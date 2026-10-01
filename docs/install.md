@@ -6,8 +6,8 @@ One command. A compiled binary. No git clone of the portal.
 curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
-This installs the Console in **self-hosted mode** with local password authentication. 
-For **hosted mode** (portal at `https://my.genestack.dev`), see [hosted-mode.md](hosted-mode.md).
+This installs the Console on a machine you operate, with local password authentication.
+To connect that console to the account portal at `https://my.genestack.dev`, see [hosted-mode.md](hosted-mode.md).
 
 | Host | Console | Local AIO VM (`--dev`) | Production metal |
 |---|---|---|---|

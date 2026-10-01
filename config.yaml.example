@@ -167,9 +167,9 @@ terminal:
 # their own IdP. https://app.genestack.dev is the retired door.
 oidc:
   enabled: false
-  # Hosted mode: https://my.genestack.dev. Self-hosted: your own IdP.
+  # Portal: https://my.genestack.dev. A console on its own: your identity provider.
   issuer_url: "https://my.genestack.dev"
-  # Hosted mode: genestack-console (pre-registered); self-hosted: your client_id
+  # Portal: genestack-console (pre-registered). Your own IdP: your client_id
   client_id: "genestack-console"
   # Obtain from portal admin or your IdP
   client_secret: ""

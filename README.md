@@ -71,9 +71,9 @@ All config in `config.yaml`. See `config.yaml.example` for all options.
 
 Key settings:
 - `secret_key` — Encryption key for stored secrets (CHANGE FROM DEFAULT)
-- `oidc` — Optional OIDC/SSO login. For hosted mode (portal at `https://my.genestack.dev`),
-  enable with `issuer_url: https://my.genestack.dev` and `client_id: genestack-console`.
-  See [docs/hosted-mode.md](docs/hosted-mode.md) for details.
+- `oidc` — Optional sign-in through `https://my.genestack.dev`, or through your own identity provider.
+  For the portal, set `issuer_url: https://my.genestack.dev` and `client_id: genestack-console`.
+  See [docs/hosted-mode.md](docs/hosted-mode.md). The portal is the account and the Apple connection. The console still runs on your host.
 - `hub.advertise_url` — URL that agents can reach (e.g., `https://console.example.com:8080`).
   **Required for installing agents on remote hosts**: the one-liner the portal
   shows (`curl <console>/agent | bash -s -- --hub …`) must contain a hub URL
