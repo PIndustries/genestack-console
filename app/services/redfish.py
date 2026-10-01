@@ -151,6 +151,13 @@ def set_pxe_boot(host: str, username: str, password: str) -> None:
     )
 
 
+def boot_override(host: str, username: str, password: str) -> str:
+    """Read BootSourceOverrideTarget back from the system. Empty when absent."""
+    data = _request("GET", host, username, password, SYSTEM_PATH) or {}
+    boot = data.get("Boot") if isinstance(data.get("Boot"), dict) else {}
+    return str(boot.get("BootSourceOverrideTarget") or "")
+
+
 def power(host: str, username: str, password: str, action: str) -> str:
     """Power action via ComputerSystem.Reset; returns the ResetType sent."""
     reset_type = RESET_TYPES.get(str(action).strip().lower())

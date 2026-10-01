@@ -45,6 +45,29 @@ servers:
 """
 
 
+def test_greenfield_iso_cannot_wipe():
+    from app.services.greenfield import run_greenfield
+
+    logs: list[str] = []
+    result = run_greenfield(
+        None,
+        None,
+        None,
+        logs.append,
+        dry_run=True,
+        skip_push=True,
+        timeout=1,
+        extra_env={},
+        ssh_target=None,
+        remote_env={},
+        settings=None,
+        boot="iso",
+    )
+    assert result["ok"] is False
+    assert "cannot wipe" in result["error"]
+    assert any("cannot wipe" in line for line in logs)
+
+
 def test_greenfield_in_catalog():
     op = get_operation("genestack.greenfield")
     assert op is not None
@@ -97,8 +120,8 @@ def test_greenfield_dry_run_pxe_then_hosts(client, admin_headers, monkeypatch):
     job = resp.json()
     assert job["status"] == "success", job.get("error")
     log = job.get("log_text") or ""
-    assert "would PXE/ISO-boot ctrl1" in log
-    assert "would PXE/ISO-boot compute1" in log
+    assert "would commission ctrl1" in log
+    assert "would commission compute1" in log
     assert captured.get("from_stage") == "hosts"
     assert captured.get("dry_run") is True
 

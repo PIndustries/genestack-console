@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.config import Settings
-from app.services import envconfig, pxe
+from app.services import bootselect, envconfig, pxe
 
 PXE_CFG = {
     "interface": "eth1",
@@ -109,17 +109,22 @@ def test_render_pxe_config_requires_core_keys():
 # ---------------------------------------------------------------------------
 
 
-def test_render_boot_ipxe_talos_metal_args():
+def test_render_boot_ipxe_chains_per_mac_and_talos_stays_separate():
     script = pxe.render_boot_ipxe("http://10.10.0.1:8080")
     assert script.startswith("#!ipxe")
     assert (
-        "kernel http://10.10.0.1:8080/assets/vmlinuz "
-        "talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200" in script
+        "chain http://10.10.0.1:8080/mac/${net0/mac:hexhyp}.ipxe || exit" in script
     )
-    assert "initrd http://10.10.0.1:8080/assets/initramfs.xz" in script
-    assert script.rstrip().endswith("boot")
+    assert "talos.platform" not in script
+    talos = bootselect.render_talos_ipxe("http://10.10.0.1:8080")
+    assert (
+        "kernel http://10.10.0.1:8080/assets/vmlinuz "
+        "talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200" in talos
+    )
+    assert "initrd http://10.10.0.1:8080/assets/initramfs.xz" in talos
+    assert talos.rstrip().endswith("boot")
     # Maintenance-mode boot: no machine-config source on the cmdline.
-    assert "talos.config=" not in script
+    assert "talos.config=" not in talos
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +275,80 @@ def test_ensure_assets_and_config_invalid_section_never_raises(tmp_path):
     result = pxe.ensure_assets_and_config(env, doc, _settings(tmp_path))
     assert result["ok"] is False
     assert "range_start" in result["error"]
+
+
+def test_disk_profile_writes_an_exit_script_and_does_not_download(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        pxe,
+        "download_factory_image",
+        lambda *a, **k: pytest.fail("disk profile must not download"),
+    )
+    env = SimpleNamespace(name="bm-env")
+    result = pxe.ensure_assets_and_config(
+        env,
+        {"pxe": dict(PXE_CFG)},
+        _settings(tmp_path),
+        profiles=[
+            {
+                "name": "node-a",
+                "pxe_mac": "aa:bb:cc:dd:ee:01",
+                "expected_ip": "10.10.0.11",
+                "next_boot": "disk",
+                "token": "should-not-appear",
+            }
+        ],
+        apply_runtime=False,
+    )
+    assert result["ok"] is True, result
+    root = tmp_path / "pxe"
+    boot = (root / "boot.ipxe").read_text()
+    assert "chain " in boot and "|| exit" in boot
+    script = (root / "mac" / "aa-bb-cc-dd-ee-01.ipxe").read_text()
+    assert "# profile: disk" in script
+    assert "should-not-appear" not in script
+    assert not (root / "assets" / "commission").exists()
+
+
+def test_commission_profile_fetches_assets_without_the_network(tmp_path, monkeypatch):
+    seen: list[str] = []
+
+    def fake(url, log, dest_dir, filename=None, max_bytes=0):
+        name = filename or "asset"
+        seen.append(name)
+        dest = Path(dest_dir) / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"asset")
+        return dest, "abc"
+
+    monkeypatch.setattr(pxe, "download_factory_image", fake)
+    env = SimpleNamespace(name="bm-env")
+    result = pxe.ensure_assets_and_config(
+        env,
+        {"pxe": dict(PXE_CFG)},
+        _settings(tmp_path),
+        profiles=[
+            {
+                "name": "node-a",
+                "pxe_mac": "AA-BB-CC-DD-EE-01",
+                "expected_ip": "10.10.0.11",
+                "next_boot": "commission",
+                "token": "tok-1",
+            }
+        ],
+        apply_runtime=False,
+    )
+    assert result["ok"] is True, result
+    assert set(seen) == {"vmlinuz-lts", "initramfs-lts", "modloop-lts"}
+    script = (tmp_path / "pxe" / "mac" / "aa-bb-cc-dd-ee-01.ipxe").read_text()
+    assert "gsc_wipe=1" in script
+    assert "gsc_token=tok-1" in script
+    assert "gsc_report=http://10.10.0.1:" in script
+    apkovl = tmp_path / "pxe" / "assets" / "commission.apkovl.tar.gz"
+    assert apkovl.is_file()
+    with tarfile.open(apkovl, "r:gz") as archive:
+        script_bytes = archive.extractfile("etc/local.d/commission.start").read()
+    assert b"dd if=/dev/zero" in script_bytes
+    assert b"poweroff -f" in script_bytes
 
 
 # ---------------------------------------------------------------------------

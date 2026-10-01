@@ -53,6 +53,16 @@ _HARDWARE_ACCOUNT_COLUMN_MIGRATIONS = {
     "tenant_id": "VARCHAR(36) REFERENCES tenants(id)",
 }
 
+_BAREMETAL_NODE_COLUMN_MIGRATIONS = {
+    "next_boot": "VARCHAR(16) DEFAULT 'disk' NOT NULL",
+    "boot_stage": "VARCHAR(32) DEFAULT 'new' NOT NULL",
+    "commission_token": "VARCHAR(64)",
+    "commission_report": "TEXT",
+    "boot_log": "TEXT",
+    "wiped_at": "TIMESTAMP",
+    "talos_served_at": "TIMESTAMP",
+}
+
 
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
@@ -217,6 +227,7 @@ def _column_migrations() -> tuple[tuple[str, dict[str, str]], ...]:
         ("ovh_accounts", _OVH_ACCOUNT_COLUMN_MIGRATIONS),
         ("agent_credentials", _AGENT_CREDENTIAL_COLUMN_MIGRATIONS),
         ("hardware_accounts", _HARDWARE_ACCOUNT_COLUMN_MIGRATIONS),
+        ("baremetal_nodes", _BAREMETAL_NODE_COLUMN_MIGRATIONS),
     )
 
 

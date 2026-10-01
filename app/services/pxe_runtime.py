@@ -267,6 +267,47 @@ class _PxeHttpHandler(SimpleHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
         log.info("pxe-http " + fmt, *args)
 
+    def do_GET(self) -> None:  # noqa: N802
+        path = self.path.split("?", 1)[0]
+        if path.startswith("/mac/") and path.endswith(".ipxe"):
+            try:
+                from app.services.baremetal import record_boot_fetch
+
+                record_boot_fetch(self.directory, path)
+            except Exception:
+                log.warning("pxe http: boot fetch log failed", exc_info=True)
+        super().do_GET()
+
+    def do_POST(self) -> None:  # noqa: N802
+        path = self.path.split("?", 1)[0]
+        if not path.startswith("/commission/"):
+            self.send_error(404)
+            return
+        token = path.rstrip("/").rsplit("/", 1)[-1]
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 1_000_000:
+            self.send_error(400, "commission report size rejected")
+            return
+        raw = self.rfile.read(length)
+        try:
+            from app.services.baremetal import ingest_commission_bytes
+
+            result = ingest_commission_bytes(token, raw)
+        except Exception as exc:
+            log.warning("pxe http: commission ingest failed: %s", exc)
+            self.send_error(500)
+            return
+        body = json.dumps(result).encode()
+        code = 200 if result.get("ok") else 400
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
 
 class PxeHttpServer:
     def __init__(self, bind: str, port: int, root: Path) -> None:

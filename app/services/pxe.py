@@ -156,30 +156,14 @@ def render_pxe_config(
 
 
 def render_boot_ipxe(assets_base_url: str) -> str:
-    """Render the iPXE script that chainloads the Talos kernel + initramfs.
+    """Env-wide iPXE chain. The per-MAC profile lives under ``mac/``.
 
-    ``assets_base_url`` is the console's PXE HTTP base (e.g.
-    ``http://10.10.0.1:8080``); assets live under ``<base>/assets/``.
-
-    Kernel args are the documented Talos metal-platform set:
-
-    - ``talos.platform=metal`` — bare-metal platform (disks from the machine).
-    - ``ip=dhcp`` — interface configuration via DHCP (our dnsmasq lease).
-    - ``console=tty0 console=ttyS0,115200`` — VGA + serial consoles.
-
-    No ``talos.config=`` on purpose: without a machine-config source Talos
-    boots into maintenance mode, and the console pushes the config over the
-    Talos API (https://<node>:50000, insecure bootstrap) during provision.
+    Talos kernel args stay in :func:`app.services.bootselect.render_talos_ipxe`.
+    That script is written only for a MAC whose next boot is Talos.
     """
-    base = assets_base_url.rstrip("/")
-    return f"""#!ipxe
-# Rendered by the Genestack Console (app/services/pxe.py) — do not edit.
-# Talos metal maintenance-mode boot; the console configures the machine via
-# the Talos API once it answers on https://<node-ip>:50000.
-kernel {base}/assets/vmlinuz talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200
-initrd {base}/assets/initramfs.xz
-boot
-"""
+    from app.services.bootselect import render_chain_ipxe
+
+    return render_chain_ipxe(assets_base_url)
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +450,52 @@ def _baremetal_nodes(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return nodes
 
 
+def fetch_commission_assets(root: Path, log: LogFn | None = None) -> dict[str, Any]:
+    """Download the pinned Alpine netboot files used by the commission RAM disk."""
+    from app.services.bootselect import ALPINE_NETBOOT, COMMISSION_FILES
+
+    dest = root / "assets" / "commission"
+    dest.mkdir(parents=True, exist_ok=True)
+    changed = False
+    try:
+        for name in COMMISSION_FILES:
+            path = dest / name
+            if path.is_file() and path.stat().st_size > 0:
+                continue
+            download_factory_image(
+                f"{ALPINE_NETBOOT}/{name}", log, dest, filename=name
+            )
+            changed = True
+            _log(log, f"[pxe] commission asset {name}")
+    except MaasDownloadError as exc:
+        return {"ok": False, "error": str(exc), "changed": changed}
+    return {"ok": True, "changed": changed}
+
+
+def _write_mac_profiles(
+    root: Path, base_url: str, profiles: list[dict[str, Any]], log: LogFn | None
+) -> tuple[bool, bool]:
+    """Write ``mac/<mac>.ipxe``. Returns (changed, needs_commission_kernel)."""
+    from app.services.bootselect import mac_filename, render_profile_ipxe
+
+    mac_dir = root / "mac"
+    mac_dir.mkdir(parents=True, exist_ok=True)
+    changed = False
+    needs = False
+    for profile in profiles:
+        filename = mac_filename(profile.get("pxe_mac"))
+        if not filename:
+            continue
+        choice = str(profile.get("next_boot") or "disk").strip().lower()
+        if choice == "commission":
+            needs = True
+        script = render_profile_ipxe(
+            choice, base_url, str(profile.get("token") or "")
+        )
+        changed |= _write_if_changed(mac_dir / filename, script, log)
+    return changed, needs
+
+
 def ensure_assets_and_config(
     env: Any,
     doc: dict[str, Any],
@@ -474,6 +504,7 @@ def ensure_assets_and_config(
     agent_id: str | None = None,
     agent_pxe_config: dict | None = None,
     apply_runtime: bool = True,
+    profiles: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Render PXE files, fetch assets when missing, reload in-process runtime.
 
@@ -514,6 +545,19 @@ def ensure_assets_and_config(
             root = Path(settings.data_dir) / "pxe"
 
         nodes = _baremetal_nodes(doc)
+        seen_macs = {str(node.get("pxe_mac") or "").lower() for node in nodes}
+        for profile in profiles or []:
+            mac = str(profile.get("pxe_mac") or "")
+            ip = str(profile.get("expected_ip") or "").strip()
+            if mac and ip and mac.lower() not in seen_macs:
+                nodes.append(
+                    {
+                        "name": profile.get("name"),
+                        "pxe_mac": mac,
+                        "expected_ip": ip,
+                    }
+                )
+                seen_macs.add(mac.lower())
         root.mkdir(parents=True, exist_ok=True)
 
         changed = _write_if_changed(
@@ -528,6 +572,32 @@ def ensure_assets_and_config(
         changed |= _write_if_changed(
             root / "boot.ipxe", render_boot_ipxe(base_url), log
         )
+        mac_changed, needs_commission = _write_mac_profiles(
+            root, base_url, list(profiles or []), log
+        )
+        changed |= mac_changed
+        if needs_commission:
+            commission_assets = fetch_commission_assets(root, log)
+            changed |= bool(commission_assets.get("changed"))
+            if not commission_assets.get("ok"):
+                return {
+                    "ok": False,
+                    "error": (
+                        "commission kernel download failed: "
+                        f"{commission_assets.get('error')}"
+                    ),
+                }
+            from app.services.bootselect import build_apkovl
+
+            apkovl_path = root / "assets" / "commission.apkovl.tar.gz"
+            apkovl_bytes = build_apkovl()
+            if (
+                not apkovl_path.is_file()
+                or apkovl_path.read_bytes() != apkovl_bytes
+            ):
+                apkovl_path.write_bytes(apkovl_bytes)
+                changed = True
+                _log(log, f"[pxe] wrote {apkovl_path}")
 
         image_url = str(pxe_cfg.get("image_url") or "").strip()
         if not image_url:

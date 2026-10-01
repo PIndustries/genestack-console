@@ -135,6 +135,7 @@ def test_baremetal_ops_in_catalog(client, admin_headers):
         "baremetal.nodes.list": ("viewer", False, None),
         "baremetal.node.power": ("operator", True, 120),
         "baremetal.node.pxe_boot": ("operator", True, 300),
+        "baremetal.node.next_boot": ("operator", True, 300),
         "baremetal.node.provision": ("admin", True, 1800),
     }
     for op_id, (role, mutating, timeout) in expected.items():
@@ -397,6 +398,7 @@ def test_pxe_boot_sets_override_and_restarts(client, admin_headers, monkeypatch)
 
     calls = []
     monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: calls.append(("pxe",) + a))
+    monkeypatch.setattr(redfish, "boot_override", lambda *a: "Pxe")
     monkeypatch.setattr(
         redfish, "power", lambda *a: calls.append(("power",) + a) or "ForceRestart"
     )
@@ -413,6 +415,7 @@ def test_pxe_boot_sets_override_and_restarts(client, admin_headers, monkeypatch)
     assert job["status"] == "success", job
     assert [c[0] for c in calls] == ["pxe", "power"], "pxe override before restart"
     assert calls[1][4] == "restart"
+    assert "readback Pxe" in (job.get("log_text") or "")
     assert _node_row(env["id"], name)["state"] == "booting"
 
 
@@ -444,14 +447,42 @@ def test_pxe_boot_dry_run_changes_nothing(client, admin_headers, monkeypatch):
 
 
 def _patch_provision_path(monkeypatch, ready=True):
-    """Mock redfish + the talos poll + the pxe sidecar for provision tests."""
+    """Mock redfish, the commission wait, and PXE prep for provision tests.
+
+    A ready path pretends the RAM disk already posted an accepted wipe so the
+    test does not wait out the job timeout or download Alpine.
+    """
+    from datetime import datetime, timezone
+
     from app.services import baremetal
     from app.services import redfish
 
     monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: None)
+    monkeypatch.setattr(redfish, "boot_override", lambda *a: "Pxe")
     monkeypatch.setattr(redfish, "power", lambda *a: "ForceRestart")
     monkeypatch.setattr(baremetal, "talos_api_ready", lambda ip, log=None: ready)
-    monkeypatch.setattr(baremetal, "_prepare_pxe", lambda db, env, settings, log: None)
+    monkeypatch.setattr(
+        baremetal, "_prepare_pxe", lambda db, env, settings, log: {"ok": True}
+    )
+    if not ready:
+        return
+
+    def fake_wait(db, node, predicate, **kwargs):
+        node.boot_stage = "commissioned"
+        node.wiped_at = datetime.now(timezone.utc)
+        node.next_boot = "talos"
+        node.commission_report = {
+            "wipe": True,
+            "serial": "fixture",
+            "product": "fixture",
+            "disks": [{"name": "sda", "wiped": True}],
+            "nics": [],
+        }
+        db.add(node)
+        db.flush()
+        return True
+
+    monkeypatch.setattr(baremetal, "_wait_until", fake_wait)
 
 
 def test_provision_dry_run_logs_the_plan(client, admin_headers):
@@ -475,7 +506,9 @@ def test_provision_zero_touch_happy_path(client, admin_headers, monkeypatch):
     _patch_provision_path(monkeypatch, ready=True)
 
     env = _create_env(client, admin_headers, dry_run=False)
-    node_id, name = _make_node(env["id"], expected_ip="10.9.0.12")
+    node_id, name = _make_node(
+        env["id"], expected_ip="10.9.0.12", pxe_mac="aa:bb:cc:dd:ee:21"
+    )
     job = _submit(
         client,
         admin_headers,
@@ -526,7 +559,9 @@ def test_provision_timeout_marks_node_failed(client, admin_headers, monkeypatch)
     from app.services import baremetal
 
     env = _create_env(client, admin_headers, dry_run=False)
-    node_id, name = _make_node(env["id"], expected_ip="10.9.0.13")
+    node_id, name = _make_node(
+        env["id"], expected_ip="10.9.0.13", pxe_mac="aa:bb:cc:dd:ee:22"
+    )
 
     logs = []
     db = SessionLocal()
@@ -548,6 +583,124 @@ def test_provision_timeout_marks_node_failed(client, admin_headers, monkeypatch)
     assert result["ok"] is False
     assert "timed out" in result["error"]
     assert _node_row(env["id"], name)["state"] == "failed"
+
+
+def test_provision_stop_after_commission_does_not_serve_talos(
+    client, admin_headers, monkeypatch
+):
+    _patch_provision_path(monkeypatch, ready=True)
+    from app.db import SessionLocal
+    from app.models import BaremetalNode, Environment
+    from app.services import baremetal
+
+    def _boom(*_a, **_k):
+        raise AssertionError("Talos was served")
+
+    monkeypatch.setattr(baremetal, "_serve_talos", _boom)
+    env = _create_env(client, admin_headers, dry_run=False)
+    node_id, _name = _make_node(
+        env["id"], expected_ip="10.9.0.31", pxe_mac="aa:bb:cc:dd:ee:31"
+    )
+    db = SessionLocal()
+    try:
+        result = baremetal.provision(
+            db,
+            db.get(Environment, env["id"]),
+            db.get(BaremetalNode, node_id),
+            roles=["compute"],
+            actor="tester",
+            dry_run=False,
+            log=lambda *_: None,
+            timeout_seconds=5,
+            poll_interval=0,
+            stop_after="commission",
+        )
+    finally:
+        db.close()
+    assert result["ok"] is True, result
+    assert result["stopped_after"] == "commission"
+
+
+def test_provision_stop_after_talos_does_not_update_inventory(
+    client, admin_headers, monkeypatch
+):
+    _patch_provision_path(monkeypatch, ready=True)
+    from app.db import SessionLocal
+    from app.models import BaremetalNode, Environment
+    from app.services import baremetal
+
+    def _boom(*_a, **_k):
+        raise AssertionError("inventory was updated")
+
+    monkeypatch.setattr("app.services.envconfig.assign_server", _boom)
+    env = _create_env(client, admin_headers, dry_run=False)
+    node_id, _name = _make_node(
+        env["id"], expected_ip="10.9.0.32", pxe_mac="aa:bb:cc:dd:ee:32"
+    )
+    db = SessionLocal()
+    try:
+        result = baremetal.provision(
+            db,
+            db.get(Environment, env["id"]),
+            db.get(BaremetalNode, node_id),
+            roles=["compute"],
+            actor="tester",
+            dry_run=False,
+            log=lambda *_: None,
+            timeout_seconds=5,
+            poll_interval=0,
+            stop_after="talos",
+        )
+        db.commit()
+    finally:
+        db.close()
+    assert result["ok"] is True, result
+    assert result["stopped_after"] == "talos"
+    assert result["state"] == "talos-ready"
+
+
+def test_next_boot_talos_without_a_wipe_is_refused(client, admin_headers, monkeypatch):
+    from app.services import redfish
+
+    calls = []
+    monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: calls.append(a))
+    monkeypatch.setattr(redfish, "power", lambda *a: calls.append(a))
+    env = _create_env(client, admin_headers, dry_run=False)
+    node_id, name = _make_node(
+        env["id"], expected_ip="10.9.0.33", pxe_mac="aa:bb:cc:dd:ee:33"
+    )
+    job = _submit(
+        client,
+        admin_headers,
+        env["id"],
+        "baremetal.node.next_boot",
+        {"node_id": node_id, "next_boot": "talos", "boot_now": True},
+    )
+    assert job["status"] == "failed", job
+    assert "no accepted commission wipe" in (job.get("error") or "")
+    assert calls == []
+    assert _node_row(env["id"], name)["state"] == "registered"
+
+
+def test_next_boot_dry_run_does_not_power_the_machine(client, admin_headers, monkeypatch):
+    from app.services import redfish
+
+    calls = []
+    monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: calls.append(a))
+    monkeypatch.setattr(redfish, "power", lambda *a: calls.append(a))
+    env = _create_env(client, admin_headers)
+    node_id, name = _make_node(env["id"], pxe_mac="aa:bb:cc:dd:ee:34")
+    job = _submit(
+        client,
+        admin_headers,
+        env["id"],
+        "baremetal.node.next_boot",
+        {"node_id": node_id, "next_boot": "commission", "boot_now": True},
+    )
+    assert job["status"] == "success", job
+    assert "[dry-run]" in (job.get("log_text") or "")
+    assert calls == []
+    assert _node_row(env["id"], name)["state"] == "registered"
 
 
 def test_provision_unknown_role_fails(client, admin_headers):
@@ -603,7 +756,10 @@ def test_rest_list_returns_nodes_without_password(client, admin_headers):
     assert node["name"] == name
     assert node["state"] == "talos-ready"
     assert node["expected_ip"] == "10.9.0.20"
+    assert node["next_boot"] == "disk"
+    assert node["boot_stage"] == "new"
     assert "bmc_password" not in node
+    assert "commission_token" not in node
 
 
 def test_rest_list_unknown_env_404(client, admin_headers):
@@ -639,6 +795,7 @@ def test_baremetal_ops_tenant_scoping(client, admin_headers):
         ("baremetal.node.register", _register_params(f"bm-{_suffix()}")),
         ("baremetal.node.power", {"node_id": node_id, "action": "on"}),
         ("baremetal.node.pxe_boot", {"node_id": node_id}),
+        ("baremetal.node.next_boot", {"node_id": node_id, "next_boot": "disk"}),
         ("baremetal.node.provision", {"node_id": node_id}),
     ):
         resp = client.post(

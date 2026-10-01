@@ -608,6 +608,20 @@ class BaremetalNode(Base):
     expected_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     # One of: registered, booting, talos-ready, failed
     state: Mapped[str] = mapped_column(String(32), default="registered", nullable=False)
+    # Next PXE profile for this MAC: commission, talos, or disk.
+    # disk is the safe default — a stray PXE boot does not wipe anything.
+    next_boot: Mapped[str] = mapped_column(String(16), default="disk", nullable=False)
+    # new, commissioning, commissioned, talos, fresh-maintenance, installed, failed
+    boot_stage: Mapped[str] = mapped_column(String(32), default="new", nullable=False)
+    commission_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    commission_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    boot_log: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    wiped_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    talos_served_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_seen: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

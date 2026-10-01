@@ -1,11 +1,13 @@
 // pages/environment_baremetal.js — "Bare metal (console-managed)" card on the
 // environment detail page. Zero-touch bare-metal provisioning without MAAS: nodes
 // are registered by BMC credentials (baremetal.node.register), then driven per row
-// — power on/off/restart (baremetal.node.power), PXE boot (baremetal.node.pxe_boot),
-// and Provision (baremetal.node.provision, admin-gated: PXE boot → wait for the
-// talos API → land the node in the env inventory doc). Data comes from
-// GET /api/v1/environments/{id}/baremetal; every action is a job (confirm → POST →
-// amber running pill + #/activity?tab=jobs&job=<id> link → 5s poll → reload on terminal), mirroring
+// — power on/off/restart (baremetal.node.power), next boot
+// (baremetal.node.next_boot: commission, Talos, or disk), PXE boot
+// (baremetal.node.pxe_boot of the current choice), and Provision
+// (baremetal.node.provision, admin-gated: commission wipe, then Talos, then
+// inventory). Data comes from GET /api/v1/environments/{id}/baremetal; every
+// action is a job (confirm → POST → amber running pill +
+// #/activity?tab=jobs&job=<id> link → 5s poll → reload on terminal), mirroring
 // the verify/maas patterns in environment_workflow.js / environment_servers.js.
 // Defensive: the endpoint may 404 (backend not deployed yet) or return partial
 // payloads — every path degrades to a muted note, never a page break.
@@ -37,6 +39,29 @@ function statePillHtml(state) {
   if (s === "talos-ready") return '<span class="pill ok">talos-ready</span>';
   if (s === "failed") return '<span class="pill bad">failed</span>';
   return `<span class="pill">${esc(state || "unknown")}</span>`;
+}
+
+function stagePillHtml(stage) {
+  const s = String(stage || "new").toLowerCase();
+  if (s === "fresh-maintenance" || s === "installed" || s === "commissioned") {
+    return `<span class="pill ok">${esc(s)}</span>`;
+  }
+  if (s === "commissioning" || s === "talos") return `<span class="pill warn">${esc(s)}</span>`;
+  if (s === "failed") return `<span class="pill bad">${esc(s)}</span>`;
+  return `<span class="pill">${esc(s)}</span>`;
+}
+
+function bootCellHtml(info) {
+  const next = String((info && info.next_boot) || "disk");
+  const commission = info && info.commission && typeof info.commission === "object" ? info.commission : {};
+  const disks = Number(commission.disk_count || 0);
+  const bits = [`next ${next}`];
+  if (disks > 0) bits.push(`${disks} disk${disks === 1 ? "" : "s"}`);
+  const title = [commission.product, commission.serial].filter(Boolean).join(" · ");
+  return (
+    `${stagePillHtml(info && info.boot_stage)} ` +
+    `<span class="muted" title="${esc(title)}">${esc(bits.join(" · "))}</span>`
+  );
 }
 
 function bmRunningHtml(label, jobId, status) {
@@ -200,8 +225,40 @@ async function bmOpenConsole(envId, node) {
 function bmPxeBoot(envId, node) {
   const name = (node && node.name) || "?";
   const nodeId = String((node && node.id) || "");
-  if (!confirm(`PXE boot ${name}? The node reboots and boots talos from this console.`)) return;
+  const next = (node && node.next_boot) || "disk";
+  if (
+    !confirm(
+      `PXE boot ${name}? The node reboots into its current next boot (${next}). ` +
+        "This does not change that choice. Disk exits to the local disk."
+    )
+  )
+    return;
   startBmJob(envId, nodeId, name, "baremetal.node.pxe_boot", "pxe boot", { node_id: nodeId }, "operator");
+}
+
+function bmNextBoot(envId, node, target) {
+  const name = (node && node.name) || "?";
+  const nodeId = String((node && node.id) || "");
+  const prompts = {
+    commission:
+      `Commission ${name}? The next PXE is a RAM disk that wipes fixed disks and ` +
+      "reports hardware. This destroys the installed operating system.",
+    talos:
+      `Serve Talos to ${name}? This power-cycles into Talos. It is refused until ` +
+      "a commission wipe has been accepted.",
+    disk: `Boot ${name} from the local disk? The next PXE exits without wiping.`,
+  };
+  if (!prompts[target] || !confirm(prompts[target])) return;
+  const labels = { commission: "commission", talos: "serve talos", disk: "boot disk" };
+  startBmJob(
+    envId,
+    nodeId,
+    name,
+    "baremetal.node.next_boot",
+    labels[target],
+    { node_id: nodeId, next_boot: target, boot_now: true },
+    "operator"
+  );
 }
 
 function bmProvision(envId, node) {
@@ -209,8 +266,9 @@ function bmProvision(envId, node) {
   const nodeId = String((node && node.id) || "");
   if (
     !confirm(
-      `Provision ${name}? Zero-touch: PXE boot → wait for the talos API → add the node ` +
-        "to this environment's inventory. This acts on the real hardware."
+      `Provision ${name}? Commission RAM disk wipes fixed disks and reports hardware, ` +
+        "then a second PXE serves Talos. Inventory is updated only after fresh " +
+        "Talos maintenance. This acts on the real hardware."
     )
   )
     return;
@@ -236,8 +294,14 @@ function bmActionsCellHtml(node, i) {
     `<button class="secondary btn-sm" type="button" data-bm-power="restart" data-row="${i}" title="Force restart via the BMC" ${opGate}>Restart</button>` +
     `</div></details> ` +
     `<button class="secondary btn-sm" type="button" data-bm-console="${i}" title="iLO HTML5 remote console via Console proxy" ${opGate}>Console</button> ` +
-    `<button class="secondary btn-sm" type="button" data-bm-pxe="${i}" title="PXE-boot into talos (boot once + restart)" ${opGate}>PXE boot</button> ` +
-    `<button class="secondary btn-sm" type="button" data-bm-provision="${i}" title="Zero-touch: PXE boot → talos API → inventory" ${adminGate}>Provision</button>` +
+    `<details class="bm-power"><summary>Next boot ▾</summary>` +
+    `<div class="bm-power-menu">` +
+    `<button class="secondary btn-sm" type="button" data-bm-next="commission" data-row="${i}" title="RAM disk: probe hardware and wipe fixed disks" ${opGate}>Commission</button>` +
+    `<button class="secondary btn-sm" type="button" data-bm-next="talos" data-row="${i}" title="One-shot PXE of Talos after an accepted wipe" ${opGate}>Serve Talos</button>` +
+    `<button class="secondary btn-sm" type="button" data-bm-next="disk" data-row="${i}" title="Next PXE exits to the local disk" ${opGate}>Boot disk</button>` +
+    `</div></details> ` +
+    `<button class="secondary btn-sm" type="button" data-bm-pxe="${i}" title="PXE the machine's current next-boot image" ${opGate}>PXE boot</button> ` +
+    `<button class="secondary btn-sm" type="button" data-bm-provision="${i}" title="Commission wipe, then Talos, then inventory" ${adminGate}>Provision</button>` +
     `<div class="bm-job-line" data-bm-job="${esc(nodeId)}"></div></td>`
   );
 }
@@ -252,6 +316,7 @@ function nodesTableHtml(nodes) {
         <td class="muted">${esc(info.pxe_mac || "—")}</td>
         <td class="muted">${esc(info.expected_ip || "—")}</td>
         <td>${statePillHtml(info.state)}</td>
+        <td>${bootCellHtml(info)}</td>
         <td class="muted">${esc(fmtTime(info.last_seen)) || "—"}</td>
         ${bmActionsCellHtml(info, i)}
       </tr>`;
@@ -259,7 +324,7 @@ function nodesTableHtml(nodes) {
     .join("");
   return `<table>
       <thead><tr>
-        <th>Name</th><th>BMC host</th><th>PXE MAC</th><th>Expected IP</th><th>State</th><th>Last seen</th><th>Actions</th>
+        <th>Name</th><th>BMC host</th><th>PXE MAC</th><th>Expected IP</th><th>State</th><th>Boot</th><th>Last seen</th><th>Actions</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
@@ -363,7 +428,7 @@ export function baremetalCardHtml() {
     <button class="secondary btn-sm" id="bm-refresh" type="button">Refresh</button>
     <span id="bm-msg" class="muted"></span>
   </div>
-  <div class="hint-row">Redfish BMC: iLO console (HTML5 KVM proxied here), power, PXE-boot into Talos, provision</div>
+  <div class="hint-row">Each machine has its own next boot: commission (RAM-disk wipe), Talos, or local disk. A machine that was not asked to provision stays on disk. Commission reports are accepted by the hub PXE server.</div>
   <div id="bm-err"></div>
   <div id="bm-body" class="muted">
     <div class="card-empty">
@@ -439,7 +504,7 @@ export async function loadBaremetalCard(envId) {
   body.classList.remove("muted");
   if (!nodes.length) {
     body.innerHTML =
-      '<div class="muted">No bare-metal nodes registered — register a node\'s BMC, PXE-boot it into talos, provision — zero touch.</div>';
+      '<div class="muted">No bare-metal nodes registered. Register a BMC, then commission and provision from the row.</div>';
     return;
   }
   body.innerHTML = nodesTableHtml(nodes);
@@ -452,6 +517,13 @@ export async function loadBaremetalCard(envId) {
   );
   body.querySelectorAll("button[data-bm-console]").forEach((btn) =>
     btn.addEventListener("click", () => bmOpenConsole(envId, nodes[Number(btn.dataset.bmConsole)]))
+  );
+  body.querySelectorAll("button[data-bm-next]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const details = btn.closest("details");
+      if (details) details.open = false;
+      bmNextBoot(envId, nodes[Number(btn.dataset.row)], btn.dataset.bmNext);
+    })
   );
   body.querySelectorAll("button[data-bm-pxe]").forEach((btn) =>
     btn.addEventListener("click", () => bmPxeBoot(envId, nodes[Number(btn.dataset.bmPxe)]))

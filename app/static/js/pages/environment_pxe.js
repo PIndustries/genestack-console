@@ -141,8 +141,8 @@ function agentEditFormHtml(envId, agent, ac) {
         <input name="gateway" type="text" value="${esc(cfg.gateway || "")}" placeholder="10.10.0.1" ${g}/>
       </div>
       <div class="pxe-form-field">
-        <label>image_url (optional)</label>
-        <input name="image_url" type="text" value="${esc(cfg.image_url || "")}" placeholder="Talos image URL" ${g}/>
+        <label>image_url (Talos asset, optional)</label>
+        <input name="image_url" type="text" value="${esc(cfg.image_url || "")}" placeholder="Talos image URL" title="Talos kernel source. Which image a MAC receives is chosen per machine on the bare-metal wall." ${g}/>
       </div>
     </form>
     <div class="pxe-form-actions">
@@ -186,8 +186,8 @@ function agentWithoutConfigHtml(envId, agent) {
         <input name="gateway" type="text" value="" placeholder="10.10.0.1" ${g}/>
       </div>
       <div class="pxe-form-field">
-        <label>image_url (optional)</label>
-        <input name="image_url" type="text" placeholder="Talos image URL" ${g}/>
+        <label>image_url (Talos asset, optional)</label>
+        <input name="image_url" type="text" placeholder="Talos image URL" title="Talos kernel source. Which image a MAC receives is chosen per machine on the bare-metal wall." ${g}/>
       </div>
     </form>
     <div class="pxe-form-actions">

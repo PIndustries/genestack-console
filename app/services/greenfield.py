@@ -1,9 +1,11 @@
-"""Greenfield redeploy: PXE (or OVH BYOI) every inventory box, then full pipeline.
+"""Greenfield redeploy: commission, then Talos, then the pipeline.
 
-Puts metal back into Talos maintenance (one-shot PXE, then iLO virtual CD
-when DHCP/TFTP never show, or when the box comes back k8s Ready / old OS;
-OVH BYOI on OVH). Real maintenance is :50000 up and not a Ready k8s node.
-Then ``genestack.deploy`` from ``hosts``. Never logs BMC passwords.
+Each inventory server PXE-boots a RAM disk that wipes fixed disks and
+reports hardware. The next one-shot PXE serves Talos. Fresh maintenance is
+the Talos API up, the node not Kubernetes Ready, and Talos served after
+that wipe. Then ``genestack.deploy`` from ``hosts``. ``stop_after`` can
+hold after the wipe report or after fresh maintenance. OVH environments
+still use BYOI. Never logs BMC passwords.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import BaremetalNode, Environment
 from app.services import baremetal as baremetal_service
+from app.services.bootselect import metal_ready, served_after_wipe
 from app.services import deploy as deploy_service
 from app.services import deploy_timing
 from app.services import envconfig as envconfig_service
@@ -93,11 +96,24 @@ def run_greenfield(
     parallelism: int | None = None,
     boot: str = "auto",
     wait_seconds: int | None = None,
+    stop_after: str = "",
 ) -> dict[str, Any]:
     """PXE/BYOI every inventory server, then ``run_deploy`` from hosts."""
     boot_mode = str(boot or "auto").strip().lower()
     if boot_mode not in _BOOT_MODES:
         msg = f"Unknown boot '{boot}'. Valid: auto, pxe, iso"
+        log(f"[greenfield] {msg}")
+        return {"ok": False, "error": msg, "returncode": 2, "dry_run": dry_run}
+    stop = str(stop_after or "").strip().lower()
+    if stop not in ("", "commission", "talos"):
+        msg = "stop_after must be commission or talos"
+        log(f"[greenfield] {msg}")
+        return {"ok": False, "error": msg, "returncode": 2, "dry_run": dry_run}
+    if boot_mode == "iso":
+        msg = (
+            "greenfield boot=iso cannot wipe disks. Use pxe or auto so the "
+            "commission RAM disk runs before Talos."
+        )
         log(f"[greenfield] {msg}")
         return {"ok": False, "error": msg, "returncode": 2, "dry_run": dry_run}
 
@@ -135,9 +151,10 @@ def run_greenfield(
         return out
 
     log(
-        f"[greenfield] DESTRUCTIVE: PXE/ISO every inventory box, format Talos "
-        f"install disks, rebuild Kubernetes + OpenStack "
-        f"(boot={boot_mode} dry_run={dry_run} hosts={len(servers)})"
+        f"[greenfield] DESTRUCTIVE: commission RAM disk wipes fixed disks, "
+        f"then Talos, then OpenStack from hosts "
+        f"(boot={boot_mode} dry_run={dry_run} hosts={len(servers)} "
+        f"stop_after={stop or 'deploy'})"
     )
 
     if env_is_ovh(env):
@@ -198,10 +215,25 @@ def run_greenfield(
         if dry_run:
             for hostname, node, ip in plan:
                 log(
-                    f"[dry-run] would PXE/ISO-boot {hostname} bmc={node.bmc_host} "
-                    f"then wait for talos maintenance at {ip}:{baremetal_service.TALOS_API_PORT}"
+                    f"[dry-run] would commission {hostname} (RAM disk wipe) then "
+                    f"serve Talos and wait for fresh maintenance at "
+                    f"{ip}:{baremetal_service.TALOS_API_PORT} stop_after={stop or 'deploy'}"
                 )
         else:
+            for hostname, node, _ip in plan:
+                started = baremetal_service.begin_commission(
+                    db, env, node, log=log, settings=settings, boot_now=False
+                )
+                if not started.get("ok"):
+                    return _stamp(
+                        {
+                            "ok": False,
+                            "error": started.get("error") or f"{hostname} commission setup failed",
+                            "returncode": 2,
+                            "dry_run": False,
+                            "failed_at": "greenfield/commission",
+                        }
+                    )
             try:
                 pxe_t0 = deploy_timing.now()
                 baremetal_service._prepare_pxe(db, env, settings, log)
@@ -222,20 +254,16 @@ def run_greenfield(
             boot_errors: list[str] = []
             iso_count: dict[str, int] = {}
             last_iso_at: dict[str, float] = {}
+            last_talos_at: dict[str, float] = {}
             node_by_host: dict[str, BaremetalNode] = {}
             boot_t0 = deploy_timing.now()
             host_t0 = {hostname: deploy_timing.now() for hostname, _node, _ip in plan}
             for hostname, node, _ip in plan:
                 if check_cancel:
                     check_cancel()
-                result = _boot_one(
-                    db,
-                    env,
-                    node,
-                    boot=boot_mode,
-                    dry_run=False,
-                    log=log,
-                    settings=settings,
+                db.refresh(node)
+                result = baremetal_service.pxe_boot(
+                    db, node, dry_run=False, log=log, settings=settings
                 )
                 node_by_host[hostname] = node
                 if str(result.get("via") or "") == "iso":
@@ -278,6 +306,22 @@ def run_greenfield(
             pending = {hostname: ip for hostname, _node, ip in plan}
             saw_down: dict[str, bool] = {hostname: False for hostname in pending}
             attempt = 0
+            waiting_for = (
+                "a commission report"
+                if stop == "commission"
+                else "fresh Talos maintenance"
+            )
+
+            def _fail_pending() -> None:
+                for hostname in pending:
+                    failed = node_by_host.get(hostname)
+                    if failed is None:
+                        continue
+                    failed.state = "failed"
+                    failed.boot_stage = "failed"
+                    db.add(failed)
+                db.commit()
+
             while pending:
                 if check_cancel:
                     check_cancel()
@@ -285,26 +329,62 @@ def run_greenfield(
                     wait_s_done = round(deploy_timing.elapsed(wait_t0), 1)
                     deploy_timing.log_timing(log, phase="metal", seconds=wait_s_done)
                     phases.append({"id": "metal", "seconds": wait_s_done})
+                    _fail_pending()
                     return _stamp(
                         {
                             "ok": False,
-                            "error": "greenfield deadline exceeded waiting for Talos maintenance",
+                            "error": (
+                                "greenfield deadline exceeded waiting for "
+                                f"{waiting_for}"
+                            ),
                             "returncode": 1,
                             "failed_at": "greenfield/maintenance",
                         }
                     )
                 ready: list[str] = []
                 remount: list[str] = []
-                for hostname, ip in pending.items():
+                for hostname, ip in list(pending.items()):
+                    node = node_by_host.get(hostname)
+                    if node is not None:
+                        db.refresh(node)
+                        if (
+                            stop != "commission"
+                            and node.wiped_at is not None
+                            and not served_after_wipe(
+                                node.talos_served_at, node.wiped_at
+                            )
+                            and (
+                                hostname not in last_talos_at
+                                or (time.monotonic() - last_talos_at[hostname])
+                                >= _ISO_COOLDOWN_S
+                            )
+                        ):
+                            last_talos_at[hostname] = time.monotonic()
+                            served = baremetal_service._serve_talos(
+                                db, env, node, log=log, settings=settings
+                            )
+                            if not served.get("ok"):
+                                log(
+                                    f"[greenfield] {hostname} Talos boot failed: "
+                                    f"{served.get('error')}"
+                                )
+                    probe_ip = ip
+                    if node is not None:
+                        addrs = baremetal_service.probe_addresses(node, ip)
+                        probe_ip = addrs[0] if addrs else ip
                     state = baremetal_service.host_boot_state(
-                        ip,
+                        probe_ip,
                         kube,
                         was_ready=was_ready,
                         saw_down=saw_down.get(hostname, False),
+                        require_fresh=stop != "commission",
+                        wiped_at=getattr(node, "wiped_at", None),
+                        talos_served_at=getattr(node, "talos_served_at", None),
                     )
                     if state == "down":
                         saw_down[hostname] = True
-                    if state == "maintenance":
+                    stage = getattr(node, "boot_stage", "") if node is not None else ""
+                    if metal_ready(stage, state, stop):
                         ready.append(hostname)
                         host_s = round(
                             deploy_timing.elapsed(host_t0.get(hostname, wait_t0)), 1
@@ -315,18 +395,24 @@ def run_greenfield(
                         metal_hosts.append(
                             {"host": hostname, "seconds": host_s, "phase": "metal"}
                         )
-                        log(
-                            f"[greenfield] {hostname} in Talos maintenance at "
-                            f"{ip}:{baremetal_service.TALOS_API_PORT} "
-                            "(not a Ready k8s node)"
-                        )
+                        if stop == "commission":
+                            ready_msg = (
+                                f"{hostname} commissioned "
+                                "(fixed disks wiped; Talos was not served)"
+                            )
+                        else:
+                            ready_msg = (
+                                f"{hostname} in fresh Talos maintenance at "
+                                f"{ip}:{baremetal_service.TALOS_API_PORT}"
+                            )
+                        log(f"[greenfield] {ready_msg}")
                         try:
                             from app.services.live_events import publish_metal
 
                             publish_metal(
                                 getattr(env, "id", None),
                                 "boot",
-                                f"{hostname} in Talos maintenance",
+                                ready_msg,
                                 host=hostname,
                                 ip=ip,
                             )
@@ -334,6 +420,7 @@ def run_greenfield(
                             pass
                     elif (
                         state == "old-os"
+                        and stage in ("talos", "commissioned", "fresh-maintenance")
                         and boot_mode != "pxe"
                         and iso_count.get(hostname, 0) < _ISO_RETRY_LIMIT
                         and (time.monotonic() - last_iso_at.get(hostname, 0.0))
@@ -345,8 +432,9 @@ def run_greenfield(
                     node = node_by_host.get(hostname) or bm_index.get(
                         hostname.strip().lower()
                     )
-                    if node is not None and str(node.state or "") != "talos-ready":
+                    if node is not None and stop != "commission":
                         node.state = "talos-ready"
+                        node.boot_stage = "fresh-maintenance"
                         db.add(node)
                 if ready:
                     db.commit()
@@ -388,20 +476,33 @@ def run_greenfield(
                 if time.monotonic() >= deadline_wait:
                     left_bits = []
                     for h, ip in pending.items():
+                        left_node = node_by_host.get(h)
                         st = baremetal_service.host_boot_state(
                             ip,
                             kube,
                             was_ready=was_ready,
                             saw_down=saw_down.get(h, False),
+                            require_fresh=stop != "commission",
+                            wiped_at=(
+                                getattr(left_node, "wiped_at", None)
+                                if left_node is not None
+                                else None
+                            ),
+                            talos_served_at=(
+                                getattr(left_node, "talos_served_at", None)
+                                if left_node is not None
+                                else None
+                            ),
                         )
                         left_bits.append(f"{h} ({ip} {st})")
-                    msg = "timed out waiting for Talos maintenance: " + ", ".join(
+                    msg = f"timed out waiting for {waiting_for}: " + ", ".join(
                         left_bits
                     )
                     log(f"[greenfield] {msg}")
                     wait_s_done = round(deploy_timing.elapsed(wait_t0), 1)
                     deploy_timing.log_timing(log, phase="metal", seconds=wait_s_done)
                     phases.append({"id": "metal", "seconds": wait_s_done})
+                    _fail_pending()
                     return _stamp(
                         {
                             "ok": False,
@@ -422,7 +523,19 @@ def run_greenfield(
         )
         deploy_timing.log_timing(log, phase="metal", seconds=wait_s_done)
         phases.append({"id": "metal", "seconds": wait_s_done})
-    log("[greenfield] metal in maintenance — deploying Talos + OpenStack from hosts")
+    if stop in ("commission", "talos"):
+        log(
+            f"[greenfield] stopped after {stop} — OpenStack deploy was not started"
+        )
+        return _stamp(
+            {
+                "ok": True,
+                "dry_run": dry_run,
+                "stopped_after": stop,
+                "stages_completed": [stop],
+            }
+        )
+    log("[greenfield] metal in fresh maintenance — deploying Talos + OpenStack from hosts")
     result = deploy_service.run_deploy(
         db,
         env,

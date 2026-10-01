@@ -702,15 +702,18 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
     },
     {
         "id": "genestack.greenfield",
-        "name": "Greenfield redeploy (PXE + wipe + Talos + OpenStack)",
+        "name": "Greenfield redeploy (commission + Talos + OpenStack)",
         "description": (
-            "DESTRUCTIVE. PXE-boot every inventory server; if DHCP/TFTP never "
-            "show, iLO-mount the Talos ISO and continue (or OVH BYOI). A box "
-            "that comes back k8s Ready is the old OS — not maintenance — and "
-            "is remounted via iLO virtual CD. Wait for real Talos maintenance "
-            "(:50000 up and not Ready), then run deploy from hosts. "
-            "apply-config formats the Talos install disk. Requires a BMC row "
-            "per server (or an OVH-bound env). Workloads are destroyed."
+            "DESTRUCTIVE. For each inventory server: PXE a RAM-disk commission "
+            "image that wipes fixed disks and reports hardware, then one-shot "
+            "PXE the Talos image. Fresh maintenance means the Talos API is up, "
+            "the node is not Kubernetes Ready, and Talos was served after this "
+            "wipe. Then deploy OpenStack from hosts. boot=iso is rejected "
+            "because an ISO cannot run the wipe. stop_after=commission returns "
+            "after the wipe report; stop_after=talos returns after fresh "
+            "maintenance and does not deploy. A machine still running the old "
+            "OS is not deployed onto. Requires a BMC row per server (or an "
+            "OVH-bound env, which uses BYOI). Workloads are destroyed."
         ),
         "required_role": "admin",
         "backend": "genestack",
@@ -720,7 +723,7 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
             _p(
                 "boot",
                 False,
-                "auto (PXE; if DHCP/TFTP never show, iLO virtual CD), pxe, or iso",
+                "auto or pxe. iso is rejected because it cannot wipe disks",
                 "string",
             ),
             _p(
@@ -728,6 +731,13 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
                 False,
                 "OpenStack services parallelism after metal is up (1..16)",
                 "integer",
+            ),
+            _p(
+                "stop_after",
+                False,
+                "Optional hold: commission (after the wipe report, no Talos) "
+                "or talos (after fresh maintenance, no OpenStack). "
+                "Omit to run the full path.",
             ),
         ],
         "handler": "genestack_greenfield",
@@ -905,9 +915,11 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
         "id": "baremetal.nodes.list",
         "name": "List Bare-Metal Nodes",
         "description": (
-            "List the environment's registered bare-metal nodes and their "
-            "states (registered|booting|talos-ready|failed). The UI also "
-            "reads these via GET /api/v1/environments/{id}/baremetal."
+            "List the environment's registered bare-metal nodes, power state "
+            "(registered|booting|talos-ready|failed), and boot stage "
+            "(new|commissioning|commissioned|talos|fresh-maintenance|"
+            "installed|failed). The UI also reads these via "
+            "GET /api/v1/environments/{id}/baremetal."
         ),
         "required_role": "viewer",
         "backend": "baremetal",
@@ -935,10 +947,12 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
         "id": "baremetal.node.pxe_boot",
         "name": "PXE Boot Bare-Metal Node",
         "description": (
-            "ForceOff, wait until the chassis is Off, set one-shot PXE, then "
-            "On (not ACPI restart — hung kernels ignore ForceRestart). State "
-            "moves to booting. Console PXE DHCP/HTTP then assigns the "
-            "reserved IP and serves Talos boot assets."
+            "Set one-shot PXE, read BootSourceOverrideTarget back, then "
+            "ForceRestart. State moves to booting. The image is this "
+            "machine's current next boot: commission, Talos, or an exit to "
+            "the local disk. This does not change that choice. A machine "
+            "that was not asked to provision stays on disk, so this PXE "
+            "does not wipe it."
         ),
         "required_role": "operator",
         "backend": "baremetal",
@@ -946,6 +960,37 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
             _p("node_id", True, "BaremetalNode row UUID"),
         ],
         "handler": "baremetal_node_pxe_boot",
+        "mutating": True,
+        "timeout_seconds": 300,
+    },
+    {
+        "id": "baremetal.node.next_boot",
+        "name": "Set Bare-Metal Next Boot",
+        "description": (
+            "Choose the next PXE image for one machine: commission (RAM-disk "
+            "probe and fixed-disk wipe), talos (only after a wipe report), "
+            "or disk (iPXE exits to the local disk). boot_now power-cycles "
+            "into that image. The default for a machine that was not asked "
+            "to provision stays disk, so a stray PXE does not wipe."
+        ),
+        "required_role": "operator",
+        "backend": "baremetal",
+        "params": [
+            _p("node_id", True, "BaremetalNode row UUID"),
+            _p(
+                "next_boot",
+                True,
+                "commission, talos, or disk",
+                enum=["commission", "talos", "disk"],
+            ),
+            _p(
+                "boot_now",
+                False,
+                "Power-cycle into the chosen image now",
+                "boolean",
+            ),
+        ],
+        "handler": "baremetal_node_next_boot",
         "mutating": True,
         "timeout_seconds": 300,
     },
@@ -974,13 +1019,16 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
         "id": "baremetal.node.provision",
         "name": "Provision Bare-Metal Node (zero-touch)",
         "description": (
-            "Full zero-touch per node: prepare in-process PXE, one-shot PXE "
-            "via Redfish, then iLO virtual CD if DHCP/TFTP never show. Wait "
-            "for the talos maintenance API at the node's expected_ip (port "
-            "50000, insecure), then mark the node talos-ready and upsert it "
-            "into the env config doc servers section (source=baremetal) so "
-            "the talos bootstrap flow sees it. The node needs an expected_ip "
-            "(assigned from the PXE pool) first."
+            "Commission, then Talos. The first PXE is a RAM disk that wipes "
+            "fixed disks and posts a hardware report. After that report, a "
+            "second one-shot PXE serves Talos. Success is fresh maintenance: "
+            "the Talos API is up, the node is not Kubernetes Ready, and Talos "
+            "was served after this wipe. The node is then marked talos-ready "
+            "and upserted into the env config doc servers section "
+            "(source=baremetal). stop_after=commission returns after the wipe "
+            "report and does not serve Talos. stop_after=talos returns after "
+            "fresh maintenance and does not update inventory. The node needs "
+            "a PXE MAC and an expected_ip first."
         ),
         "required_role": "admin",
         "backend": "baremetal",
@@ -992,6 +1040,13 @@ OPERATION_CATALOG_RAW: list[dict[str, Any]] = [
                 "Genestack roles for the doc servers entry: "
                 "k8s_control_plane/etcd/control/compute/network/storage",
                 "array",
+            ),
+            _p(
+                "stop_after",
+                False,
+                "Optional hold: commission (after the wipe report, no Talos) "
+                "or talos (after fresh maintenance, no inventory update). "
+                "Omit to commission, install Talos, and update inventory.",
             ),
         ],
         "handler": "baremetal_node_provision",

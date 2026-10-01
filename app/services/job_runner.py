@@ -2405,9 +2405,11 @@ class JobRunner:
             if skip_push is None:
                 skip_push = True
             boot = str(params.get("boot") or "auto").strip() or "auto"
+            stop_after = str(params.get("stop_after") or "").strip().lower()
             log(
                 f"[greenfield] Starting greenfield redeploy for '{env.name}' "
-                f"(dry_run={effective_dry} boot={boot})"
+                f"(dry_run={effective_dry} boot={boot} "
+                f"stop_after={stop_after or 'deploy'})"
             )
             result = greenfield_service.run_greenfield(
                 self.db,
@@ -2425,6 +2427,7 @@ class JobRunner:
                 check_cancel=check_cancel,
                 parallelism=params.get("parallelism"),
                 boot=boot,
+                stop_after=stop_after,
             )
             self.write_audit(
                 actor=job.created_by or "system",
@@ -2434,6 +2437,7 @@ class JobRunner:
                 environment_id=env.id,
                 details={
                     "boot": boot,
+                    "stop_after": stop_after,
                     "skip_push": bool(skip_push),
                     "dry_run": effective_dry,
                     "failed_at": result.get("failed_at"),
@@ -3145,6 +3149,7 @@ class JobRunner:
         if handler in (
             "baremetal_node_power",
             "baremetal_node_pxe_boot",
+            "baremetal_node_next_boot",
             "baremetal_node_iso_boot",
             "baremetal_node_provision",
         ):
@@ -3180,6 +3185,26 @@ class JobRunner:
                     self.db, node, dry_run=dry, log=log, settings=self.settings
                 )
                 audit_action = "env.baremetal.pxe_boot"
+            elif handler == "baremetal_node_next_boot":
+                target = str(params.get("next_boot") or "").strip().lower()
+                raw_now = params.get("boot_now")
+                if isinstance(raw_now, str):
+                    boot_now = raw_now.strip().lower() in ("1", "true", "yes", "on")
+                else:
+                    boot_now = bool(raw_now)
+                result = baremetal_service.set_next_boot(
+                    self.db,
+                    env,
+                    node,
+                    target,
+                    boot_now=boot_now,
+                    dry_run=dry,
+                    log=log,
+                    settings=self.settings,
+                )
+                audit_action = "env.baremetal.next_boot"
+                details["next_boot"] = target
+                details["boot_now"] = boot_now
             elif handler == "baremetal_node_iso_boot":
                 result = baremetal_service.iso_boot(
                     self.db,
@@ -3211,6 +3236,7 @@ class JobRunner:
                         ),
                         "returncode": 2,
                     }
+                stop_after = str(params.get("stop_after") or "").strip().lower()
                 result = baremetal_service.provision(
                     self.db,
                     env,
@@ -3221,9 +3247,11 @@ class JobRunner:
                     log=log,
                     settings=self.settings,
                     timeout_seconds=timeout,
+                    stop_after=stop_after,
                 )
                 audit_action = "env.baremetal.provision"
                 details["roles"] = roles
+                details["stop_after"] = stop_after
             self.write_audit(
                 actor=job.created_by or "system",
                 action=audit_action,
