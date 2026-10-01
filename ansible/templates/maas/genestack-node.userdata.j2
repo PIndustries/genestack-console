@@ -1,0 +1,51 @@
+#cloud-config
+# Genestack node user-data template (Ansible / MAAS deploy)
+# Roles / labels: openstack-control-plane | compute | network | storage
+hostname: {{ hostname | default(maas_hostname) | default('genestack-node') }}
+fqdn: {{ fqdn | default(hostname) | default(maas_hostname) | default('genestack-node') }}
+manage_etc_hosts: true
+package_update: true
+packages:
+  - python3
+  - python3-pip
+  - openssh-server
+  - curl
+  - jq
+  - lvm2
+
+users:
+  - default
+  - name: {{ admin_user | default('ubuntu') }}
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh_authorized_keys:
+{% if ssh_keys is defined and ssh_keys %}
+{% for key in ssh_keys %}
+      - {{ key }}
+{% endfor %}
+{% else %}
+      - ssh-ed25519 AAAA_REPLACE_ME genestack-console-placeholder
+{% endif %}
+
+write_files:
+  - path: /etc/profile.d/genestack.sh
+    permissions: '0644'
+    content: |
+      export GENESTACK_ENV="{{ genestack_env | default('default') }}"
+{% if genestack_role is defined and genestack_role %}
+      export GENESTACK_ROLE="{{ genestack_role }}"
+{% endif %}
+  - path: /etc/genestack/env
+    permissions: '0644'
+    content: |
+      GENESTACK_ENV={{ genestack_env | default('default') }}
+{% if genestack_role is defined and genestack_role %}
+      GENESTACK_ROLE={{ genestack_role }}
+{% endif %}
+
+runcmd:
+  - [ mkdir, -p, /etc/genestack ]
+  - [ bash, -c, "echo GENESTACK_ENV={{ genestack_env | default('default') }} >> /etc/environment" ]
+
+final_message: "Genestack node cloud-init complete (env={{ genestack_env | default('default') }})"

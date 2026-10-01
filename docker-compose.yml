@@ -1,0 +1,72 @@
+services:
+  console:
+    build:
+      context: .
+      dockerfile: Containerfile
+    ports:
+      # Host port 8080 is the canonical one (README quick start, the
+      # installer's GSC_PORT default, and the cors example origins all use
+      # it). Override with GSC_PORT if 8080 is taken: sed "s/8080:8080/${GSC_PORT}:8080/".
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+      - ../:/genestack:ro
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - genestack
+
+  worker:
+    build:
+      context: .
+      dockerfile: Containerfile
+    command: ["python", "-m", "app.worker.runner", "--daemon"]
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+      - ../:/genestack:ro
+    restart: unless-stopped
+    depends_on:
+      console:
+        condition: service_healthy
+    healthcheck:
+      # Liveness probe: the daemon shares the console's image, so "can reach
+      # the job database" is the meaningful failure mode (crash loop on a
+      # missing volume, dead interpreter).
+      test: ["CMD", "python", "-m", "app.worker.runner", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - genestack
+
+  local-agent:
+    build:
+      context: ./agent
+      dockerfile: Containerfile
+    environment:
+      - GSC_HUB_URL=ws://console:8080
+      - GSC_AGENT_TOKEN_FILE=/token-dir/local-agent-token
+      - GSC_AGENT_NAME=local-agent
+      - GSC_ALLOWED_ROOT=/etc/genestack:/app/data
+    volumes:
+      - ./data:/token-dir:ro
+    restart: unless-stopped
+    depends_on:
+      console:
+        condition: service_healthy
+    networks:
+      - genestack
+
+networks:
+  genestack:
+    driver: bridge

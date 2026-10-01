@@ -1,0 +1,119 @@
+---
+# Post-MAAS deploy bridge playbook.
+# After MAAS deploys a node, wait for SSH (or skip on localhost),
+# gather facts, and record hostname / Genestack env markers.
+#
+# Local dry-run:
+#   ansible-playbook -i inventory/localhost.ini playbooks/provision_bridge.yml
+#
+# Against a real host (after deploy):
+#   ansible-playbook -i inventory/maas.yml playbooks/provision_bridge.yml \
+#     -l <hostname> -e genestack_env=prod
+#
+# Node roles / labels: openstack-control-plane, compute, network, storage
+
+- name: Genestack provision bridge (post-MAAS)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    # Prefer extra-vars / group_vars; avoid self-referential defaults here.
+    provision_ssh_timeout: 300
+    provision_ssh_delay: 5
+    provision_ssh_port: 22
+    # genestack_env comes from group_vars/all or -e; default applied in tasks
+
+  tasks:
+    - name: Resolve provision defaults
+      ansible.builtin.set_fact:
+        _provision_ssh_timeout: "{{ provision_ssh_timeout | default(300) | int }}"
+        _provision_ssh_delay: "{{ provision_ssh_delay | default(5) | int }}"
+        _provision_ssh_port: "{{ provision_ssh_port | default(22) | int }}"
+        _genestack_env: "{{ genestack_env | default('default') }}"
+      tags:
+        - always
+
+    - name: Detect whether we are targeting localhost
+      ansible.builtin.set_fact:
+        is_local_target: >-
+          {{ inventory_hostname in ['localhost', '127.0.0.1']
+             or (ansible_connection | default('')) == 'local' }}
+      tags:
+        - always
+
+    - name: Wait for SSH on remote Genestack node
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: "{{ _provision_ssh_port }}"
+        delay: "{{ _provision_ssh_delay }}"
+        timeout: "{{ _provision_ssh_timeout }}"
+        state: started
+      when: not (is_local_target | bool)
+      tags:
+        - wait_ssh
+        - provision
+
+    - name: Skip SSH wait on localhost dry-run
+      ansible.builtin.debug:
+        msg: "Skipping SSH wait (local connection / localhost dry-run)"
+      when: is_local_target | bool
+      tags:
+        - wait_ssh
+        - provision
+
+    - name: Gather facts for hostname and inventory
+      ansible.builtin.setup:
+        gather_subset:
+          - min
+          - network
+      tags:
+        - facts
+        - provision
+
+    - name: Set Genestack hostname facts
+      ansible.builtin.set_fact:
+        genestack_hostname: "{{ ansible_hostname | default(inventory_hostname) }}"
+        genestack_fqdn: "{{ ansible_fqdn | default(inventory_hostname) }}"
+        genestack_env_resolved: "{{ _genestack_env }}"
+      tags:
+        - facts
+        - provision
+
+    - name: Report provision bridge summary
+      ansible.builtin.debug:
+        msg: >-
+          provision_bridge ok host={{ genestack_hostname }}
+          fqdn={{ genestack_fqdn }}
+          env={{ genestack_env_resolved }}
+          (labels: openstack-control-plane|compute|network|storage)
+      tags:
+        - provision
+
+    - name: Check cloud-init / Genestack env marker when present
+      ansible.builtin.stat:
+        path: /etc/genestack/env
+      register: genestack_env_file
+      tags:
+        - provision
+        - markers
+
+    - name: Read Genestack env marker if present
+      ansible.builtin.slurp:
+        src: /etc/genestack/env
+      register: genestack_env_slurp
+      when: genestack_env_file.stat.exists | default(false)
+      tags:
+        - provision
+        - markers
+
+    - name: Show Genestack env marker contents
+      ansible.builtin.debug:
+        msg: "{{ genestack_env_slurp.content | b64decode | trim }}"
+      when:
+        - genestack_env_file.stat.exists | default(false)
+        - genestack_env_slurp is defined
+        - genestack_env_slurp.content is defined
+      tags:
+        - provision
+        - markers

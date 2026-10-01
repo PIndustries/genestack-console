@@ -1,0 +1,23 @@
+---
+# Shared defaults for Genestack Console Ansible automation.
+# Role labels align with Genestack/Kubespray node labels:
+#   openstack-control-plane, compute, network, storage
+
+genestack_env: "{{ lookup('env', 'GENESTACK_ENV') | default('default', true) }}"
+genestack_console: true
+
+# Minimum free disk (MB) for preflight disk_check
+preflight_min_disk_mb: 2048
+preflight_disk_path: /
+
+# SSH wait defaults (provision_bridge)
+provision_ssh_timeout: 300
+provision_ssh_delay: 5
+provision_ssh_port: 22
+
+# Python interpreter preference on target nodes
+genestack_python_interpreter: /usr/bin/python3
+
+# Optional MAAS metadata (filled by console job runner)
+maas_system_id: ""
+maas_hostname: ""

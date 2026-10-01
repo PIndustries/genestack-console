@@ -1,0 +1,20 @@
+[Unit]
+Description=Genestack Console API (operator control plane)
+After=network.target
+
+[Service]
+Type=simple
+# Adjust User/Group and paths for your install; the console reads config.yaml
+# from its working directory (override with CONSOLE_CONFIG=/path/config.yaml).
+User=genestack
+Group=genestack
+WorkingDirectory=/opt/genestack-console
+ExecStart=/opt/genestack-console/genestack-console-linux-amd64 serve --host 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+
+# Binds loopback by design — private exposure (WireGuard, reverse proxy,
+# ssh tunnel, socat) is an infrastructure concern outside this repo.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Genestack Console — Admin Portal</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/static/css/portal.css" />
+  <link rel="stylesheet" href="/static/css/theme.css" />
+  <style>
+    .tab-panel { display: none; padding: .75rem 0; }
+    .tab-panel.active { display: block; }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr));
+      gap: .75rem;
+      margin: 0;
+    }
+    .span-12 { grid-column: 1 / -1; }
+    .span-6  { grid-column: span 1; }
+    .span-4  { grid-column: span 1; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--bg-card, #161616);
+      border: 1px solid var(--border, #2a2a2a);
+      border-radius: .4rem;
+      padding: .65rem .75rem;
+      transition: border-color .15s;
+    }
+    .card:hover {
+      border-color: var(--border-hover, #3a3a3a);
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding-bottom: .4rem;
+      margin-bottom: .3rem;
+      border-bottom: 1px solid var(--border, #222);
+      flex-wrap: wrap;
+    }
+    .toolbar h2 {
+      margin: 0;
+      font-size: .95rem;
+      font-weight: 600;
+    }
+
+    /* ── Stat bar ── */
+    .stat-bar {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: .4rem .75rem;
+      background: var(--bg-card, #161616);
+      border: 1px solid var(--border, #222);
+      border-radius: .35rem;
+      font-size: .82rem;
+    }
+    .stat-bar .stat {
+      display: flex;
+      align-items: center;
+      gap: .3rem;
+    }
+    .stat-bar .stat strong {
+      font-size: 1rem;
+    }
+
+    /* ── Environment cards (fleet) ── */
+    .fl-env-card {
+      cursor: default;
+    }
+    .fl-env-card .toolbar {
+      cursor: pointer;
+    }
+    .fl-env-card .toolbar:hover {
+      opacity: .85;
+    }
+
+    /* ── Pill improvements ── */
+    .pill {
+      display: inline-block;
+      padding: .15rem .45rem;
+      border-radius: .2rem;
+      font-size: .72rem;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+    .pill.ok { background: #1a3a1a; color: #4caf50; }
+    .pill.bad { background: #3a1a1a; color: #ef5350; }
+    .pill.warn { background: #3a3a1a; color: #ffc107; }
+
+    /* ── Chip ── */
+    .chip {
+      display: inline-block;
+      padding: .1rem .35rem;
+      border-radius: .2rem;
+      font-size: .68rem;
+      background: var(--bg-card, #1e1e1e);
+      border: 1px solid var(--border, #333);
+      color: var(--fg-muted, #888);
+    }
+
+    /* ── Compact row (for compact workflow steps) ── */
+    .compact-row {
+      display: flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .25rem .5rem;
+      min-height: auto;
+    }
+
+    /* ── Breadcrumbs ── */
+    #breadcrumbs-bar {
+      padding: .4rem 0;
+      font-size: .78rem;
+      border-bottom: 1px solid var(--border, #222);
+      margin-bottom: .5rem;
+    }
+    #breadcrumbs-bar a {
+      color: var(--fg-muted, #666);
+      text-decoration: none;
+    }
+    #breadcrumbs-bar a:hover {
+      color: var(--accent, #4a9eff);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <!-- Login screen (shown when no session token / API key in localStorage) -->
+  <div id="login-view" class="login-wrap hidden">
+    <div class="card login-card">
+      <div class="brand" style="margin-bottom:.35rem">
+        <div class="mark">GS</div>
+        <div>Genestack Console</div>
+      </div>
+      <p class="muted" style="margin:0 0 1rem;font-size:.85rem">Community console — metal, Talos, Kubernetes, OpenStack.</p>
+      <h1>Sign in</h1>
+      <div id="login-sso" class="hidden">
+        <div style="display:grid; gap:.75rem; margin-bottom:1rem">
+          <button id="btn-login-sso" type="button">Sign in with SSO</button>
+          <p class="muted" style="font-size:.8rem;margin:0">…or with a local console account:</p>
+        </div>
+      </div>
+      <div id="login-user-form">
+        <p class="muted">Sign in with your console account.</p>
+        <div style="display:grid; gap:.75rem; margin-top:1rem">
+          <label class="field">
+            <span>Username</span>
+            <input id="login-username" type="text" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="login-password" type="password" autocomplete="current-password" />
+          </label>
+          <button id="btn-login" type="button">Sign in</button>
+          <button class="secondary btn-sm" id="btn-show-key" type="button">Use a service key instead</button>
+        </div>
+      </div>
+      <div id="login-key-form" class="hidden">
+        <p class="muted">Break-glass access — use a static key from <code>config.yaml</code>.</p>
+        <div style="display:grid; gap:.75rem; margin-top:1rem">
+          <label class="field">
+            <span>Service API key</span>
+            <input id="api-key" type="password" placeholder="dev-admin-key" autocomplete="off" />
+          </label>
+          <button id="btn-login-key" type="button">Enter portal</button>
+          <button class="secondary btn-sm" id="btn-show-user" type="button">Back to sign in</button>
+        </div>
+        <p class="muted" style="font-size:.8rem;margin-top:1rem">
+          Default local keys: <code>dev-admin-key</code> / <code>dev-operator-key</code> / <code>dev-viewer-key</code>
+        </p>
+      </div>
+      <div id="login-error" class="error hidden" style="margin-top:1rem"></div>
+      <div id="login-version" class="muted version-line"></div>
+    </div>
+  </div>
+
+  <!-- Portal shell -->
+  <div id="app-shell" class="shell hidden">
+    <aside class="sidebar">
+      <a class="brand" href="#/fleet">
+        <div class="mark">GS</div>
+        <div>
+          <div class="brand-name">Genestack</div>
+          <div class="muted brand-sub">Console</div>
+        </div>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <div class="nav-label">Fleet</div>
+        <a class="nav-link" data-page="fleet" href="#/fleet">Environments</a>
+        <a class="nav-link" data-page="observe" href="#/observe">Observe</a>
+        <a class="nav-link" data-page="hardware" href="#/hardware">Hardware</a>
+
+        <div id="nav-env" class="nav-env hidden">
+          <div class="nav-label">This environment</div>
+          <a class="nav-env-title" id="nav-env-title" href="#/fleet">—</a>
+          <a class="nav-link" data-env-tab="workflow" href="#">Overview</a>
+          <a class="nav-link" data-env-tab="observe" href="#">Observe</a>
+          <a class="nav-link" data-env-tab="platform" href="#">Platform</a>
+          <a class="nav-link" data-env-tab="settings" href="#">Settings</a>
+        </div>
+
+        <div class="nav-label">Operations</div>
+        <a class="nav-link" data-page="activity" href="#/activity">Activity <span class="badge hidden" id="alerts-badge" title="Firing alerts">0</span></a>
+        <a class="nav-link" data-page="operations" href="#/operations">Catalog</a>
+        <a class="nav-link hidden" id="nav-admin-link" data-page="admin" href="#/admin">Admin</a>
+      </nav>
+      <div class="sidebar-foot">
+        <a class="nav-link" href="/docs">API docs</a>
+        <div id="sidebar-version" class="version-line muted"></div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="page-title">Environments</h1>
+          <span class="pill hidden" id="health-pill">…</span>
+          <span class="pill hidden" id="dryrun-pill">dry-run</span>
+          <button type="button" class="pill hidden" id="update-pill" title="A newer Console is published">update</button>
+        </div>
+        <div class="row topbar-right">
+          <select id="tenant-switch" class="hidden" title="Tenant"></select>
+          <div class="user-menu" id="user-menu">
+            <button class="user-chip secondary" id="user-chip" type="button" aria-haspopup="true" aria-expanded="false">
+              <span class="user-avatar" aria-hidden="true"></span>
+              <span class="user-chip-meta">
+                <span id="user-chip-name">—</span>
+                <span class="badge" id="role-badge">—</span>
+              </span>
+            </button>
+            <div class="user-menu-panel hidden" id="user-menu-panel" role="menu">
+              <div class="user-menu-status">
+                <div id="user-health-line" class="muted">Console</div>
+                <div id="user-dryrun-line" class="muted"></div>
+              </div>
+              <button class="secondary" id="btn-logout" type="button">Sign out</button>
+            </div>
+          </div>
+        </div>
+      </header>
+      <main id="page-root"></main>
+    </div>
+  </div>
+
+  <div id="toast-root"></div>
+  <script>
+    // Cache-bust: append build timestamp so browser always fetches fresh JS/CSS
+    var _v = Date.now();
+    var _css = document.querySelectorAll('link[rel="stylesheet"]');
+    _css.forEach(function(l){var h=l.getAttribute('href');if(h && h.indexOf('?')===-1)l.setAttribute('href',h+'?v='+_v)});
+    var _s=document.querySelector('script[src*="app.js"]');
+    if(_s){var _h=_s.getAttribute('src');if(_h.indexOf('?')===-1)_s.setAttribute('src',_h+'?v='+_v)}
+  </script>
+  <script type="module" src="/static/js/app.js?v=ls17"></script>
+</body>
+</html>

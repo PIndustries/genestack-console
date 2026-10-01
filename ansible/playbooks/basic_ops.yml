@@ -1,0 +1,19 @@
+---
+# Basic operations playbook for Genestack Console.
+# Select action via extra var: action=ping|facts|disk_check
+#
+#   ansible-playbook -i inventory/localhost.ini playbooks/basic_ops.yml -e action=ping
+#   ansible-playbook -i inventory/localhost.ini playbooks/basic_ops.yml -e action=facts
+#   ansible-playbook -i inventory/localhost.ini playbooks/basic_ops.yml -e action=disk_check
+#
+# Tags: ping, facts, disk_check
+# Genestack labels: openstack-control-plane, compute, network, storage
+
+- name: Genestack basic operations
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  roles:
+    - role: basic_ops

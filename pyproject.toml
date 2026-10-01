@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "genestack-console"
+# CalVer release identity; the runtime value in app/version.py (single source
+# of truth, rewritten by scripts/bump-version.sh) is injected at build time
+# via the file-based version below.
+dynamic = ["version"]
+description = "Genestack Console — operator fleet control plane for managing Genestack environments"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Genestack Contributors" }]
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "websockets>=12",
+    "sqlalchemy>=2.0.25",
+    "psycopg[binary]>=3.1",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "python-multipart>=0.0.6",
+    "httpx>=0.26.0",
+    "pyyaml>=6.0.1",
+    "jinja2>=3.1.0",
+    "greenlet>=3.0.0",
+    "cryptography>=42",
+    "authlib>=1.3.0",
+    "joserfc>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.26.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+genestack-console-worker = "app.worker.runner:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "app.version.VERSION" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

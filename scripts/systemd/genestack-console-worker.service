@@ -1,0 +1,17 @@
+[Unit]
+Description=Genestack Console job worker (queued-job daemon)
+After=network.target genestack-console.service
+
+[Service]
+Type=simple
+# Same install paths as genestack-console.service; shares config.yaml and the
+# sqlite job queue with the API process.
+User=genestack
+Group=genestack
+WorkingDirectory=/opt/genestack-console
+ExecStart=/opt/genestack-console/genestack-console-linux-amd64 worker --daemon --interval 5
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

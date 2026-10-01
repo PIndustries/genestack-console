@@ -1,0 +1,60 @@
+---
+# Preflight checks for Genestack nodes (and localhost dry-run).
+# Validates Python, SSH client availability, and free disk.
+# Genestack labels: openstack-control-plane, compute, network, storage
+
+- name: Display target and Genestack environment
+  ansible.builtin.debug:
+    msg: >-
+      preflight target={{ inventory_hostname }}
+      env={{ genestack_env | default('default') }}
+      python={{ ansible_python_version | default('unknown') }}
+
+- name: Assert Python 3 is available
+  ansible.builtin.assert:
+    that:
+      - ansible_python.version.major | int >= 3
+    fail_msg: "Python 3 is required on Genestack nodes"
+    success_msg: "Python {{ ansible_python_version }} OK"
+
+- name: Check ssh client is present (control host / node tooling)
+  ansible.builtin.command: which ssh
+  register: preflight_ssh
+  changed_when: false
+  failed_when: false
+
+- name: Report SSH client status
+  ansible.builtin.debug:
+    msg: >-
+      ssh client {{ 'found: ' + preflight_ssh.stdout
+      if preflight_ssh.rc == 0 else 'not found (ok for pure local dry-run)' }}
+
+- name: Resolve preflight disk defaults
+  ansible.builtin.set_fact:
+    _preflight_disk_path: "{{ preflight_disk_path | default('/') }}"
+    _preflight_min_disk_mb: "{{ preflight_min_disk_mb | default(2048) | int }}"
+
+- name: Collect free disk space on preflight path
+  ansible.builtin.shell: |
+    set -o pipefail
+    df -Pm {{ _preflight_disk_path | quote }} | awk 'NR==2 {print $4}'
+  args:
+    executable: /bin/bash
+  register: preflight_disk_free
+  changed_when: false
+
+- name: Assert minimum free disk
+  ansible.builtin.assert:
+    that:
+      - (preflight_disk_free.stdout | trim | int) >= (_preflight_min_disk_mb | int)
+    fail_msg: >-
+      Free disk on {{ _preflight_disk_path }} is
+      {{ preflight_disk_free.stdout | trim }}MB;
+      need at least {{ _preflight_min_disk_mb }}MB
+    success_msg: >-
+      Disk OK: {{ preflight_disk_free.stdout | trim }}MB free on
+      {{ _preflight_disk_path }}
+
+- name: Preflight complete
+  ansible.builtin.debug:
+    msg: "host_preflight passed for {{ inventory_hostname }}"

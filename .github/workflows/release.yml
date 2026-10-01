@@ -1,0 +1,134 @@
+name: release
+
+# Public release only. Branch pushes and pull requests do not run this
+# workflow, so day-to-day work does not take a fleet runner.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version matching app/version.py, with or without a leading v"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: genestack-console-release
+  cancel-in-progress: false
+
+jobs:
+  binary:
+    if: >-
+      github.repository == 'PIndustries/genestack-console' &&
+      github.event.repository.fork == false &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: [self-hosted, Linux, X64, phx, fleet, org]
+    timeout-minutes: 120
+    env:
+      GSC_SKIP_PUBLISH: "1"
+      PIP_BREAK_SYSTEM_PACKAGES: "1"
+      KUBECONFIG: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Check version
+        id: ver
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = Path("app/version.py").read_text()
+          match = re.search(r'^VERSION\s*=\s*"([^"]+)"\s*$', text, re.M)
+          if not match:
+              raise SystemExit("app/version.py has no VERSION")
+          version = match.group(1)
+          if os.environ["EVENT_NAME"] == "workflow_dispatch":
+              raw = os.environ.get("INPUT_VERSION", "").strip()
+              if not raw:
+                  raise SystemExit("workflow_dispatch requires version")
+              tag = raw if raw.startswith("v") else "v" + raw
+          else:
+              tag = os.environ["REF_NAME"]
+          if not re.fullmatch(r"v\d{4}\.\d{2}\.\d{2}(-[0-9A-Za-z.]+)?", tag):
+              raise SystemExit(f"refused tag shape: {tag}")
+          bare = tag[1:]
+          if bare != version:
+              raise SystemExit(f"{tag} does not match app/version.py {version}")
+          prerelease = "-" in bare
+          out = Path(os.environ["GITHUB_OUTPUT"])
+          with out.open("a") as fh:
+              fh.write(f"tag={tag}\n")
+              fh.write(f"version={version}\n")
+              fh.write(f"prerelease={'true' if prerelease else 'false'}\n")
+              fh.write(f"make_latest={'false' if prerelease else 'true'}\n")
+          print(f"tag={tag} version={version} prerelease={prerelease}")
+          PY
+
+      - name: Compile tools
+        run: |
+          set -euo pipefail
+          need=0
+          for c in gcc g++ patchelf python3; do
+            if ! command -v "$c" >/dev/null 2>&1; then
+              echo "missing $c"
+              need=1
+            fi
+          done
+          if [ "$need" -eq 1 ]; then
+            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              gcc g++ patchelf python3 python3-pip python3-dev ccache zlib1g-dev
+          fi
+          python3 --version
+
+      - name: Compile
+        run: ./scripts/compile-console.sh
+
+      - name: Release URL in version.json
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("dist/version.json")
+          data = json.loads(path.read_text())
+          name = str(data.get("binary") or "")
+          if "/" in name or name.startswith("http"):
+              raise SystemExit("version.json binary must be a file name")
+          tag = os.environ["TAG"]
+          data["binary"] = (
+              "https://github.com/PIndustries/genestack-console/releases/download/"
+              f"{tag}/{name}"
+          )
+          path.write_text(json.dumps(data) + "\n")
+          print(data["binary"])
+          PY
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          prerelease: ${{ steps.ver.outputs.prerelease }}
+          make_latest: ${{ steps.ver.outputs.make_latest }}
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: |
+            dist/genestack-console-linux-*
+            dist/version.json
+          body: |
+            Genestack Console ${{ steps.ver.outputs.version }} for Linux.
+
+            The asset `genestack-console-linux-amd64` is the single binary.
+            `version.json` names that asset for the update check.

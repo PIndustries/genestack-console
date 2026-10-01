@@ -1,0 +1,40 @@
+# Example dynamic inventory for Canonical MAAS (community.general.maas / netbox-style).
+# Copy to maas.yml and fill credentials. Requires a MAAS inventory plugin or script.
+#
+# Genestack maps MAAS tags -> groups:
+#   control-plane / openstack-control-plane -> control_plane
+#   compute                                 -> compute
+#   network                                 -> network
+#   storage                                 -> storage
+#
+# Plugin options vary by collection; this file documents the expected shape
+# for Genestack Console operators.
+
+plugin: community.general.proxmox  # placeholder — replace with your MAAS plugin
+# For script-based inventory, prefer:
+#   ansible-inventory -i inventory/maas_inventory.py --list
+#
+# Environment (preferred for secrets):
+#   MAAS_URL=https://maas.example:5240/MAAS
+#   MAAS_API_KEY=consumer_key:token_key:token_secret
+#
+# compose:
+#   ansible_host: ip_addresses[0]
+# keyed_groups:
+#   - key: tags
+#     prefix: tag
+# groups:
+#   control_plane: "'control-plane' in (tags|list) or 'openstack-control-plane' in (tags|list)"
+#   compute: "'compute' in (tags|list)"
+#   network: "'network' in (tags|list)"
+#   storage: "'storage' in (tags|list)"
+
+# Minimal static-style fallback used when documenting group mapping only:
+# (Uncomment and adapt if using a custom inventory script that emits these groups.)
+#
+# plugin: ansible.builtin.constructed
+# strict: false
+# groups:
+#   control_plane: inventory_hostname is match('.*control.*')
+#   compute: inventory_hostname is match('.*compute.*')
+#   storage: inventory_hostname is match('.*storage.*')

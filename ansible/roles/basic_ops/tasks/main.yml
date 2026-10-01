@@ -1,0 +1,69 @@
+---
+# Basic ops role — driven by `action` extra var and tags.
+# Tags: ping, facts, disk_check
+# Genestack labels: openstack-control-plane, compute, network, storage
+
+- name: Normalize action and disk defaults
+  ansible.builtin.set_fact:
+    basic_ops_action: "{{ action | default('ping') | lower }}"
+    _preflight_disk_path: "{{ preflight_disk_path | default('/') }}"
+    _preflight_min_disk_mb: "{{ preflight_min_disk_mb | default(2048) | int }}"
+  tags:
+    - always
+
+- name: Ping host
+  ansible.builtin.ping:
+  when: basic_ops_action in ['ping', 'all']
+  tags:
+    - ping
+
+- name: Gather facts
+  ansible.builtin.setup:
+  when: basic_ops_action in ['facts', 'all']
+  tags:
+    - facts
+
+- name: Show selected facts
+  ansible.builtin.debug:
+    msg:
+      hostname: "{{ ansible_hostname | default(inventory_hostname) }}"
+      fqdn: "{{ ansible_fqdn | default(inventory_hostname) }}"
+      python: "{{ ansible_python_version | default('n/a') }}"
+      os: "{{ ansible_distribution | default('n/a') }} {{ ansible_distribution_version | default('') }}"
+  when: basic_ops_action in ['facts', 'all']
+  tags:
+    - facts
+
+- name: Disk free check
+  ansible.builtin.shell: |
+    set -o pipefail
+    df -Pm {{ _preflight_disk_path | quote }} | awk 'NR==2 {print $4}'
+  args:
+    executable: /bin/bash
+  register: basic_ops_disk
+  changed_when: false
+  when: basic_ops_action in ['disk_check', 'all']
+  tags:
+    - disk_check
+
+- name: Assert disk free for disk_check action
+  ansible.builtin.assert:
+    that:
+      - (basic_ops_disk.stdout | trim | int) >= (_preflight_min_disk_mb | int)
+    fail_msg: >-
+      disk_check failed: {{ basic_ops_disk.stdout | trim }}MB free
+      (min {{ _preflight_min_disk_mb }}MB)
+    success_msg: >-
+      disk_check OK: {{ basic_ops_disk.stdout | trim }}MB free
+  when: basic_ops_action in ['disk_check', 'all']
+  tags:
+    - disk_check
+
+- name: Warn on unknown action
+  ansible.builtin.debug:
+    msg: >-
+      Unknown action '{{ basic_ops_action }}'.
+      Use action=ping|facts|disk_check|all
+  when: basic_ops_action not in ['ping', 'facts', 'disk_check', 'all']
+  tags:
+    - always

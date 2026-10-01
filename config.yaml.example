@@ -1,0 +1,184 @@
+# Genestack Console — single config file (edit this, not a pile of env vars).
+#
+# Optional override: CONSOLE_CONFIG=/path/to/other.yaml
+# Everything else has safe local defaults + auto-detection.
+
+# When true, jobs log commands but do not execute installs/playbooks.
+dry_run: true
+
+# Seed tenant `demo` / env `walkthrough` — a labeled sample full deployment
+# so first-boot UI has honeycomb/3D/Platform/Activity to click. Not real metal.
+# Installer writes true on first create. Leave false in tests and CI.
+seed_demo: false
+
+# SQLite lives under data_dir (no DATABASE_URL needed for local use).
+data_dir: ./data
+
+# Encrypts secrets stored in the DB (environment kubeconfig_data, BMC passwords)
+# with Fernet; encrypted values carry a "fernet:" prefix. Rotating this key
+# requires re-encrypting every stored secret, so back them up before rotation.
+# The server logs a startup warning while this is the built-in default.
+# CHANGE THIS per install — never commit real values to a public repo.
+secret_key: REPLACE_ME-generated-per-install
+
+auth:
+  # Static API key -> role (viewer | operator | admin). Static keys act as
+  # platform-admin "break-glass" credentials that bypass tenant scoping.
+  # Portal users instead log in with username/password at
+  # POST /api/v1/auth/login and get a session token (per-tenant roles).
+  # The shipped dev-* keys are publicly known — replace them for any
+  # non-loopback deployment. The server logs a warning if dev-* keys are active.
+  api_keys:
+    gsc-admin-REPLACE_ME: admin
+    gsc-operator-REPLACE_ME: operator
+    gsc-viewer-REPLACE_ME: viewer
+  # Hours a login session token stays valid.
+  session_ttl_hours: 12
+  # DEV ONLY: when true, every request is authenticated as platform-admin
+  # with NO credentials and the portal skips the login screen. Convenient
+  # for local development on a private interface. NEVER enable on anything
+  # exposed or production-adjacent — the server logs a loud startup warning.
+  dev_auto_login: false
+
+# Public channel on genestack.dev (not source). Console checks this and can
+# replace its compiled binary. auto: daily timer from --auto-update.
+update:
+  url: https://genestack.dev/releases/version.json
+  auto: false
+
+# Leave root empty to auto-detect (parent of this package, or /opt/genestack).
+genestack:
+  root: null
+
+# Leave empty to use ./ansible next to this config.
+ansible:
+  root: null
+
+# MAAS integration: empty url => mock inventory (no separate mock flag).
+# For real MAAS, set url and api_key.
+maas:
+  url: ""
+  api_key: ""
+
+# OVH dedicated-server import (optional). The app key/secret identify this
+# console as an OVH "application" — create one at https://eu.api.ovh.com/createApp/
+# requesting read access to /dedicated/server. The per-environment consumer key
+# is created in-console (Admin → OVH) and is NOT stored here. Leave endpoint
+# empty (or omit the whole section) to disable OVH import.
+ovh:
+  endpoint: "https://eu.api.ovh.com/1.0"
+  app_key: ""
+  app_secret: ""
+
+# Bind private by default. Fleet VPN / access path is outside this repo.
+# Do NOT use 0.0.0.0 unless you intend to expose the console on a public NIC.
+server:
+  host: 127.0.0.1
+  port: 8080
+
+jobs:
+  timeout_seconds: 600
+
+# Cluster telemetry collector (snapshots of nodes/pods/helm per environment).
+collector:
+  enabled: true
+  interval_seconds: 60
+  probe_timeout_seconds: 15
+  # 7 days of snapshots
+  retention_hours: 168
+
+# Metric sample collection via kubectl top (metrics-server) plus snapshot
+# gauges (cluster / Talos / cloud / jobs / alerts). Degrades if
+# metrics-server is missing: top samples are skipped, gauges still record.
+# Collection never fails a probe.
+metrics:
+  enabled: true
+  retention_hours: 72
+
+# Hypervisor tier: discovery + management of the raw QEMU VMs on this host
+# that run genestack lab/dev/AIO nodes (no libvirt). Discovery scans each
+# root for qemu pidfiles and /proc for qemu-system processes; VM start/
+# stop/restart actions run through the job queue.
+hypervisor:
+  enabled: true
+  roots:
+    - /var/lib/genestack/vms
+  # Root helper (via NOPASSWD sudo) used when QEMU processes/files are not
+  # owned by the console user. Only this exact path is allowed by sudoers.
+  sudo_helper: /usr/local/sbin/gsc-qemu-ctl
+
+# Server-sent events fan-out guardrail.
+stream:
+  max_subscribers: 100
+  # DB relay: the API process polls the DB every relay_interval_seconds and
+  # re-publishes worker-process events (snapshots, alerts, job transitions)
+  # onto its in-process event bus so SSE subscribers actually receive them.
+  relay_enabled: true
+  relay_interval_seconds: 3.0
+
+# Agent command relay: the API process polls agent_commands rows and
+# dispatches them to connected agents so the worker daemon process can
+# route commands/file-writes through agents.
+agent:
+  relay_enabled: true
+  relay_interval_seconds: 2.0
+  # Environment that receives the auto "local-agent" credential seeded at
+  # startup (its token is written to <data_dir>/local-agent-token for the
+  # docker-compose local-agent container). Leave empty for single-env
+  # installs; REQUIRED when several environments exist — with more than one
+  # env and no override the seed is skipped (it must never guess a tenant).
+  default_environment_id: ""
+
+# External URL that agents and target hosts use to reach this console.
+# Required for agent.install: remote hosts need a hub URL THEY can reach,
+# not one derived from the API client's headers.
+hub:
+  advertise_url: ""
+
+# Retention policies for non-snapshot tables (worker daemon, daily-ish).
+retention:
+  jobs_days: 30
+  audit_days: 90
+  agent_commands_days: 7
+  alert_events_days: 30
+  env_config_versions_keep: 50
+
+# CORS origins allowed to call the API from browsers. Defaults to ["*"]
+# (open) when omitted; restrict to your portal origin for deployments.
+cors:
+  allow_origins:
+    - http://127.0.0.1:8080
+    - http://localhost:8080
+    - https://my.genestack.dev
+
+# Terminal overrides (DEV/CI only). Replaces the ssh argv for the deploy-host
+# pty bridge — point at /bin/cat in CI so tests don't need real hosts.
+terminal:
+  command_override: ""
+
+# Optional OIDC/SSO login. Feature is active only when enabled is true AND
+# issuer_url is non-empty. Local accounts and static API keys always remain
+# available as a fallback.
+#
+# For hosted Console (portal at https://my.genestack.dev): set enabled: true
+# and keep the issuer and redirect below. The portal provisions users with
+# gsc_tenant_id/gsc_tenant_role claims. Self-hosted installations keep
+# password login available alongside OIDC and should point issuer_url at
+# their own IdP. https://app.genestack.dev is the retired door.
+oidc:
+  enabled: false
+  # Hosted mode: https://my.genestack.dev. Self-hosted: your own IdP.
+  issuer_url: "https://my.genestack.dev"
+  # Hosted mode: genestack-console (pre-registered); self-hosted: your client_id
+  client_id: "genestack-console"
+  # Obtain from portal admin or your IdP
+  client_secret: ""
+  # Hosted native/portal path: MUST be this portal callback (enables gsc_console).
+  # Self-hosted IdP: use your Console's public URL + /api/v1/auth/oidc/callback instead.
+  redirect_url: "https://my.genestack.dev/api/v1/auth/oidc/callback"
+  # Fallback tenant when gsc_tenant_id claim is absent (empty = no auto-membership)
+  default_tenant: ""
+  # Fallback role when gsc_tenant_role claim is absent
+  default_role: viewer
+  # UI label for the SSO button
+  label: SSO

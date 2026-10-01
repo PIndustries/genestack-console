@@ -1,0 +1,24 @@
+# Genestack Console — runtime dependencies
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+websockets>=12
+httpx>=0.26.0
+sqlalchemy>=2.0.25
+# Postgres driver (database_url=postgresql+psycopg://…); SQLite needs nothing.
+psycopg[binary]>=3.1
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+pyyaml>=6.0.1
+python-multipart>=0.0.6
+jinja2>=3.1.0
+greenlet>=3.0.0
+# Ansible for console playbooks + bridge into Genestack host automation
+ansible-core>=2.16.0
+
+# Fernet encryption for secrets at rest (app/services/crypto.py, ssh_keys.py,
+# scripts/rotate_secrets.py) — was previously pulled in transitively.
+cryptography>=42.0.0
+
+# OIDC/SSO sign-in (optional oidc: config section).
+authlib>=1.3.0
+joserfc>=1.0.0

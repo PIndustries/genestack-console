@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Console API — Genestack</title>
+  <link rel="stylesheet" href="/static/css/theme.css">
+  <link rel="stylesheet" href="/static/css/docs.css">
+</head>
+<body class="docs-page">
+  <header class="topbar">
+    <a class="brand" href="/ui">
+      <span class="mark" aria-hidden="true">GS</span>
+      <span class="brand-text">
+        <span class="brand-name">Genestack</span>
+        <span class="brand-sub">Console</span>
+      </span>
+    </a>
+    <nav>
+      <a href="/ui">Portal</a>
+      <a href="/docs" aria-current="page">API</a>
+      <a href="/swagger">OpenAPI</a>
+    </nav>
+  </header>
+
+  <main>
+    <header class="docs-hero">
+      <p class="kicker">Genestack Console · REST</p>
+      <h1>What the API can do</h1>
+      <p class="lead">
+        This portal is a client of <code>/api/v1</code>. Same auth, same tenant
+        and environment scope — from curl, CI, or your own tools. Each area,
+        what it is for, the path, and a curl you can copy.
+      </p>
+      <div class="docs-facts" aria-label="How to call it">
+        <div>
+          <em>Base</em>
+          <code id="docs-base"></code>
+        </div>
+        <div>
+          <em>Auth</em>
+          <span>Bearer session or API key</span>
+        </div>
+        <div>
+          <em>Shape</em>
+          <span>JSON · jobs for mutations</span>
+        </div>
+      </div>
+      <p class="docs-also" id="docs-also"></p>
+      <label class="docs-search-wrap">
+        <span class="visually-hidden">Search endpoints</span>
+        <input id="docs-search" type="search" placeholder="Search paths, methods, what it does…" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </label>
+    </header>
+
+    <div class="docs-layout">
+      <aside class="docs-rail" id="docs-nav" aria-label="API areas"></aside>
+      <div id="docs-root"></div>
+    </div>
+  </main>
+  <script src="/static/js/docs-catalog.js"></script>
+</body>
+</html>
