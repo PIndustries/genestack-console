@@ -45,11 +45,15 @@ Exchange username/password for a session token.
 }
 ```
 
+The bearer and the refresh token are opaque strings. A second login returns a second pair. Send the bearer as `Authorization: Bearer <token>`.
+
 **Response:**
 ```json
 {
-  "token": "eyJhbGciOi...",
+  "token": "<opaque session token>",
   "expires_at": "2025-01-15T12:00:00Z",
+  "refresh_token": "<opaque refresh token>",
+  "refresh_expires_at": "2025-01-22T00:00:00Z",
   "user": {
     "username": "admin",
     "platform_admin": true,
@@ -63,6 +67,28 @@ Exchange username/password for a session token.
 curl -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "password"}'
+```
+
+---
+
+### POST `/api/v1/auth/refresh`
+
+Exchange one login's refresh token for a new bearer and a new refresh token. The bearer is not required. The refresh token you send stops working. Another login for the same person is left alone. An unknown, expired, or reused refresh token is `401`.
+
+**Request body:**
+```json
+{
+  "refresh_token": "<opaque refresh token>"
+}
+```
+
+**Response:** the same shape as login.
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "<opaque refresh token>"}'
 ```
 
 ---
@@ -171,11 +197,11 @@ curl -I http://localhost:8000/api/v1/auth/oidc/login
 
 ### GET `/api/v1/auth/oidc/callback`
 
-Complete OIDC flow and redirect to UI with session token in URL fragment.
+Complete OIDC flow and redirect the browser to `/ui#token=...&refresh=...`. The fragment is not sent back to the server.
 
 **Query params:** `code`, `state`
 
-**Response:** HTTP 302 redirect to `/ui#token=...`
+**Response:** HTTP 302 redirect to `/ui#token=...&refresh=...`
 
 ---
 

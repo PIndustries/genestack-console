@@ -213,7 +213,7 @@ def test_callback_provisions_user_without_memberships(client, monkeypatch):
     assert resp.status_code == 302, resp.text
     location = resp.headers["location"]
     assert location.startswith("/ui#token=")
-    token = location.split("#token=", 1)[1]
+    token = location.split("#token=", 1)[1].split("&", 1)[0]
     assert token
 
     who = client.get(
@@ -240,7 +240,7 @@ def test_callback_provisions_user_with_default_tenant_and_role(client, monkeypat
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
-    token = resp.headers["location"].split("#token=", 1)[1]
+    token = resp.headers["location"].split("#token=", 1)[1].split("&", 1)[0]
     who = client.get(
         "/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"}
     ).json()
@@ -268,7 +268,7 @@ def test_callback_reuses_existing_local_account(client, admin_headers, monkeypat
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
-    token = resp.headers["location"].split("#token=", 1)[1]
+    token = resp.headers["location"].split("#token=", 1)[1].split("&", 1)[0]
     who = client.get(
         "/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"}
     ).json()
@@ -368,7 +368,7 @@ def test_hosted_mode_portal_issuer(client, admin_headers, monkeypatch):
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
-    token = resp.headers["location"].split("#token=", 1)[1]
+    token = resp.headers["location"].split("#token=", 1)[1].split("&", 1)[0]
     who = client.get(
         "/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"}
     ).json()
@@ -465,7 +465,7 @@ def test_provision_user_honors_gsc_tenant_id_claim(client, monkeypatch):
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
-    token = resp.headers["location"].split("#token=", 1)[1]
+    token = resp.headers["location"].split("#token=", 1)[1].split("&", 1)[0]
     who = client.get(
         "/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"}
     ).json()
@@ -489,7 +489,7 @@ def test_provision_user_gsc_tenant_id_fallback_to_default(client, monkeypatch):
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
-    token = resp.headers["location"].split("#token=", 1)[1]
+    token = resp.headers["location"].split("#token=", 1)[1].split("&", 1)[0]
     who = client.get(
         "/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"}
     ).json()
@@ -526,7 +526,7 @@ def test_provision_user_gsc_role_defaults_to_viewer(client, monkeypatch):
         follow_redirects=False,
     )
     assert resp.status_code == 302, resp.text
-    token = resp.headers["location"].split("#token=", 1)[1]
+    token = resp.headers["location"].split("#token=", 1)[1].split("&", 1)[0]
     who = client.get(
         "/api/v1/auth/whoami", headers={"Authorization": f"Bearer {token}"}
     ).json()

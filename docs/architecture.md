@@ -102,9 +102,13 @@ Two credential kinds coexist:
   platform-admin break-glass credentials that bypass tenant scoping.
 - **User accounts + sessions** — `POST /api/v1/auth/login` exchanges
   username/password for a `SessionToken` (Bearer); passwords are hashed with
-  PBKDF2-SHA256 (600k iterations, stdlib only); tokens expire after
-  `auth.session_ttl_hours` (default 12). `POST …/logout` invalidates;
-  `GET …/whoami` reports identity, `platform_admin`, and tenant memberships.
+  PBKDF2-SHA256 (600k iterations, stdlib only); the bearer expires after
+  `auth.session_ttl_hours` (default 12). A second login inserts another row.
+  `POST …/auth/refresh` rotates that row only: new bearer, new refresh token
+  (SHA-256 stored, raw value returned once), and the presented refresh token
+  stops working. Refresh life is `auth.refresh_ttl_hours` (default 168).
+  `POST …/logout` deletes the presented session. `GET …/whoami` reports
+  identity, `platform_admin`, and tenant memberships.
 
 ```
 Tenant ──< Membership (role: viewer|operator|admin) >── User
@@ -788,7 +792,7 @@ Service enablement is **allow-listed** (e.g. `placement` ok; `rm` rejected).
 | `dry_run` in config.yaml | `true` | Destructive steps are logged, not executed; per-env `dry_run` field overrides |
 | API keys + roles | config.yaml | `X-API-Key` header; viewer < operator < admin; static keys = platform-admin break-glass |
 | Tenant isolation | enforced | Env lists filtered by membership; cross-tenant access → 403 |
-| User sessions | 12 h TTL | PBKDF2-SHA256 (600k) passwords; `auth.session_ttl_hours`; logout invalidates |
+| User sessions | 12 h bearer, 168 h refresh | PBKDF2-SHA256 (600k) passwords; each login is its own row; refresh rotates that row only; logout drops the presented session |
 | Service allowlist | enforced | Blocks shell injection / unknown services |
 | Per-env mutating-job lock | enforced | Second mutating job for same env → HTTP 409 |
 | Per-op job timeouts | 600 s default, 6 h ceiling | Long ops override in the catalog (deploy 6 h, pipeline 4 h); running jobs past deadline recovered to `failed` on startup; worker also abandons all running once at start |

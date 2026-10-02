@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -53,9 +53,22 @@ def run_retention_sweep(db: Session, settings: Settings) -> dict[str, int]:
         delete(AuditLog).where(AuditLog.timestamp < cutoff)
     ).rowcount
 
-    # Session tokens: expiry is the retention rule.
+    # A bearer can expire while its refresh token is still good. Drop the
+    # row once the refresh token is gone, or when an older row has no
+    # refresh token and the bearer itself has expired.
     counts["session_tokens"] = db.execute(
-        delete(SessionToken).where(SessionToken.expires_at < now)
+        delete(SessionToken).where(
+            or_(
+                and_(
+                    SessionToken.refresh_expires_at.is_not(None),
+                    SessionToken.refresh_expires_at < now,
+                ),
+                and_(
+                    SessionToken.refresh_expires_at.is_(None),
+                    SessionToken.expires_at < now,
+                ),
+            )
+        )
     ).rowcount
 
     # Agent command relay rows: short-lived plumbing, 7 days by default.

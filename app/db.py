@@ -57,6 +57,11 @@ _ALERT_RULE_COLUMN_MIGRATIONS = {
     "channel_id": "VARCHAR(36)",
 }
 
+_SESSION_TOKEN_COLUMN_MIGRATIONS = {
+    "refresh_token_hash": "VARCHAR(64)",
+    "refresh_expires_at": "TIMESTAMP",
+}
+
 _BAREMETAL_NODE_COLUMN_MIGRATIONS = {
     "next_boot": "VARCHAR(16) DEFAULT 'disk' NOT NULL",
     "boot_stage": "VARCHAR(32) DEFAULT 'new' NOT NULL",
@@ -233,6 +238,7 @@ def _column_migrations() -> tuple[tuple[str, dict[str, str]], ...]:
         ("hardware_accounts", _HARDWARE_ACCOUNT_COLUMN_MIGRATIONS),
         ("baremetal_nodes", _BAREMETAL_NODE_COLUMN_MIGRATIONS),
         ("alert_rules", _ALERT_RULE_COLUMN_MIGRATIONS),
+        ("session_tokens", _SESSION_TOKEN_COLUMN_MIGRATIONS),
     )
 
 

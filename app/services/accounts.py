@@ -69,35 +69,109 @@ def create_user(
     return user
 
 
+def _aware(moment: datetime) -> datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def _refresh_material() -> tuple[str, str, datetime]:
+    """Raw refresh token, its SHA-256 hex, and when that token stops working."""
+    raw = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    expires = _utcnow() + timedelta(hours=get_settings().refresh_ttl_hours)
+    return raw, digest, expires
+
+
+def _refresh_alive(session: SessionToken, now: datetime) -> bool:
+    expires = session.refresh_expires_at
+    if expires is None:
+        return False
+    return _aware(expires) > now
+
+
 def create_session(db: Session, user: User) -> SessionToken:
-    """Issue a new session token for the user (TTL from settings). Caller commits."""
-    ttl_hours = get_settings().session_ttl_hours
+    """Issue a new session for the user. Does not touch that user's other sessions.
+
+    The raw refresh token is stashed on ``session.raw_refresh_token`` for the
+    caller to return once. Only the hash is stored. Caller commits.
+    """
+    settings = get_settings()
+    raw, digest, refresh_expires = _refresh_material()
     session = SessionToken(
         token=secrets.token_urlsafe(32),
         user_id=user.id,
-        expires_at=_utcnow() + timedelta(hours=ttl_hours),
+        expires_at=_utcnow() + timedelta(hours=settings.session_ttl_hours),
+        refresh_token_hash=digest,
+        refresh_expires_at=refresh_expires,
     )
+    session.raw_refresh_token = raw  # type: ignore[attr-defined]
     db.add(session)
     db.flush()
     return session
 
 
 def resolve_session(db: Session, token: str) -> User | None:
-    """Return the session's active user, or None; expired tokens are deleted."""
+    """Return the session's active user, or None.
+
+    An expired bearer is not a reason to drop a refresh token that is still
+    inside its own lifetime. The row is deleted when the refresh token is
+    missing or also expired.
+    """
     session = db.get(SessionToken, token)
     if session is None:
         return None
-    expires_at = session.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at <= _utcnow():
+    now = _utcnow()
+    if _aware(session.expires_at) <= now:
+        if not _refresh_alive(session, now):
+            db.delete(session)
+            db.commit()
+        return None
+    user = db.get(User, session.user_id)
+    if user is None or not user.active:
+        return None
+    return user
+
+
+def refresh_session(db: Session, raw_refresh_token: str) -> SessionToken | None:
+    """Exchange one refresh token for a new bearer and a new refresh token.
+
+    The previous row for that login is deleted. Other logins for the same
+    user are left in place. Returns None when the token is unknown, expired,
+    or the user is inactive. Caller commits on success. An expired token is
+    deleted here.
+    """
+    presented = (raw_refresh_token or "").strip()
+    if not presented:
+        return None
+    digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
+    session = db.scalar(
+        select(SessionToken).where(SessionToken.refresh_token_hash == digest)
+    )
+    if session is None:
+        return None
+    now = _utcnow()
+    if not _refresh_alive(session, now):
         db.delete(session)
         db.commit()
         return None
     user = db.get(User, session.user_id)
     if user is None or not user.active:
         return None
-    return user
+    settings = get_settings()
+    raw, new_digest, refresh_expires = _refresh_material()
+    replacement = SessionToken(
+        token=secrets.token_urlsafe(32),
+        user_id=session.user_id,
+        expires_at=now + timedelta(hours=settings.session_ttl_hours),
+        refresh_token_hash=new_digest,
+        refresh_expires_at=refresh_expires,
+    )
+    replacement.raw_refresh_token = raw  # type: ignore[attr-defined]
+    db.delete(session)
+    db.add(replacement)
+    db.flush()
+    return replacement
 
 
 def delete_session(db: Session, token: str) -> None:

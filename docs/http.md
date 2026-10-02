@@ -6,10 +6,11 @@ The install chapter is [Genestack Console](genestack-guide.md). The jobs the API
 
 ## How a call is authenticated
 
-Two logins work at the same time.
+Two logins work at the same time. Each login is its own session. Logging out of one leaves the other in place.
 
-- A person posts a username and password to `POST /api/v1/auth/login` and sends the session back as a Bearer token. The session expires. The default life is 12 hours, from `auth.session_ttl_hours`. `POST /api/v1/auth/logout` drops it. `GET /api/v1/auth/whoami` says who you are, whether you are a platform admin, and which tenants you belong to.
-- An API key from `config.yaml` is sent as `X-API-Key`. It is a platform admin. It skips tenant checks. Use it when the user accounts cannot be used.
+- A person posts a username and password to `POST /api/v1/auth/login` and sends the session back as a Bearer token. The session expires. The default life is 12 hours, from `auth.session_ttl_hours`. The same response includes a refresh token for that login. `POST /api/v1/auth/logout` drops that session. `GET /api/v1/auth/whoami` says who you are, whether you are a platform admin, and which tenants you belong to.
+- `POST /api/v1/auth/refresh` posts that refresh token. It does not need the Bearer token. The response is a new Bearer token and a new refresh token for that same login. The refresh token you just sent stops working. The other login is left alone. The refresh token lasts `auth.refresh_ttl_hours` hours. The default is 168, which is 7 days. After that, the person signs in again. A refresh token that is unknown, expired, or reused is refused. That refusal does not drop the other login.
+- An API key from `config.yaml` is sent as `X-API-Key`. It is a platform admin. It skips tenant checks. Use it when the user accounts cannot be used. An API key has no refresh token.
 
 A route that names an environment checks your membership in that environment's tenant. A viewer can read. An operator can run the jobs marked for an operator. An admin can change the tenant and run the install. A person from another tenant is refused.
 
@@ -34,7 +35,7 @@ A route that names an environment checks your membership in that environment's t
 
 | File | What it serves |
 | --- | --- |
-| `app/routers/auth.py` | Login, logout, whoami, and the optional company login. |
+| `app/routers/auth.py` | Login, refresh, logout, whoami, and the optional company login. |
 | `app/routers/tenants.py` | Tenants and memberships. |
 | `app/routers/environments.py` | Create and list environments. An environment is one cloud. |
 | `app/routers/envconfig.py` | The settings document for one environment, and its older versions. Saving does not edit `/etc/genestack` by itself. A job copies the document onto the deploy host. |

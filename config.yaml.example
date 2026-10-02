@@ -32,8 +32,11 @@ auth:
     gsc-admin-REPLACE_ME: admin
     gsc-operator-REPLACE_ME: operator
     gsc-viewer-REPLACE_ME: viewer
-  # Hours a login session token stays valid.
+  # Hours a login's bearer token stays valid.
   session_ttl_hours: 12
+  # Hours that same login's refresh token can mint a new bearer.
+  # Each login is its own session. The default is 7 days.
+  refresh_ttl_hours: 168
   # DEV ONLY: when true, every request is authenticated as platform-admin
   # with NO credentials and the portal skips the login screen. Convenient
   # for local development on a private interface. NEVER enable on anything

@@ -1,5 +1,5 @@
 // app.js — portal shell: login, whoami, hash router, topbar.
-import { api, setUnauthorizedHandler, getKey, setKey, clearKey, esc, toast } from "./api.js";
+import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clearRefresh, esc, toast } from "./api.js";
 import { store, loadEnvs } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
@@ -282,6 +282,7 @@ function logout(msg) {
   closeAll(); // no stream may outlive the session that authorized it
   serverLogout();
   clearKey();
+  clearRefresh();
   store.role = null;
   store.keyName = null;
   store.username = null;
@@ -363,10 +364,12 @@ async function doLogin() {
     // Session tokens resolve through the same X-API-Key header as static keys,
     // so the token goes into the existing storage slot untouched.
     setKey(res.token);
+    setRefresh(res.refresh_token);
     await establishSession();
     await enterApp();
   } catch (e) {
     clearKey();
+    clearRefresh();
     loginError(e.status === 401 ? "Invalid username or password." : e.message || String(e));
   }
 }
@@ -378,6 +381,9 @@ async function doKeyLogin() {
     loginError("Enter an API key.");
     return;
   }
+  // An API key has no refresh token. Drop any stored one before the check,
+  // so a rejected key cannot sign the previous person back in.
+  clearRefresh();
   setKey(key);
   try {
     await establishSession();
@@ -389,13 +395,17 @@ async function doKeyLogin() {
 }
 
 // ---------- OIDC/SSO ----------
-// The callback redirects to /ui#token=<session-token>. A fragment is never sent
-// to a server, so the token cannot land in access/proxy logs; read it once and
-// strip it from the URL (and browser history) immediately.
+// The callback redirects to /ui#token=<session>&refresh=<refresh>. A fragment
+// is never sent to a server, so neither value can land in access/proxy logs.
+// Read both once and strip them from the URL (and browser history) immediately.
 function consumeOidcToken() {
-  const m = (location.hash || "").match(/^#token=([^&]+)/);
-  if (!m) return;
-  setKey(decodeURIComponent(m[1]));
+  const hash = location.hash || "";
+  const tokenMatch = hash.match(/^#token=([^&]+)/);
+  if (!tokenMatch) return;
+  setKey(decodeURIComponent(tokenMatch[1]));
+  const refreshMatch = hash.match(/[?&]refresh=([^&]+)/);
+  if (refreshMatch) setRefresh(decodeURIComponent(refreshMatch[1]));
+  else clearRefresh();
   history.replaceState(null, "", location.pathname + location.search + "#/fleet");
 }
 

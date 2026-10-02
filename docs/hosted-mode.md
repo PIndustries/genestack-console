@@ -69,7 +69,7 @@ For a console that operators open directly, with no portal in the path:
 
 ### Authentication
 
-- **Password Login Always Available**: Local username/password accounts work out of the box via `POST /api/v1/auth/login`.
+- **Password Login Always Available**: Local username/password accounts work out of the box via `POST /api/v1/auth/login`. The response includes a refresh token for that login. A second login is a second session.
 - **Static API Keys**: Platform-admin break-glass credentials defined in `config.yaml` under `auth.api_keys`.
 - **Optional OIDC**: You may enable OIDC with your own identity provider (Keycloak, Auth0, Okta, etc.) while keeping password login as a fallback.
 
@@ -83,6 +83,7 @@ auth:
     gsc-admin-REPLACE_ME: admin
     gsc-operator-REPLACE_ME: operator
   session_ttl_hours: 12
+  refresh_ttl_hours: 168
 
 oidc:
   enabled: false  # Password login is always available

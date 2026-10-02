@@ -381,7 +381,10 @@ class Membership(Base):
 
 
 class SessionToken(Base):
-    """Opaque bearer token issued at login; no refresh tokens."""
+    """One login. The bearer token and its refresh token live on this row.
+
+    A second login inserts another row. Refresh replaces this row only.
+    """
 
     __tablename__ = "session_tokens"
 
@@ -394,6 +397,14 @@ class SessionToken(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+    # SHA-256 hex of the raw refresh token. The raw value is returned once.
+    # Null on rows created before refresh tokens existed.
+    refresh_token_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
+    refresh_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False

@@ -19,7 +19,7 @@ The API process does not run the install. It writes a row and returns. A long de
 
 ## What the API does with a click
 
-1. The route checks the login. A session is a Bearer token from `POST /api/v1/auth/login`. An API key is the `X-API-Key` header. Passwords are stored as a PBKDF2-SHA256 hash. They are not encrypted with `secret_key`. The session life is `auth.session_ttl_hours`, 12 hours unless you change it.
+1. The route checks the login. A session is a Bearer token from `POST /api/v1/auth/login`. An API key is the `X-API-Key` header. Passwords are stored as a PBKDF2-SHA256 hash. They are not encrypted with `secret_key`. The session life is `auth.session_ttl_hours`, 12 hours unless you change it. Each login is its own session. `POST /api/v1/auth/refresh` replaces that session's bearer and its refresh token. The other login stays. The refresh token lasts `auth.refresh_ttl_hours`, 168 hours unless you change it.
 2. A route that names an environment checks your membership in that environment's tenant. A person from another tenant is refused.
 3. A read returns JSON from the database, or from the last snapshot the collector wrote.
 4. A change calls `execute_operation` in `app/services/job_runner.py`. That inserts a job row with status `queued` and returns the job id. The default is not to run the job inside the request.
@@ -170,7 +170,8 @@ One file. `python -m app.cli make-config` prints a new one, with a generated `se
 | `server.host`, `server.port` | `127.0.0.1`, `8080` in the installed unit | Where the page listens. The code default, if the file omits the host, is every interface, and startup refuses that while the secrets are still the examples. |
 | `secret_key` | a public example string | Fernet key for secrets in the database. Replace it. |
 | `auth.api_keys` | example keys | Break-glass platform admins, sent as `X-API-Key`. Replace them. |
-| `auth.session_ttl_hours` | 12 | Session life. |
+| `auth.session_ttl_hours` | 12 | Bearer token life for one login. |
+| `auth.refresh_ttl_hours` | 168 | How long that login's refresh token can mint a new bearer. A second login has its own. |
 | `auth.dev_auto_login` | false | Every request is a platform admin, with no password. Leave it off on a machine that is not your laptop. |
 | `dry_run` | true | Jobs log commands and do not apply them. |
 | `database_url` | `sqlite:///./data/console.db` | Postgres when you set a Postgres URL. |

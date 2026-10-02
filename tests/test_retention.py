@@ -120,6 +120,37 @@ def test_sweep_deletes_expired_session_tokens_keeps_valid(db, settings):
     assert db.get(SessionToken, valid_token) is not None
 
 
+def test_sweep_keeps_a_live_refresh_token(db, settings):
+    """A dead bearer with a live refresh token stays. An expired refresh token goes."""
+    from app.models import SessionToken, User
+    from app.services.retention import run_retention_sweep
+
+    user = User(username=f"retention-refresh-{uuid.uuid4().hex[:8]}")
+    db.add(user)
+    db.flush()
+    held = SessionToken(
+        token=f"held-{uuid.uuid4().hex}",
+        user_id=user.id,
+        expires_at=_ago(hours=1),
+        refresh_token_hash=f"held-{uuid.uuid4().hex}",
+        refresh_expires_at=_future(hours=1),
+    )
+    spent = SessionToken(
+        token=f"spent-{uuid.uuid4().hex}",
+        user_id=user.id,
+        expires_at=_ago(hours=2),
+        refresh_token_hash=f"spent-{uuid.uuid4().hex}",
+        refresh_expires_at=_ago(hours=1),
+    )
+    db.add_all([held, spent])
+    db.commit()
+    held_token, spent_token = held.token, spent.token
+
+    run_retention_sweep(db, settings)
+    assert db.get(SessionToken, held_token) is not None
+    assert db.get(SessionToken, spent_token) is None
+
+
 def test_sweep_deletes_old_agent_commands_keeps_recent(db, settings, env_id):
     from app.models import AgentCommand
     from app.services.retention import run_retention_sweep

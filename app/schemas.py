@@ -109,6 +109,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1)
+
+
 class LoginUser(BaseModel):
     username: str
     platform_admin: bool
@@ -118,6 +122,8 @@ class LoginUser(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     expires_at: datetime
+    refresh_token: str
+    refresh_expires_at: datetime
     user: LoginUser
 
 

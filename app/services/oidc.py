@@ -19,9 +19,9 @@ Security notes:
   - State and nonce are single-use and expire after STATE_TTL_SECONDS.
   - Tokens, codes, and claim payloads are never logged; error paths raise
     generic HTTP errors without embedding provider responses.
-  - The session token is handed to the UI via a URL fragment (``#token=…``),
-    which browsers do not send to servers or proxies, so it cannot appear in
-    access logs.
+  - The session token and its refresh token are handed to the UI via a URL
+    fragment (``#token=…&refresh=…``), which browsers do not send to servers
+    or proxies, so neither value can appear in access logs.
 """
 
 from __future__ import annotations

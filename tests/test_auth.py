@@ -170,6 +170,177 @@ def test_login_token_works_on_whoami(client, admin_headers):
     assert who["platform_admin"] is False
 
 
+def test_two_logins_stay_independent(client, admin_headers):
+    """A second login does not replace the first. Logout drops only its own session."""
+    username = f"login-two-{uuid.uuid4().hex[:8]}"
+    _create_user(client, admin_headers, username, "pw-two")
+    first = _login(client, username, "pw-two")
+    second = _login(client, username, "pw-two")
+    assert first["token"] != second["token"]
+    assert first["refresh_token"] != second["refresh_token"]
+    assert first["refresh_token"]
+    assert second["refresh_token"]
+
+    headers_first = {"Authorization": f"Bearer {first['token']}"}
+    headers_second = {"Authorization": f"Bearer {second['token']}"}
+    assert client.get("/api/v1/auth/whoami", headers=headers_first).status_code == 200
+    assert client.get("/api/v1/auth/whoami", headers=headers_second).status_code == 200
+
+    resp = client.post("/api/v1/auth/logout", headers=headers_first)
+    assert resp.status_code == 200, resp.text
+    assert client.get("/api/v1/auth/whoami", headers=headers_first).status_code == 401
+    assert client.get("/api/v1/auth/whoami", headers=headers_second).status_code == 200
+
+
+def test_refresh_replaces_one_session(client, admin_headers):
+    """Refresh mints a new bearer for that login. The other login keeps working."""
+    username = f"login-refresh-{uuid.uuid4().hex[:8]}"
+    _create_user(client, admin_headers, username, "pw-refresh")
+    first = _login(client, username, "pw-refresh")
+    second = _login(client, username, "pw-refresh")
+
+    resp = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": first["refresh_token"]},
+    )
+    assert resp.status_code == 200, resp.text
+    renewed = resp.json()
+    assert renewed["token"] != first["token"]
+    assert renewed["refresh_token"] != first["refresh_token"]
+    assert renewed["user"]["username"] == username
+
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {renewed['token']}"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {first['token']}"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {second['token']}"},
+        ).status_code
+        == 200
+    )
+
+    # The refresh token that was just used cannot be used again.
+    again = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": first["refresh_token"]},
+    )
+    assert again.status_code == 401
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {renewed['token']}"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {second['token']}"},
+        ).status_code
+        == 200
+    )
+
+    # The second login can still refresh on its own.
+    other = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": second["refresh_token"]},
+    )
+    assert other.status_code == 200, other.text
+    assert other.json()["token"] != second["token"]
+    assert other.json()["token"] != renewed["token"]
+
+
+def test_refresh_works_after_the_bearer_expires(client, admin_headers):
+    username = f"login-expired-{uuid.uuid4().hex[:8]}"
+    _create_user(client, admin_headers, username, "pw-expired")
+    issued = _login(client, username, "pw-expired")
+    from datetime import datetime, timedelta, timezone
+
+    from app.db import SessionLocal
+    from app.models import SessionToken
+
+    with SessionLocal() as db:
+        row = db.get(SessionToken, issued["token"])
+        row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {issued['token']}"},
+        ).status_code
+        == 401
+    )
+    resp = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": issued["refresh_token"]},
+    )
+    assert resp.status_code == 200, resp.text
+    renewed = resp.json()
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {renewed['token']}"},
+        ).status_code
+        == 200
+    )
+
+
+def test_refresh_rejects_unknown_token(client):
+    resp = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": "not-a-real-refresh-token"},
+    )
+    assert resp.status_code == 401
+
+
+def test_expired_refresh_does_not_drop_the_other_login(client, admin_headers):
+    """A refresh token past its own life is refused. The other login still works."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.db import SessionLocal
+    from app.models import SessionToken
+
+    username = f"login-refresh-exp-{uuid.uuid4().hex[:8]}"
+    _create_user(client, admin_headers, username, "pw-refresh-exp")
+    first = _login(client, username, "pw-refresh-exp")
+    second = _login(client, username, "pw-refresh-exp")
+    with SessionLocal() as db:
+        row = db.get(SessionToken, first["token"])
+        row.refresh_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+
+    resp = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": first["refresh_token"]},
+    )
+    assert resp.status_code == 401
+    assert (
+        client.get(
+            "/api/v1/auth/whoami",
+            headers={"Authorization": f"Bearer {second['token']}"},
+        ).status_code
+        == 200
+    )
+    other = client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": second["refresh_token"]},
+    )
+    assert other.status_code == 200, other.text
+
+
 def test_login_wrong_password_returns_401(client, admin_headers):
     username = f"login-bad-{uuid.uuid4().hex[:8]}"
     _create_user(client, admin_headers, username, "pw-right")

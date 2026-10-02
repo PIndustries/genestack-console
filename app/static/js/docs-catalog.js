@@ -15,8 +15,14 @@
         {
           m: "POST",
           p: "/api/v1/auth/login",
-          d: "Username and password in, session token out.",
+          d: "Username and password in. A bearer token and a refresh token for that login come back. A second login is a second session.",
           body: '{"username":"you","password":"…"}',
+        },
+        {
+          m: "POST",
+          p: "/api/v1/auth/refresh",
+          d: "Post one login's refresh token. A new bearer and a new refresh token come back. The other login stays.",
+          body: '{"refresh_token":"…"}',
         },
         { m: "GET", p: "/api/v1/auth/whoami", d: "Who you are, role, and which tenants you belong to." },
         { m: "POST", p: "/api/v1/auth/logout", d: "Drop the session. No-op for static API keys." },

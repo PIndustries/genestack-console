@@ -33,6 +33,7 @@ from app.schemas import (
     LoginResponse,
     LoginUser,
     Principal,
+    RefreshRequest,
     TenantMembershipRead,
     TicketResponse,
 )
@@ -133,17 +134,60 @@ def login(
     _login_throttle.record_success(throttle_key)
     session = accounts.create_session(db, user)
     # Capture before commit: attribute refresh after commit returns naive datetimes on SQLite
-    token, expires_at = session.token, session.expires_at
+    token = session.token
+    expires_at = session.expires_at
+    refresh_token = session.raw_refresh_token
+    refresh_expires_at = session.refresh_expires_at
     db.commit()
+    return _login_response(user, db, token, expires_at, refresh_token, refresh_expires_at)
+
+
+def _login_response(
+    user: User,
+    db: Session,
+    token: str,
+    expires_at,
+    refresh_token: str,
+    refresh_expires_at,
+) -> LoginResponse:
     return LoginResponse(
         token=token,
         expires_at=expires_at,
+        refresh_token=refresh_token,
+        refresh_expires_at=refresh_expires_at,
         user=LoginUser(
             username=user.username,
             platform_admin=user.platform_admin,
             tenants=_tenants_for(db, user.id),
         ),
     )
+
+
+@router.post("/refresh", response_model=LoginResponse)
+def refresh(body: RefreshRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    """Exchange one session's refresh token for a new bearer and a new refresh token.
+
+    The other login for the same user is not touched. The refresh token that
+    was just presented stops working.
+    """
+    session = accounts.refresh_session(db, body.refresh_token)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    user = db.get(User, session.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    token = session.token
+    expires_at = session.expires_at
+    refresh_token = session.raw_refresh_token
+    refresh_expires_at = session.refresh_expires_at
+    db.commit()
+    return _login_response(user, db, token, expires_at, refresh_token, refresh_expires_at)
 
 
 @router.post("/logout")
@@ -256,10 +300,10 @@ def oidc_callback(
 
     Validates state and nonce, exchanges the code (id_token signature/iss/aud
     verified by app.services.oidc), looks up or auto-provisions the local
-    user, and issues a normal console session. The token travels in the URL
-    fragment (``/ui#token=…``): fragments are never sent to servers, so the
-    token cannot appear in access logs or proxy logs. The UI reads it once and
-    strips it from history.
+    user, and issues a normal console session. The bearer and the refresh
+    token travel in the URL fragment (``/ui#token=…&refresh=…``): fragments
+    are never sent to servers, so neither value can appear in access logs or
+    proxy logs. The UI reads them once and strips them from history.
     """
     settings = get_settings()
     if not oidc.oidc_enabled(settings):
@@ -307,6 +351,7 @@ def oidc_callback(
         )
     session = accounts.create_session(db, user)
     token = session.token  # capture before commit (never logged)
+    refresh_token = session.raw_refresh_token
     db.commit()
     if flow["native"]:
         response = RedirectResponse(url="/ui", status_code=status.HTTP_302_FOUND)
@@ -321,4 +366,7 @@ def oidc_callback(
         )
         response.headers["Cache-Control"] = "no-store"
         return response
-    return RedirectResponse(url=f"/ui#token={token}", status_code=status.HTTP_302_FOUND)
+    return RedirectResponse(
+        url=f"/ui#token={token}&refresh={refresh_token}",
+        status_code=status.HTTP_302_FOUND,
+    )

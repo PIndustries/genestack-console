@@ -64,6 +64,7 @@ def test_resolve_session_expires_and_deletes(db):
     db.commit()
     session = accounts.create_session(db, user)
     session.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    session.refresh_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
     db.commit()
     token = session.token
 
@@ -72,6 +73,22 @@ def test_resolve_session_expires_and_deletes(db):
     from app.models import SessionToken
 
     assert db.get(SessionToken, token) is None
+
+
+def test_resolve_session_keeps_row_while_refresh_is_alive(db):
+    """An expired bearer does not delete a refresh token that still works."""
+    from app.models import SessionToken
+
+    username = f"acct-hold-{uuid.uuid4().hex[:8]}"
+    user = accounts.create_user(db, username, "pw")
+    db.commit()
+    session = accounts.create_session(db, user)
+    session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    db.commit()
+    token = session.token
+
+    assert accounts.resolve_session(db, token) is None
+    assert db.get(SessionToken, token) is not None
 
 
 def test_role_helpers(db):

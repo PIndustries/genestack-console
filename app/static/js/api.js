@@ -1,10 +1,11 @@
 // api.js — fetch wrapper (X-API-Key auth) + shared UI helpers.
 
-// The API key (or session token) lives in sessionStorage, NOT localStorage:
-// localStorage outlives the tab and is shared across tabs, so a key leaked
-// via XSS there is a persistent platform-admin credential. A fresh tab
-// requires a fresh login.
+// The API key (or session token) and the refresh token live in
+// sessionStorage, NOT localStorage: localStorage outlives the tab and is
+// shared across tabs, so a key leaked via XSS there is a persistent
+// platform-admin credential. A fresh tab requires a fresh login.
 const KEY_STORAGE = "gs_console_api_key";
+const REFRESH_STORAGE = "gs_console_refresh_token";
 
 export class ApiError extends Error {
   constructor(status, message, opts = {}) {
@@ -30,6 +31,59 @@ export function setKey(key) {
 }
 export function clearKey() {
   sessionStorage.removeItem(KEY_STORAGE);
+}
+export function getRefresh() {
+  return sessionStorage.getItem(REFRESH_STORAGE) || "";
+}
+export function setRefresh(token) {
+  if (token) sessionStorage.setItem(REFRESH_STORAGE, token);
+  else sessionStorage.removeItem(REFRESH_STORAGE);
+}
+export function clearRefresh() {
+  sessionStorage.removeItem(REFRESH_STORAGE);
+}
+
+let refreshInFlight = null;
+
+async function refreshSession() {
+  const refresh = getRefresh();
+  if (!refresh) return false;
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      let res;
+      try {
+        res = await fetch("/api/v1/auth/refresh", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refresh }),
+        });
+      } catch {
+        return false;
+      }
+      if (!res.ok) {
+        clearKey();
+        clearRefresh();
+        return false;
+      }
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        return false;
+      }
+      if (!data || !data.token || !data.refresh_token) {
+        clearKey();
+        clearRefresh();
+        return false;
+      }
+      setKey(data.token);
+      setRefresh(data.refresh_token);
+      return true;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 const DEFAULT_TIMEOUT = 30000; // 30 s
@@ -103,10 +157,13 @@ async function authedFetch(path, opts = {}) {
 }
 
 export async function api(path, opts = {}) {
+  const retried = !!opts._retried;
   const headers = Object.assign({ Accept: "application/json" }, opts.headers || {});
   if (opts.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+  const clean = Object.assign({}, opts);
+  delete clean._retried;
 
-  const res = await authedFetch(path, { ...opts, headers });
+  const res = await authedFetch(path, { ...clean, headers });
   const text = await res.text();
   let data = null;
   try {
@@ -115,13 +172,27 @@ export async function api(path, opts = {}) {
     data = text;
   }
 
-  if (!res.ok) throw httpError(res, data, text);
+  if (!res.ok) {
+    const skipRefresh =
+      path === "/api/v1/auth/login" ||
+      path === "/api/v1/auth/refresh" ||
+      path === "/api/v1/auth/logout";
+    if (res.status === 401 && !retried && !skipRefresh && getRefresh()) {
+      const renewed = await refreshSession();
+      if (renewed) return api(path, { ...opts, _retried: true });
+    }
+    throw httpError(res, data, text);
+  }
   return data;
 }
 
 // Authenticated file download (kubeconfig / talosconfig / similar blobs).
 export async function downloadAuth(path, filename) {
-  const res = await authedFetch(path, { headers: { Accept: "*/*" } });
+  let res = await authedFetch(path, { headers: { Accept: "*/*" } });
+  if (res.status === 401 && getRefresh()) {
+    const renewed = await refreshSession();
+    if (renewed) res = await authedFetch(path, { headers: { Accept: "*/*" } });
+  }
   if (!res.ok) {
     const text = await res.text();
     let data = null;

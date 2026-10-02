@@ -152,6 +152,9 @@ class Settings(BaseModel):
     ovh_app_secret: str = ""
     job_timeout_seconds: int = 600
     session_ttl_hours: int = 12
+    # How long a refresh token can mint a new session. Longer than the
+    # bearer token so a client can continue after the bearer expires.
+    refresh_ttl_hours: int = 168
     collector_enabled: bool = True
     collector_interval_seconds: int = 60
     collector_probe_timeout_seconds: int = 15
@@ -405,6 +408,10 @@ def load_settings(config_path: Path | None = None) -> Settings:
         session_ttl_hours = int(auth.get("session_ttl_hours", 12))
     except (TypeError, ValueError):
         session_ttl_hours = 12
+    try:
+        refresh_ttl_hours = int(auth.get("refresh_ttl_hours", 168))
+    except (TypeError, ValueError):
+        refresh_ttl_hours = 168
 
     collector_enabled = collector.get("enabled", True)
     if isinstance(collector_enabled, str):
@@ -542,6 +549,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         ovh_app_secret=ovh_app_secret,
         job_timeout_seconds=max(30, min(int(timeout), 86400)),
         session_ttl_hours=max(1, session_ttl_hours),
+        refresh_ttl_hours=max(1, refresh_ttl_hours),
         collector_enabled=bool(collector_enabled),
         collector_interval_seconds=max(
             5, _int_or(collector.get("interval_seconds"), 60)

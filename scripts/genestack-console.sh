@@ -1001,6 +1001,7 @@ auth:
     ${operator_key}: operator
     ${viewer_key}: viewer
   session_ttl_hours: 12
+  refresh_ttl_hours: 168
   # Production posture: real login required. NEVER enable on anything exposed.
   dev_auto_login: false
 
