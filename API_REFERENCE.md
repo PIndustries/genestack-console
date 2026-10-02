@@ -641,11 +641,11 @@ Preview rendered config-dir-relative files for the current document (secrets mas
 
 ## Servers
 
-Server management for an environment. Non-MAAS (static) server endpoints are shown below.
+Server management for an environment. These routes are for hosts you already have an address for. Installing Talos is the bare-metal path: the console answers DHCP and serves the boot file.
 
 ### GET `/api/v1/environments/{environment_id}/servers`
 
-List servers: union of config doc entries and live MAAS machines.
+List the servers saved for this environment.
 
 **Response:**
 ```json
@@ -670,7 +670,7 @@ List servers: union of config doc entries and live MAAS machines.
 
 ### POST `/api/v1/environments/{environment_id}/servers/static`
 
-Add or update a static (non-MAAS) host. Creates a new config version. Requires operator.
+Add or update a host by address. Creates a new config version. Requires operator.
 
 **Request body:**
 ```json

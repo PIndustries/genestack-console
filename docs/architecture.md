@@ -294,35 +294,11 @@ The operate step of the workflow surfaces the latest `genestack.verify` job
 (`verify: {job_id, status, level, finished_at}` in details) and the UI puts
 verify-level buttons with a live result pill plus the day-2 buttons there.
 
-## MAAS provisioning (write actions)
+## How the console installs Talos
 
-MAAS is optional. The console boots a server itself with DHCP and a boot file. That path is the next section. This section is only for a site that already runs a MAAS server. The operations live in `app/modules/maas/`.
-
-Beyond inventory reads, the MAAS adapter (`app/services/maas.py`) supports
-`commission` / `deploy` / `release` (operator, mutating, per-op timeouts
-10–30 min) and a read-only `power_status` (viewer). The mock client applies
-deterministic status transitions for each write op, so the full flow is
-testable without a MAAS.
-
-`maas.machine.deploy` is deploy → inventory in one action: it renders
-cloud-init user-data (`app/services/maas_userdata.py` — hostname, SSH
-authorized keys, and `GENESTACK_ENV` / `GENESTACK_ROLE` markers written to
-`/etc/genestack/env`, which `ansible/playbooks/provision_bridge.yml` reads
-when bridging a freshly deployed node), then **upserts the machine into the
-env config doc's `servers` section** (source `maas`, as a new config
-version). The Servers card drives
-all three actions with per-MAAS-status buttons and polls each job to a
-result line.
-
-**Talos on MAAS.** `maas.talos.image_upload` (operator, 30 min) downloads a
-Talos Image Factory image over HTTPS (bounded size, sha256 logged) and
-uploads it as a custom MAAS boot-resource; the URL defaults to the doc's
-`talos.image_url`. `maas.machine.deploy image=<name>` then deploys onto that
-image and skips cloud-init entirely.
-
-## Zero-touch bare-metal provisioning
-
-For racks without MAAS the console provisions nodes itself. Components:
+The console is the DHCP server and the boot server for the machines it
+installs. Talos goes on a machine from the network, so this program answers
+the address request and serves the boot file. Components:
 
 - **`app/services/redfish.py`** — a generic Redfish BMC client:
   `power_state`, `set_pxe_boot` (one-shot, `BootSourceOverrideTarget=Pxe` /

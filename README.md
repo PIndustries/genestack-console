@@ -36,7 +36,7 @@ An environment is one cloud: a lab, one rack, or one site. You create it in the 
 
 ## How a physical server gets an operating system
 
-Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. DHCP is how a machine asks for an IP address. The boot file is the small program the network card downloads when the server is told to start from the network instead of from its disk. Both of those services run inside the console process. You do not set up a separate DHCP server for this.
+Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. DHCP is how a machine asks for an IP address. The boot file is the small program the network card downloads when the server is told to start from the network instead of from its disk. Both of those services run inside the console process. This is how a server gets Talos. Talos is installed from the network, and the console is the program that does it. You do not set up a separate DHCP server, or another program, to boot the machines.
 
 Each server has two addresses you enter:
 
