@@ -1,13 +1,15 @@
 # Install the Genestack Console
 
-One command. A compiled binary. No git clone of the portal.
+One command. A compiled binary. The console runs on a machine you operate.
 
 ```bash
-curl -fsSL https://genestack.dev/console.sh | bash
+curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
-This installs the Console on a machine you operate, with local password authentication.
-To connect that console to the account portal at `https://my.genestack.dev`, see [hosted-mode.md](hosted-mode.md).
+`get.genestack.dev/console.sh` redirects to
+`https://github.com/PIndustries/genestack-console/releases/latest/download/console.sh`.
+The same redirect is on `genestack.dev`. The first login is a local password.
+To connect that console to the account portal at `https://my.genestack.dev`, see [hosted-mode.md](hosted-mode.md). The portal is the account and the Apple apps. It is not this program.
 
 | Host | Console | Local AIO VM (`--dev`) | Production metal |
 |---|---|---|---|
@@ -28,7 +30,7 @@ Prefix is `~/genestack-console`. First boot still seeds tenant **demo** /
 environment **walkthrough**. For a real local VM as well:
 
 ```bash
-curl -fsSL https://genestack.dev/console.sh | bash -s -- --dev
+curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --dev
 ```
 
 That is `--with-aio-vm` on a Mac: QEMU + Hypervisor.framework, Ubuntu cloud
@@ -40,13 +42,13 @@ running and `brew install qemu`. Not a production rack — a laptop lab.
 ```powershell
 wsl --install -d Ubuntu
 wsl
-curl -fsSL https://genestack.dev/console.sh | bash
+curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
 Or from PowerShell (jumps into WSL2):
 
 ```powershell
-irm https://genestack.dev/console.ps1 | iex
+irm https://get.genestack.dev/console.ps1 | iex
 ```
 
 Git Bash + Docker Desktop also runs the hub (seeded walkthrough, no AIO VM).
@@ -100,7 +102,7 @@ Open `http://127.0.0.1:8080/ui`. Login is `admin` plus the password in
 | Console | One Linux binary (`GSC_BINARY_URL`) |
 | Genestack cloud scripts | Public Apache-2.0 tarball, bind-mounted read-only |
 
-The portal is compiled. It is not unpacked as Python, a git checkout, or a
+The console binary is compiled. It is not unpacked as Python, a git checkout, or a
 docker-save of source layers.
 
 ## Docker (optional)
@@ -120,7 +122,7 @@ docker run --rm --name genestack-console \
 Or let the installer load that image and write compose (no git checkout):
 
 ```bash
-curl -fsSL https://genestack.dev/console.sh | bash -s -- --docker
+curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --docker
 ```
 
 PXE DHCP and boot-file HTTP run **inside the console process** (Python).
@@ -128,7 +130,7 @@ There is no PXE sidecar. Bare metal: run the binary on the box (needs the
 provisioning NIC and privilege to bind UDP/67). A container can do the same
 only with `--network host --cap-add NET_ADMIN`.
 
-`https://genestack.dev/console.sh` always fetches the compiled binary by default.
+`https://get.genestack.dev/console.sh` redirects to the GitHub Release and the script fetches the compiled binary by default.
 
 ## Publishing the binary (maintainers)
 
@@ -139,7 +141,8 @@ From a Console checkout, with gcc and Python 3.12:
 ```
 
 That command writes the ELF under `dist/`. A tag `v*` on this repository
-runs GitHub Actions and attaches `genestack-console-linux-amd64` and
-`version.json` to the GitHub Release. The installer downloads those assets.
+runs GitHub Actions and attaches `genestack-console-linux-amd64`,
+`version.json`, `console.sh`, and `console.ps1` to the GitHub Release.
+The installer script downloads the binary asset.
 
 Developer rebuild from a checkout: `--from-source` (container, not the operator path).

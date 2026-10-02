@@ -1,30 +1,23 @@
 # Genestack Console
 
+The program you run on the deploy host, next to a [Genestack](https://github.com/rackerlabs/genestack) checkout. It runs the bootstrap, Ansible, and Talos steps. The environment, the job log, and the BMC secrets stay on that host.
+
 ```bash
-curl -fsSL https://genestack.dev/console.sh | bash
+curl -fsSL https://get.genestack.dev/console.sh | bash
 # then open http://127.0.0.1:8080/ui and follow Guided setup
 ```
 
-The installer is served by the Genestack site. Checkout install: [docs/install.md](docs/install.md).
-Compiled Linux binaries are GitHub Release assets: [docs/releasing.md](docs/releasing.md).
+`get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080`. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md).
 
-Operator fleet control plane for managing [Genestack](https://github.com/rackerlabs/genestack) environments.
-
-## Deployment Modes
-
-The Console supports two deployment modes:
-
-- **Hosted** — As a client of the portal at `https://my.genestack.dev`. Users authenticate via portal OIDC, and tenant provisioning is managed by the portal. See [docs/hosted-mode.md](docs/hosted-mode.md).
-- **Self-hosted** — On-premise or isolated deployment. Local password accounts and optional OIDC with your own identity provider. See [docs/install.md](docs/install.md).
+Sign in with a local account. To let the Apple apps and the account page reach this console, connect it to `https://my.genestack.dev`. That portal does not run a copy of the console. See [docs/hosted-mode.md](docs/hosted-mode.md).
 
 ## What it does
 
-- **Multi-environment management** — Create, configure, and deploy Genestack clouds from a single web UI
-- **Agent-based operations** — Install lightweight agents on hosts; all operations run through them
-- **SSH key management** — Auto-generated per-environment Ed25519 key pairs
-- **Config push & deploy** — Versioned config documents pushed to deploy hosts, deployed with real-time progress
-- **Bare metal provisioning** — PXE boot, DHCP, and Talos installation via agent sidecars
-- **Hardware discovery** — Discover machines on your L2 network, register BMCs, provision bare metal
+- **Environments** — One cloud per environment: a lab, a rack, or a region. Jobs and credentials stay inside it.
+- **Deploy jobs** — Push the saved config to the deploy host, then run the Genestack install scripts. The job log stays on the environment.
+- **Agents** — A remote site dials out to the console. The agent does not accept inbound connections from the console.
+- **Bare metal** — Each MAC has a next boot. Disk is the default. A selected machine is commissioned, then PXE'd once into Talos. DHCP and the boot files run in the console process when it is on that L2.
+- **Accounts** — Local passwords, an API key, your own identity provider, or sign-in through `my.genestack.dev`.
 
 ## Quick start
 
@@ -49,10 +42,10 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 
 ## Architecture
 
-- **Console** (FastAPI + SQLite) — REST API, web UI, SSE event stream
-- **Worker** (daemon process) — Long-running jobs: config push, deploy, agent install
-- **Agent** (Docker container on target hosts) — WebSocket dial-out to console, receives commands
-- **PXE sidecar** (optional) — dnsmasq + iPXE for bare metal provisioning
+- **Console** on the deploy host — FastAPI, the UI, and SQLite. The longer map is [docs/architecture.md](docs/architecture.md).
+- **Worker** — Runs the jobs: config push, deploy, bare-metal boot.
+- **Agent** — Dial-out WebSocket from a remote site. Serves PXE there when the console is not on that L2.
+- **PXE** — In-process DHCP and boot-file HTTP. There is no PXE sidecar.
 
 ## API
 
@@ -75,7 +68,7 @@ Key settings:
   For the portal, set `issuer_url: https://my.genestack.dev` and `client_id: genestack-console`.
   See [docs/hosted-mode.md](docs/hosted-mode.md). The portal is the account and the Apple connection. The console still runs on your host.
 - `hub.advertise_url` — URL that agents can reach (e.g., `https://console.example.com:8080`).
-  **Required for installing agents on remote hosts**: the one-liner the portal
+  **Required for installing agents on remote hosts**: the one-liner the console
   shows (`curl <console>/agent | bash -s -- --hub …`) must contain a hub URL
   the *target* host can reach, which the console cannot derive from your own
   browser. With `https`, the agent dials `wss://`.

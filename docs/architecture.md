@@ -1,9 +1,26 @@
 # Genestack Console Architecture
 
-Genestack Console is a **fleet operations control plane** for Genestack /
-OpenStack bare-metal environments. It is **not** Skyline (the OpenStack
-dashboard). The console orchestrates MAAS, Ansible, and existing Genestack
-`bin/` install scripts behind a single authenticated HTTP API and job system.
+The console runs on the deploy host, next to a Genestack checkout at `/opt/genestack` and inventory at `/etc/genestack`. An environment is one cloud. A job in that environment pushes config and runs the install scripts. The UI, the job log, and the BMC secrets stay on that host.
+
+Skyline is still the OpenStack dashboard for project users. This program is for the people operating the deploy.
+
+`https://my.genestack.dev` is an optional account link for the Apple apps and for support. It does not run a copy of this console. See [hosted-mode.md](hosted-mode.md).
+
+## Boot order
+
+Each machine's next boot is its own.
+
+- **disk** is the default, including a MAC the console has never been asked to install. The machine boots its local disk.
+- **commission** is a RAM disk. It wipes fixed-disk headers and posts one report.
+- **talos** is served for that MAC only after the report is accepted. Machine config is pushed after the wipe. It is not placed on the kernel command line.
+
+An ISO boot is rejected for this path because it does not wipe the disks. DHCP and the boot files are served by the console process (`app/services/pxe_runtime.py`) when the host is on the same L2 as the machines. A site behind a firewall runs the agent. The agent dials out and serves PXE on that L2.
+
+## Jobs
+
+A job is one operation on one environment: push config, deploy, PXE a machine, or talk to a BMC. The worker runs it. Two mutating jobs for the same environment do not run at the same time. The catalog and the runner live in `app/services/job_runner.py`. The long deploy job is `app/services/deploy.py`: push the config document, then run the Genestack pipeline.
+
+MAAS, OVH, and the Apple native API are adapters on that same job system. They are described further down.
 
 ## Layers
 
@@ -30,7 +47,7 @@ dashboard). The console orchestrates MAAS, Ansible, and existing Genestack
 | **Telemetry** | Worker-side collector writing per-env cluster snapshots, in-process event bus + SSE stream, alert rules/events, optional metric samples — see [Telemetry & real-time subsystem](#telemetry--real-time-subsystem) |
 | **Agent channel** | Hub-and-spoke dial-out WebSocket per env (`app/services/agents.py`, `agent/`): HMAC enrollment handshake, heartbeats, allowlisted commands — see [Agent channel](#agent-channel-hub-and-spoke) |
 | **MAAS adapter** | List machines + power status; commission/deploy/release; Talos factory-image upload (mock when `maas.url` empty in config.yaml — write ops get deterministic mock transitions) |
-| **Bare-metal adapter** | Zero-touch provisioning without MAAS: generic Redfish BMC client (`app/services/redfish.py`), per-env node registry (`app/services/baremetal.py`), console-owned PXE/DHCP sidecar (`pxe/`, rendered by `app/services/pxe.py`) |
+| **Bare-metal adapter** | Per-MAC boot order (disk, commission, talos), Redfish BMC client (`app/services/redfish.py`), node registry (`app/services/baremetal.py`), in-process PXE/DHCP (`app/services/pxe_runtime.py`, files rendered by `app/services/pxe.py`) |
 | **Ansible adapter** | Run allow-listed playbooks (`host_preflight.yml`, `basic_ops.yml`, …) |
 | **Genestack bridge** | Read `openstack-components.yaml`, list `bin/` scripts, enable services via allowlist, run pipeline stages; inventory + curated run of repo utility scripts (`app/services/repo_scripts.py`) |
 
@@ -124,16 +141,15 @@ mode the job sees:
 - **Descriptor** — `GET /api/v1/environments/{id}/descriptor` (viewer+;
   `?format=yaml` for YAML) is a read-only snapshot of one environment:
   identity, provider, inventory topology (groups/hosts/group_vars, with a
-  `drift` flag when the portal-rendered inventory disagrees with the on-disk
+  `drift` flag when the console-rendered inventory disagrees with the on-disk
   inventory), components + chart versions (scope `environment|global`), helm
   overrides, kustomize overlays, gateway files, and live cluster/services
   reachability.
 
-## Portal-managed environment config
+## Environment config document
 
-Each environment's config can be managed in the portal as **one flat,
-versioned YAML document** (`EnvConfigVersion` rows; the doc is the source of
-truth). Top-level sections: `provider`, `deploy`, `maas`, `servers`,
+Each environment keeps **one flat, versioned YAML document** in the console
+(`EnvConfigVersion` rows; the doc is the source of truth). Top-level sections: `provider`, `deploy`, `maas`, `servers`,
 `network`, `components`, `chart_versions`, `helm_overrides`,
 `kustomize_patches`, `group_vars`, `secrets`, `storage`, `talos`, `pxe`
 (unknown keys warn, not reject).
@@ -147,7 +163,7 @@ truth). Top-level sections: `provider`, `deploy`, `maas`, `servers`,
 | `POST …/servers/assign` | operator | Upsert a role assignment (stored as a new version) |
 
 Rendering maps only the sections present in the doc onto the env's
-`/etc/genestack` tree — absent sections never wipe existing files. Portal
+`/etc/genestack` tree — absent sections never wipe existing files. Console
 output uses `console-rendered.yaml` filenames to stay separate from
 hand-maintained files:
 
@@ -164,7 +180,7 @@ hand-maintained files:
 | `secrets` | `kubesecrets.yaml` (multi-doc `v1/Secret` manifests in `bin/create-secrets.sh` shape) |
 | `storage` | `cinder_backend_name` / `cinder_worker_name` merge into the `cinder_storage_nodes` group vars; `ceph:` keys are recorded for future rook handling (no files today) |
 | `talos` | No rendered files — `cluster_name` / `install_disk` / `image_url` are consumed by the provider=talos bootstrap flow (and as the default image URL for MAAS/PXE asset fetches) |
-| `pxe` | Not pushed to the config dir — rendered by `app/services/pxe.py` into `<data_dir>/pxe/` (`dnsmasq.conf`, `boot.ipxe`, talos assets) for the PXE sidecar |
+| `pxe` | Not pushed to the config dir — rendered by `app/services/pxe.py` into `<data_dir>/pxe/` (`dnsmasq.conf`, `boot.ipxe`, talos assets) and served in-process |
 
 Two further sections carry extra semantics:
 
@@ -298,30 +314,22 @@ For racks without MAAS the console provisions nodes itself. Components:
   rest like the other stored secrets), `pxe_mac`, `expected_ip` (reserved
   from the PXE pool at provision time), and a state:
   `registered` → `booting` → `talos-ready` (or `failed`).
-- **`app/services/pxe.py` + `pxe/` sidecar** — console-owned DHCP on the
-  provisioning network. The sidecar container (dnsmasq + busybox httpd on
-  :8080) runs with **`network_mode: host`** — DHCP is L2 broadcast, so the
-  console host must sit on (L2-reach) the provisioning network. The console
-  renders everything it serves into `<data_dir>/pxe/` (bind-mounted into the
-  sidecar at `/srv/pxe`): `dnsmasq.conf` (authoritative DHCP + iPXE
-  chainload, static `dhcp-host` reservations for `source: baremetal`
-  servers), `boot.ipxe` (Talos kernel + initramfs with metal
-  maintenance-mode args), and `assets/` (kernel/initramfs fetched by reusing
-  the factory-image downloader). Config comes from the env doc's `pxe:`
-  section (`interface`/`range_start`/`range_end` required; `netmask`,
-  `gateway`, `dns`, `next_server`, `http_port`, `image_url` optional —
-  `image_url` falls back to `talos.image_url`). The sidecar is rendered into
-  the compose stack **only at install time with `GSC_WITH_PXE=1`**
-  (`scripts/genestack-console.sh`); console/worker always mount `./pxe`.
-  dnsmasq does not reload DHCP config on SIGHUP — the sidecar must be
-  restarted after a config change (the console logs the hint).
+- **`app/services/pxe.py` + `app/services/pxe_runtime.py`** — DHCP and
+  boot-file HTTP run in the console process. The host must sit on the
+  provisioning L2, because DHCP is a broadcast. The console renders
+  `<data_dir>/pxe/`: `dnsmasq.conf` (authoritative DHCP + iPXE chainload,
+  static `dhcp-host` reservations for `source: baremetal` servers),
+  `boot.ipxe`, and `assets/` (kernel and initramfs). Per-MAC scripts live
+  under `mac/`. Config comes from the env doc's `pxe:` section or from the
+  agent's `pxe_config` (`interface`, `range_start`, and `range_end` required).
+  A write reloads the in-process runtime. There is no PXE sidecar.
 - **Catalog ops** — `baremetal.node.register` (operator; Redfish MAC
   autofill when `pxe_mac` is omitted — probe skipped on dry-run, failure
   registers without a MAC), `baremetal.nodes.list` (viewer),
   `baremetal.node.power` (operator, 2 min), `baremetal.node.pxe_boot`
   (operator, 5 min — one-shot PXE + ForceRestart, state → `booting`), and
   `baremetal.node.provision` (admin, 30 min): the full zero-touch chain in
-  one job — prepare sidecar config/assets → PXE boot → poll the Talos
+  one job — prepare PXE config and assets → PXE boot → poll the Talos
   maintenance API at `https://<expected_ip>:50000` (insecure) → state
   `talos-ready` → **upsert the node into the env doc's `servers` section**
   (source `baremetal`, optional `roles`).
@@ -485,7 +493,7 @@ the env spine; "Discovery" tab on the Hardware page).
 ## Deploy-host terminal
 
 `WS /api/v1/terminal` (`app/routers/terminal.py`) gives operators an
-interactive ssh shell on the env's deploy host without leaving the portal.
+interactive ssh shell on the env's deploy host without leaving the console UI.
 The server spawns a pty running `ssh -o BatchMode=yes -o ConnectTimeout=10
 <deployer_ssh_user=root>@<deployer_ssh_host>` and bridges frames:
 `input`/`resize` client → server (pty stdin / TIOCSWINSZ), `output`/`exit`
@@ -677,7 +685,7 @@ unavailable:
 
 ## Web UI map
 
-`GET /ui` serves `app/templates/ui.html` — a hash-routed single-page portal
+`GET /ui` serves `app/templates/ui.html` — a hash-routed single-page UI
 of plain ES modules under `app/static/js/` (no build step).
 
 | Module | Renders |
@@ -785,7 +793,7 @@ Service enablement is **allow-listed** (e.g. `placement` ok; `rm` rejected).
 | Per-op job timeouts | 600 s default, 6 h ceiling | Long ops override in the catalog (deploy 6 h, pipeline 4 h); running jobs past deadline recovered to `failed` on startup; worker also abandons all running once at start |
 | Secret encryption at rest | on | Fernet (`fernet:` prefix) keyed off `secret_key` — `kubeconfig_data`, MAAS api key, config-doc `secrets`, bare-metal BMC passwords; masked as `***` on reads; rotation requires re-encrypting |
 | Redfish BMC access | per-node creds | Basic auth, `verify=False` (self-signed BMC certs), 10 s timeouts; creds stored encrypted, never returned by the API |
-| PXE/DHCP sidecar | opt-in | Console-owned DHCP on the provisioning network; requires `network_mode: host` + L2 reach; only rendered into compose with `GSC_WITH_PXE=1` at install |
+| PXE/DHCP | in-process | Console-owned DHCP and boot HTTP on the provisioning L2; files under `data_dir/pxe/`; a remote site uses the dial-out agent |
 | Agent channel | hash-only tokens | Raw `gsca_` token shown once, sha256 stored; HMAC-SHA256 challenge/proof (raw token on the wire once — use `wss://`); one credential per env, replace-on-create; commands fixed-allowlist only; file_write confined agent-side to `GSC_ALLOWED_ROOT` |
 | Deploy-host terminal | operator+ | One session per (user, env), 15-min idle timeout, pty killed on close, no free-form command (always the env's deploy host), open/close audited |
 | SSE stream | capped | `?token=` auth (session token or API key), env topics gated by tenant membership at connect, `stream.max_subscribers` (default 100) caps concurrent subscribers |
@@ -804,7 +812,7 @@ Service enablement is **allow-listed** (e.g. `placement` ok; `rm` rejected).
 | `app/` | FastAPI application |
 | `app/static/js/` | Web UI (plain ES modules, no build step) |
 | `ansible/playbooks/` | Console-owned playbooks |
-| `pxe/` | PXE/DHCP sidecar (dnsmasq + busybox httpd) for zero-touch bare metal |
+| `pxe/` | Rendered boot files (iPXE, assets). DHCP and HTTP are in-process, not this directory as a container |
 | `agent/` | Standalone in-environment agent (`main.py`, `Containerfile`, `install.sh`) |
 | `app/static/vendor/xterm/` | Vendored xterm.js + fit addon for the deploy-host terminal (no CDN) |
 | `genestack.root` | Genestack checkout (`bin/`, `openstack-components.yaml`) |
