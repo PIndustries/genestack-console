@@ -418,6 +418,9 @@ class AgentTokenRead(BaseModel):
     docker_run: str
     created_at: datetime
     pxe_config: Optional[dict[str, Any]] = None
+    # Set once on enrollment when the WireGuard hub is on. The client
+    # config includes the peer private key. Later reads omit it.
+    wireguard: Optional[dict[str, Any]] = None
 
 
 class AgentStatusEntry(BaseModel):

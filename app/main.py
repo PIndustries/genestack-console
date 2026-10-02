@@ -63,6 +63,7 @@ from app.routers import (
     ovh,
     platform,
     pxe,
+    reach,
     state,
     stream,
     tenants,
@@ -330,6 +331,7 @@ def create_app() -> FastAPI:
     app.include_router(app_hooks.router)
     app.include_router(hostvms.router)
     app.include_router(agents.router)
+    app.include_router(reach.router)
     app.include_router(terminal.router)
 
     # Frontend static assets (check_dir=False: the dir may be absent pre-build)

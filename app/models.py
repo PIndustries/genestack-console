@@ -799,6 +799,11 @@ class AgentCredential(Base):
     # JSON: {interface, range_start, range_end, gateway, dns, next_server,
     #        http_port, image_url} — the PXE network this agent serves.
     pxe_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    # WireGuard peer minted for this credential when the hub is on.
+    # The private key is Fernet-encrypted and is not returned on list.
+    wg_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    wg_public_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    wg_private_key_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class AgentCommand(Base):
@@ -915,4 +920,73 @@ class App(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
+class ReachHub(Base):
+    """One managed path on this deploy host.
+
+    ``kind`` is ``wireguard``, ``tailscale``, or ``cloudflare``. The secret
+    (WireGuard private key, Tailscale auth key, or Cloudflare tunnel token)
+    is Fernet-encrypted. Reads do not return it.
+    """
+
+    __tablename__ = "reach_hubs"
+
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="idle", nullable=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    public_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    listen_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    endpoint: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    network: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    iface: Mapped[Optional[str]] = mapped_column("interface", String(15), nullable=True)
+    hostname: Mapped[Optional[str]] = mapped_column(String(253), nullable=True)
+    secret_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    config_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class ReachLink(Base):
+    """How the console reaches one environment on one path.
+
+    Uniqueness is (environment, kind, name). A WireGuard peer private key
+    is stored encrypted. The client config that contains it is returned
+    once, when the peer is created.
+    """
+
+    __tablename__ = "reach_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "environment_id", "kind", "name", name="uq_reach_link_env_kind_name"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    environment_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("environments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), default="default", nullable=False)
+    address: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    public_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    secret_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    local_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    use_for_ssh: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="ready", nullable=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )

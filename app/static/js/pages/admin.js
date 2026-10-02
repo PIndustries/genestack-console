@@ -1,4 +1,4 @@
-// pages/admin.js — platform-admin console: tenant + user account management.
+// pages/admin.js — platform-admin console: tenants, users, and reach.
 //
 // Gated on store.platformAdmin (from /api/v1/auth/whoami); non-admins get a
 // 403-style note instead of the management UI. The endpoints themselves
@@ -663,6 +663,58 @@ async function loadData() {
   renderUsers();
   renderTenantPicker();
   loadOvhAccounts();
+  loadReach();
+}
+
+async function loadReach() {
+  const host = document.getElementById("adm-reach-status");
+  if (!host) return;
+  try {
+    const hubs = await api("/api/v1/reach");
+    host.innerHTML = (hubs || [])
+      .map((row) => {
+        const secret = row.secret_configured ? "secret saved" : "no secret";
+        const bits = [row.status, row.address, row.endpoint, row.hostname, secret]
+          .filter(Boolean)
+          .map((part) => esc(String(part)))
+          .join(" · ");
+        const detail = row.detail ? `<div class="muted">${esc(row.detail)}</div>` : "";
+        return `<div style="margin-top:.35rem"><strong>${esc(row.kind)}</strong> <span class="muted">${bits}</span>${detail}</div>`;
+      })
+      .join("");
+  } catch (e) {
+    host.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function saveReach(kind, body) {
+  try {
+    await api(`/api/v1/reach/${kind}`, { method: "PUT", body: JSON.stringify(body) });
+    toast("Saved", "ok");
+    await loadReach();
+  } catch (e) {
+    toast(e.message, "bad");
+  }
+}
+
+async function applyReach(kind) {
+  try {
+    const row = await api(`/api/v1/reach/${kind}/apply`, { method: "POST" });
+    toast(row.detail || row.status, "ok");
+    await loadReach();
+  } catch (e) {
+    toast(e.message, "bad");
+  }
+}
+
+async function stopReach(kind) {
+  try {
+    const row = await api(`/api/v1/reach/${kind}/stop`, { method: "POST" });
+    toast(row.detail || row.status, "ok");
+    await loadReach();
+  } catch (e) {
+    toast(e.message, "bad");
+  }
 }
 
 export async function render(root) {
@@ -748,6 +800,42 @@ export async function render(root) {
         <button class="secondary btn-sm" type="submit">Add account</button>
       </form>
     </details>
+  </div>
+  <div class="card" style="margin-top:1rem">
+    <div class="toolbar">
+      <h2>Reach</h2>
+      <button class="secondary btn-sm" id="adm-reach-refresh" type="button">Refresh</button>
+    </div>
+    <p class="muted" style="font-size:.78rem">
+      How this deploy host reaches environments. WireGuard is a VPN this console serves.
+      Tailscale joins your tailnet. Cloudflare Tunnel runs cloudflared here. A secret is
+      stored and is not shown again. Apply does not run when the console starts.
+    </p>
+    <div id="adm-reach-status"><div class="muted">Loading…</div></div>
+    <form id="adm-reach-wg" class="adm-inline-form" style="margin-top:.75rem">
+      <label class="check"><input name="enabled" type="checkbox" /> WireGuard</label>
+      <input name="endpoint" type="text" placeholder="endpoint host:port" maxlength="253" />
+      <input name="network" type="text" placeholder="10.67.67.0/24" />
+      <input name="listen_port" type="number" min="1" max="65535" placeholder="51820" />
+      <input name="interface" type="text" placeholder="wg-gsc" maxlength="15" />
+      <button class="secondary btn-sm" type="submit">Save</button>
+      <button class="secondary btn-sm" type="button" id="adm-reach-wg-apply">Apply</button>
+    </form>
+    <form id="adm-reach-ts" class="adm-inline-form">
+      <label class="check"><input name="enabled" type="checkbox" /> Tailscale</label>
+      <input name="hostname" type="text" placeholder="genestack-console" maxlength="63" />
+      <input name="secret" type="password" placeholder="auth key (write-only)" autocomplete="new-password" />
+      <button class="secondary btn-sm" type="submit">Save</button>
+      <button class="secondary btn-sm" type="button" id="adm-reach-ts-apply">Apply</button>
+    </form>
+    <form id="adm-reach-cf" class="adm-inline-form">
+      <label class="check"><input name="enabled" type="checkbox" /> Cloudflare Tunnel</label>
+      <input name="hostname" type="text" placeholder="hostname (optional)" maxlength="253" />
+      <input name="secret" type="password" placeholder="tunnel token (write-only)" autocomplete="new-password" />
+      <button class="secondary btn-sm" type="submit">Save</button>
+      <button class="secondary btn-sm" type="button" id="adm-reach-cf-apply">Apply</button>
+      <button class="secondary btn-sm" type="button" id="adm-reach-cf-stop">Stop</button>
+    </form>
   </div>`;
 
   document.getElementById("adm-refresh").addEventListener("click", () => loadData());
@@ -763,6 +851,47 @@ export async function render(root) {
     e.preventDefault();
     createOvhAccount(e.target);
   });
+  document.getElementById("adm-reach-refresh").addEventListener("click", () => loadReach());
+  document.getElementById("adm-reach-wg").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = { enabled: form.elements.enabled.checked };
+    const endpoint = form.elements.endpoint.value.trim();
+    const network = form.elements.network.value.trim();
+    const listen = form.elements.listen_port.value.trim();
+    const iface = form.elements.interface.value.trim();
+    if (endpoint) body.endpoint = endpoint;
+    if (network) body.network = network;
+    if (listen) body.listen_port = Number(listen);
+    if (iface) body.interface = iface;
+    saveReach("wireguard", body);
+  });
+  document.getElementById("adm-reach-ts").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = { enabled: form.elements.enabled.checked };
+    const hostname = form.elements.hostname.value.trim();
+    const secret = form.elements.secret.value;
+    if (hostname) body.hostname = hostname;
+    if (secret) body.secret = secret;
+    form.elements.secret.value = "";
+    saveReach("tailscale", body);
+  });
+  document.getElementById("adm-reach-cf").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = { enabled: form.elements.enabled.checked };
+    const hostname = form.elements.hostname.value.trim();
+    const secret = form.elements.secret.value;
+    if (hostname) body.hostname = hostname;
+    if (secret) body.secret = secret;
+    form.elements.secret.value = "";
+    saveReach("cloudflare", body);
+  });
+  document.getElementById("adm-reach-wg-apply").addEventListener("click", () => applyReach("wireguard"));
+  document.getElementById("adm-reach-ts-apply").addEventListener("click", () => applyReach("tailscale"));
+  document.getElementById("adm-reach-cf-apply").addEventListener("click", () => applyReach("cloudflare"));
+  document.getElementById("adm-reach-cf-stop").addEventListener("click", () => stopReach("cloudflare"));
 
   await loadData();
 }

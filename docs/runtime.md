@@ -161,6 +161,8 @@ The agent also reports what it sees. `GSC_PXE_LEASES` is an optional path to a d
 
 `hub.advertise_url` in `config.yaml` is the address the agent is told to use when the console's own bind address is loopback. The agent has to be able to open that address. The console does not open an inbound path to the site.
 
+WireGuard, Tailscale, and Cloudflare Tunnel are separate. They are how this deploy host reaches a site that is not L2 with it. They are off until you turn them on in Admin → Reach, or in `config.yaml`, and then apply. Apply does not run when the process starts. The console generates the WireGuard keys, assigns `10.67.67.1` to itself and the next free address to a peer, and writes a `wg-quick` file. The peer's client config is shown once. A Tailscale auth key and a Cloudflare tunnel token are stored encrypted and are not shown again. `tailscale up` is a short command. `cloudflared tunnel run` is a process the console starts and can stop. A missing `wg-quick`, `tailscale`, or `cloudflared` is reported. The file is still written. The agent program is unchanged: it still dials out with `GSC_HUB_URL` and `GSC_AGENT_TOKEN`. This is on `main`. The `v2026.10.03` binary does not include it.
+
 ## config.yaml
 
 One file. `python -m app.cli make-config` prints a new one, with a generated `secret_key` and generated API keys. The keys that change how the program behaves:
@@ -184,6 +186,9 @@ One file. `python -m app.cli make-config` prints a new one, with a generated `se
 | `oidc` | off | Company login. `https://my.genestack.dev` is one issuer you can point this at. People on the deploy host can still use a local user. |
 | `update.url` | the GitHub Release `version.json` | Where the console looks for a newer build. `config.yaml.example` still names `https://genestack.dev/releases/version.json`. The value in the file you installed is the one that is checked. `update.auto` applies a downloaded build only when you turn it on. |
 | `hub.advertise_url` | empty | The address agents dial. |
+| `wireguard` | off | This deploy host is the WireGuard server. Default interface `wg-gsc`, network `10.67.67.0/24`, UDP port `51820`. Set `endpoint` to the address peers dial. |
+| `tailscale` | off | `tailscale up` on this deploy host. `hostname` defaults to `genestack-console`. `auth_key` is a bootstrap secret. |
+| `cloudflare` | off | `cloudflared tunnel run` on this deploy host. `tunnel_token` is the connector secret. |
 | `ovh` | empty | The application key for listing OVH dedicated servers. The per-environment consumer key is created in the console and is not stored in this file. |
 | `seed_demo` | false | A labeled sample tenant so the page has something to click. The machines in it are not real. The installer can turn this on for a first run. |
 

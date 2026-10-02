@@ -18,6 +18,7 @@ import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComp
 import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";
+import { reachCardHtml, wireReachCard, loadReachCard, destroyReachCard } from "./environment_reach.js";
 import { appsCardHtml, wireAppsCard, loadAppsCard, destroyAppsCard } from "./environment_apps.js?v=slot2";
 import { observeCardHtml, wireObserveCard, loadObserveCard, destroyObserveCard } from "./environment_observe.js";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
@@ -240,8 +241,8 @@ let activeTab = "workflow";
 const TAB_LOADERS = {
   workflow: [loadDeployMap, loadProgressCard, loadTerminalCard],
   observe: [loadObserveCard],
-  settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
-  inventory: [loadSshKeysCard, loadAgentsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
+  settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
+  inventory: [loadSshKeysCard, loadAgentsCard, loadReachCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
   config: [loadConfigCard],
   apps: [loadAppsCard],
   expert: [loadComponentsCard],
@@ -355,6 +356,7 @@ export async function render(root, { param, query } = {}) {
       </div>
       <div class="env-grid" style="margin-top:.75rem">
         ${agentsCardHtml()}
+        ${reachCardHtml()}
       </div>
       <details class="card" style="margin-top:.75rem">
         <summary>Bare metal provisioning (optional)</summary>
@@ -531,6 +533,7 @@ export async function render(root, { param, query } = {}) {
   wireDiscoveryCard(() => envId);
   wirePxeCard(() => envId);
   wireAgentsCard(() => envId);
+  wireReachCard(() => envId);
   wireComponentsCard(() => envId);
   wireTerminalCard(() => envId);
   wireSshKeysCard(() => envId);
@@ -563,6 +566,7 @@ export function destroy() {
   destroyComponentsCard();
   destroyTerminalCard();
   destroyAgentsCard();
+  destroyReachCard();
   destroyServersCard();
   destroyBaremetalCard();
   destroyDiscoveryCard();

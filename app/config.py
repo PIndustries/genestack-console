@@ -231,6 +231,16 @@ class Settings(BaseModel):
     wg_network: str = "10.67.67.0/24"
     wg_endpoint: str = ""
     wg_private_key: str = ""
+    # Tailscale on this deploy host. The auth key is a bootstrap secret.
+    # Per-environment tailnet addresses are stored on reach links, not here.
+    ts_enabled: bool = False
+    ts_hostname: str = "genestack-console"
+    ts_auth_key: str = ""
+    # Cloudflare Tunnel connector on this deploy host. Separate from the
+    # account site. Per-environment hostnames are stored on reach links.
+    cf_enabled: bool = False
+    cf_hostname: str = ""
+    cf_tunnel_token: str = ""
 
     def parsed_api_keys(self) -> dict[str, Role]:
         return dict(self.api_keys)
@@ -246,6 +256,12 @@ def _is_placeholder(value: str) -> bool:
     """
     marker = value.strip().lower()
     return "replace_me" in marker or "replace-me" in marker or marker == "change-me"
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _parse_api_keys(raw: Any) -> dict[str, Role]:
@@ -613,6 +629,45 @@ def load_settings(config_path: Path | None = None) -> Settings:
         wg_network=str(wg.get("network") or "10.67.67.0/24").strip() or "10.67.67.0/24",
         wg_endpoint=str(wg.get("endpoint") or "").strip(),
         wg_private_key=str(wg.get("private_key") or "").strip(),
+        ts_enabled=_as_bool(
+            (raw.get("tailscale") or {}).get("enabled", False)
+            if isinstance(raw.get("tailscale"), dict)
+            else False
+        ),
+        ts_hostname=(
+            str(
+                (raw.get("tailscale") or {}).get("hostname")
+                if isinstance(raw.get("tailscale"), dict)
+                else ""
+            ).strip()
+            or "genestack-console"
+        ),
+        ts_auth_key=(
+            str(
+                (raw.get("tailscale") or {}).get("auth_key")
+                if isinstance(raw.get("tailscale"), dict)
+                else ""
+            ).strip()
+        ),
+        cf_enabled=_as_bool(
+            (raw.get("cloudflare") or {}).get("enabled", False)
+            if isinstance(raw.get("cloudflare"), dict)
+            else False
+        ),
+        cf_hostname=(
+            str(
+                (raw.get("cloudflare") or {}).get("hostname")
+                if isinstance(raw.get("cloudflare"), dict)
+                else ""
+            ).strip()
+        ),
+        cf_tunnel_token=(
+            str(
+                (raw.get("cloudflare") or {}).get("tunnel_token")
+                if isinstance(raw.get("cloudflare"), dict)
+                else ""
+            ).strip()
+        ),
     )
 
 

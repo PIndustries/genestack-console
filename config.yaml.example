@@ -140,6 +140,27 @@ agent:
 hub:
   advertise_url: ""
 
+# How this deploy host reaches an environment that is not L2 with it.
+# Off until you turn one on and apply it from Admin → Reach.
+# The database keeps the saved values after the first load of this file.
+wireguard:
+  enabled: false
+  interface: wg-gsc
+  network: 10.67.67.0/24
+  listen_port: 51820
+  # UDP address peers dial. Empty until you set it.
+  endpoint: ""
+tailscale:
+  enabled: false
+  hostname: genestack-console
+  # Bootstrap only. A REPLACE_ME value is ignored. Prefer Admin → Reach.
+  auth_key: ""
+cloudflare:
+  enabled: false
+  hostname: ""
+  # Connector token for cloudflared on this host. Not the account site.
+  tunnel_token: ""
+
 # Retention policies for non-snapshot tables (worker daemon, daily-ish).
 retention:
   jobs_days: 30

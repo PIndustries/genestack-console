@@ -112,6 +112,25 @@ curl -X POST http://localhost:8000/api/v1/oauth/introspect \
 
 ---
 
+## Reach
+
+How this deploy host reaches an environment. `kind` is `wireguard`, `tailscale`, or `cloudflare`.
+
+A platform admin reads and saves the hub. An operator attaches one environment. Auth keys, tunnel tokens, and WireGuard private keys are not returned. Creating a WireGuard peer returns `client_config` once.
+
+`POST /api/v1/reach/{kind}/apply` writes the config and applies it. A missing `wg-quick`, `tailscale`, or `cloudflared` sets `status` to `tool_missing`. The console does not apply on startup.
+
+This is on `main`. The `v2026.10.03` binary does not include these routes.
+
+```bash
+curl -X PUT http://localhost:8000/api/v1/reach/wireguard \
+  -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"endpoint":"203.0.113.10:51820"}'
+```
+
+---
+
 ## Auth
 
 `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` issue the same session for a client that already calls them. Prefer the OAuth 2 token endpoint above.

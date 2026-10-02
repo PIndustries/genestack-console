@@ -81,25 +81,56 @@ PXE pool, WireGuard overlay, and everything else operators change on the box.
 ## When the deploy host is L2, and when you add an agent
 
 On a network where the deploy host is L2 with the servers, the console
-answers DHCP and serves the boot file itself.
+answers DHCP and serves the boot file itself. L2 means the deploy host
+and those servers are on one local network. That is the recommendation
+when you can do it.
 
 When the deploy host cannot be L2 with a site, install an agent on a
 computer that is (`curl …/agent | bash`). The agent gives out addresses
-and boot files there, and it connects out to the console. On first adopt
-the console:
+and boot files there, and it connects out to the console. You still
+manage the environment from the console. That is the usual layout when
+one private cloud has several sites.
 
-1. Mints a WireGuard peer on `wg-gsc` (`10.67.67.0/24`, separate from
-   any overlay you already run) and pushes it over the WebSocket the agent already
-   opened *outbound*.
-2. Pushes that agent's `pxe_config` so the agent runs DHCP/HTTP locally
-   as the Console's L2 proxy.
+The console can also reach a site on a path it runs on the deploy host.
+These paths are off until you turn them on. Apply is a button or an API
+call. The console does not start them when the process starts. If the
+program is not installed, the status says the tool is missing and the
+config file is still written. This is on `main`. The `v2026.10.03`
+binary does not include it.
 
-Turn the overlay on in config (then restart):
+WireGuard is a VPN the console manages. The deploy host is the server,
+on interface `wg-gsc`, network `10.67.67.0/24`. Pick a network that does
+not overlap the hosts. Set `endpoint` to the UDP address a peer can
+reach, then apply. The console writes a `wg-quick` file under the data
+directory. On adopt, and from the environment's Reach card, the console
+mints a peer and shows the client config once. Put that file on the peer
+with `wg-quick`. The agent program still dials the console on the
+WebSocket. It does not bring the VPN up for you.
+
+Tailscale joins the deploy host to your tailnet. Save an auth key in
+Admin, then Reach. It is not shown again. Apply runs `tailscale up`.
+For each environment, save the tailnet address or MagicDNS name the
+console should use. The console does not invent that address.
+
+Cloudflare Tunnel runs `cloudflared` on the deploy host. Save the tunnel
+token in Admin, then Reach. Apply starts `cloudflared tunnel run` and
+remembers that process, so a later stop only stops that one. The token
+lets this host run the connector. It is not the account site at
+`my.genestack.dev`. For an environment, save the hostname that site
+published, and a local port if the console should forward to it.
+
+If the Kubernetes API is down, these paths do not make it answer. The
+console can still power servers and run an install.
 
 ```yaml
 wireguard:
   enabled: true
-  endpoint: "<hub-ip-or-name>:51820"   # UDP agents can reach through the firewall
+  endpoint: "<hub-ip-or-name>:51820"
+tailscale:
+  enabled: false
+  hostname: genestack-console
+cloudflare:
+  enabled: false
 ```
 
 ```bash

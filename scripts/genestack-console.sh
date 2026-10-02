@@ -1028,17 +1028,23 @@ server:
   host: ${bind_host}
   port: ${bind_port}
 
-# Console-managed overlay. Hub is the WireGuard server; agents get a peer
-# on first adopt (works through a physical firewall because the agent dials
-# out first). Pick a network that does not overlap the hosts.
-# Set enabled: true and wireguard.endpoint to an address agents can reach
-# on UDP (typically the hub's public or VPN IP plus listen_port).
+# How this deploy host reaches a site. Off until you enable one and apply
+# it from Admin → Reach. Pick a WireGuard network that does not overlap
+# the hosts. endpoint is the UDP address a peer can dial.
 wireguard:
   enabled: false
   interface: wg-gsc
   network: 10.67.67.0/24
   listen_port: 51820
   endpoint: ""
+tailscale:
+  enabled: false
+  hostname: genestack-console
+  auth_key: ""
+cloudflare:
+  enabled: false
+  hostname: ""
+  tunnel_token: ""
 
 jobs:
   timeout_seconds: 600

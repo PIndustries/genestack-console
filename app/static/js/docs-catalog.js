@@ -80,6 +80,30 @@
       ],
     },
     {
+      id: "reach",
+      title: "Reach",
+      blurb: "How this deploy host reaches an environment. WireGuard is served here. Tailscale and Cloudflare Tunnel are joined here. Secrets are write-only.",
+      routes: [
+        { m: "GET", p: "/api/v1/reach", d: "WireGuard, Tailscale, and Cloudflare status. No keys." },
+        {
+          m: "PUT",
+          p: "/api/v1/reach/{kind}",
+          d: "Platform admin. kind is wireguard, tailscale, or cloudflare. A secret is stored and not returned.",
+          body: '{"enabled":true,"endpoint":"203.0.113.10:51820"}',
+        },
+        { m: "POST", p: "/api/v1/reach/{kind}/apply", d: "Write the config and apply it. A missing program is reported. Nothing starts at boot." },
+        { m: "POST", p: "/api/v1/reach/{kind}/stop", d: "Stop WireGuard or the cloudflared process this console started. Tailscale is left up." },
+        { m: "GET", p: "/api/v1/environments/{id}/reach", d: "Paths saved for this environment. No private keys." },
+        {
+          m: "POST",
+          p: "/api/v1/environments/{id}/reach/{kind}",
+          d: "Attach a path. A WireGuard peer returns its client config once.",
+          body: '{"name":"default","address":"node.tailnet.ts.net"}',
+        },
+        { m: "DELETE", p: "/api/v1/environments/{id}/reach/{kind}/{name}", d: "Remove that path. Another environment's peer stays." },
+      ],
+    },
+    {
       id: "hardware",
       title: "Hardware",
       blurb: "Inventory and provision. Terraform bare metal (Rackspace, AWS, Azure, GCP), OVH via API, PXE, SSH, BMC/Redfish.",

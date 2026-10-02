@@ -165,7 +165,14 @@ def create_agent_token(
     replaces (revokes) that credential only; new names add credentials so
     several agents can serve one environment (HA).
     """
-    cred, token = agents_service.create_credential(db, env.id, body.name)
+    try:
+        cred, token = agents_service.create_credential(db, env.id, body.name)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    client_config = getattr(cred, "wg_client_config", None)
+    wg_address = cred.wg_address
+    wg_public = cred.wg_public_key
     JobRunner(db).write_audit(
         actor=principal.username,
         action="env.agent_token.create",
@@ -184,6 +191,13 @@ def create_agent_token(
         "docker run -d --name gsc-agent --restart unless-stopped "
         f"-e GSC_HUB_URL={hub_url} -e GSC_AGENT_TOKEN={token} gsc-agent:local"
     )
+    wireguard = None
+    if client_config:
+        wireguard = {
+            "address": wg_address,
+            "public_key": wg_public,
+            "client_config": client_config,
+        }
     return AgentTokenRead(
         agent_id=cred.id,
         environment_id=env.id,
@@ -193,6 +207,7 @@ def create_agent_token(
         instructions=instructions,
         docker_run=docker_run,
         created_at=cred.created_at,
+        wireguard=wireguard,
     )
 
 

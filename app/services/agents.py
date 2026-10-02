@@ -533,6 +533,12 @@ def create_credential(
     )
     db.add(cred)
     db.flush()
+    from app.services.reach import attach_credential_peer
+
+    client_config = attach_credential_peer(db, cred)
+    if client_config:
+        # Unmapped. The token route reads it before commit. It is not a column.
+        cred.wg_client_config = client_config  # type: ignore[attr-defined]
     return cred, token
 
 
