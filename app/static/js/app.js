@@ -22,7 +22,7 @@ const NAV_ALIAS = { setup: "fleet", environments: "fleet" };
 // Legacy hashes from before the nav collapse — send each to its new home.
 const ROUTE_REDIRECTS = {
   dashboard: () => "#/fleet",
-  machines: () => "#/hardware?tab=maas",
+  machines: () => "#/hardware?tab=baremetal",
   alerts: () => "#/activity?tab=alerts",
   audit: () => "#/activity?tab=audit",
   jobs: (param) => "#/activity?tab=jobs" + (param ? "&job=" + encodeURIComponent(param) : ""),

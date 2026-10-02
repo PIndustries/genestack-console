@@ -1,6 +1,4 @@
-"""What: Upload Talos Factory Image to MAAS. Zero-touch talos provisioning, step 1:
-download the Talos Image Factory image over HTTPS (bounded size, sha256 logged) and
-upload it to the environment's MAAS as a custom boot-resource.
+"""What: Download a Talos image. The console installs Talos from the network.
 Where: app/modules/maas/talos_image_upload.py. MaasModule lists this file.
 Why: One file so this step does not grow the job runner.
 """
@@ -13,14 +11,11 @@ HANDLERS = ("maas_talos_image_upload",)
 
 OPERATION = {
     "id": "maas.talos.image_upload",
-    "name": "Upload Talos Factory Image to MAAS",
+    "name": "Fetch Talos image",
     "description": (
-        "Zero-touch talos provisioning, step 1: download the Talos Image "
-        "Factory image over HTTPS (bounded size, sha256 logged) and upload "
-        "it to the environment's MAAS as a custom boot-resource. Then "
-        "deploy machines with maas.machine.deploy image=<name>. The image "
-        "URL defaults to the env config doc talos.image_url when the param "
-        "is omitted."
+        "Download a Talos image. Talos is installed by the console, from "
+        "the network. The image URL defaults to the environment's "
+        "talos.image_url when the param is omitted."
     ),
     "required_role": "operator",
     "backend": "maas",

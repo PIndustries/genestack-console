@@ -1,14 +1,7 @@
 // pages/environment_servers.js — server inventory card for the environment detail page.
-// Source-agnostic: the doc's entries (MAAS-assigned + static) render in an "Inventory
-// (assigned)" table with editable role checkboxes, per-row Save and Remove (static rows).
-// Live MAAS machines render in a "Discovered (MAAS)" zone shown only when MAAS is
-// configured for the environment; otherwise a muted hint plus an inline "Add host" form
-// (POST /servers/static) is shown. Discovered rows also carry status-driven machine
-// actions (commission/deploy/release as maas.machine.* jobs, operator-gated, 5s poll,
-// hidden for mock MAAS). When the config doc declares provider: talos, the deploy form
-// gains a custom-image input (talos deploys skip cloud-init) and an "Upload talos image
-// to MAAS" button (maas.talos.image_upload) appears above the discovered table.
-// Defensive: failures degrade to an "unavailable" note.
+// Saved servers render in an Inventory table with role checkboxes, Save, and Remove.
+// Add a host by address, or import OVH dedicated servers. Talos is installed from
+// the network by this console. Failures degrade to an "unavailable" note.
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { ROLES, ROLE_LABELS } from "../roles.js";
@@ -53,10 +46,10 @@ const REQUIRED_ROLE_SETS = [
   { label: "Storage", role: "storage", min: 1 },
 ];
 
-// ---------- MAAS machine actions (maas.machine.* jobs) ----------
+// ---------- older machine actions, not shown on the inventory card ----------
 
-const MAAS_ACTIVE = new Set(["queued", "running"]);
-const MAAS_POLL_MS = 5000;
+const ROW_JOB_ACTIVE = new Set(["queued", "running"]);
+const ROW_POLL_MS = 5000;
 
 let serversLoadedEnvId = ""; // env the card last rendered — guards against env switches
 let adoptingOvh = false; // re-entrancy guard for auto-adopt on load
@@ -70,7 +63,7 @@ function clearMaasTimers() {
   maasTimers.clear();
 }
 
-// MAAS status → which actions the row offers. Ready/Allocated are commissioned
+// Status → which actions the row offers. Ready and Allocated are commissioned
 // machines; Deployed is post-deploy (re-deploy allowed); release is always offered.
 function maasCanCommission(status) {
   const s = String(status || "").toLowerCase();
@@ -112,14 +105,14 @@ async function pollMaasJob(envId, sid, jobId, label) {
     job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
   } catch {
     // Transient fetch failure: keep the line as-is and retry on the next tick.
-    maasTimers.set(sid, setTimeout(() => pollMaasJob(envId, sid, jobId, label), MAAS_POLL_MS));
+    maasTimers.set(sid, setTimeout(() => pollMaasJob(envId, sid, jobId, label), ROW_POLL_MS));
     return;
   }
   if (!document.getElementById("srv-card") || serversLoadedEnvId !== envId) return;
   const status = String(job && job.status ? job.status : "").toLowerCase();
-  if (MAAS_ACTIVE.has(status)) {
+  if (ROW_JOB_ACTIVE.has(status)) {
     setMaasJobLine(sid, maasRunningHtml(label, jobId, status));
-    maasTimers.set(sid, setTimeout(() => pollMaasJob(envId, sid, jobId, label), MAAS_POLL_MS));
+    maasTimers.set(sid, setTimeout(() => pollMaasJob(envId, sid, jobId, label), ROW_POLL_MS));
     return;
   }
   // Terminal state: stop polling, re-enable the row, reload the card once.
@@ -173,7 +166,7 @@ function maasCommission(envId, server) {
 
 function maasRelease(envId, server) {
   const host = (server && (server.hostname || server.system_id)) || "?";
-  if (!confirm(`Release ${host}? This returns the machine to the MAAS pool.`)) return;
+  if (!confirm(`Release ${host}?`)) return;
   startMaasJob(envId, server, "maas.machine.release", "release", {
     system_id: String((server && server.system_id) || ""),
   });
@@ -188,7 +181,7 @@ function maasDeploy(envId, server, rowIdx, isTalos) {
   // machine also lands in the env's inventory doc.
   if (hostname) params.hostname = hostname;
   if (roles.length) params.roles = roles;
-  // Talos zero-touch: deploy with the custom MAAS image (skips cloud-init userdata).
+  // A custom image skips cloud-init. Talos itself is installed by the console.
   if (isTalos) {
     const imgInput = document.querySelector(`#srv-card [data-deploy-image="${rowIdx}"]`);
     const image = imgInput ? imgInput.value.trim() : "";
@@ -276,9 +269,9 @@ function talosImageUpload(envId, talosInfo) {
   const docUrl = (talosInfo && talosInfo.imageUrl) || "";
   let imageUrl = docUrl;
   if (docUrl) {
-    if (!confirm(`Upload the talos factory image to MAAS?\n\n${docUrl}`)) return;
+    if (!confirm(`Upload the Talos factory image?\n\n${docUrl}`)) return;
   } else {
-    imageUrl = (prompt("Factory image URL to upload to MAAS:") || "").trim();
+    imageUrl = (prompt("Factory image URL:") || "").trim();
     if (!imageUrl) return;
   }
   setTalosLine('<span class="muted">creating talos image upload job…</span>');
@@ -306,10 +299,10 @@ async function startTalosUploadJob(envId, imageUrl) {
   }
 }
 
-// Actions cell for a Discovered (MAAS) row: status-driven buttons plus an inline
+// Actions cell: status-driven buttons plus an inline
 // deploy form (hostname prefilled + role checkboxes) and a per-row job line. Talos
 // environments also get an image input (prefilled talos-genestack) for zero-touch
-// deploys with the custom MAAS image.
+// deploys with a custom image.
 function maasActionsCellHtml(s, i, isTalos) {
   const sid = String(s.system_id || "");
   const host = s.hostname || sid || "?";
@@ -322,7 +315,7 @@ function maasActionsCellHtml(s, i, isTalos) {
   if (maasCanCommission(s.status)) {
     bits.push(
       `<button class="secondary btn-sm" type="button" data-maas-op="commission" data-row="${i}"` +
-        `${titleAttr("Run MAAS commissioning")} ${gateAttr}>Commission</button>`
+        `${titleAttr("Commission this machine")} ${gateAttr}>Commission</button>`
     );
   }
   if (maasCanDeploy(s.status)) {
@@ -332,7 +325,7 @@ function maasActionsCellHtml(s, i, isTalos) {
         `<input type="text" data-deploy-hostname="${i}" value="${esc(host)}" placeholder="hostname" />` +
         (isTalos
           ? `<input type="text" data-deploy-image="${i}" value="talos-genestack" placeholder="image" />` +
-            `<span class="muted" style="font-size:.72rem">custom MAAS image name — talos deploys skip cloud-init</span>`
+            `<span class="muted" style="font-size:.72rem">custom image name</span>`
           : "") +
         `<div class="row" style="gap:0">${roleBoxes("deploy", i, roles)}</div>` +
         `<div class="row" style="gap:.4rem;align-items:center">` +
@@ -343,7 +336,7 @@ function maasActionsCellHtml(s, i, isTalos) {
   }
   bits.push(
     `<button class="secondary btn-sm" type="button" data-maas-op="release" data-row="${i}"` +
-      `${titleAttr("Return the machine to the MAAS pool")} ${gateAttr}>Release</button>`
+      `${titleAttr("Release this machine")} ${gateAttr}>Release</button>`
   );
   return (
     `<td style="white-space:nowrap">${bits.join(" ")}` +
@@ -1266,7 +1259,7 @@ export async function loadServersCard(envId) {
     if (b) b.addEventListener("click", () => addHost(envId, b));
   }
 
-  // Optional OVH dedicated-server import (separate from MAAS).
+  // Optional OVH dedicated-server import.
   const ovhSection = document.createElement("details");
   ovhSection.id = "srv-ovh-import";
   ovhSection.style.marginTop = ".9rem";
@@ -1340,74 +1333,8 @@ export async function loadServersCard(envId) {
     })();
   }
 
-  if (maasConfigured) {
-    // Talos provider (from the config doc) unlocks the zero-touch extras; mock MAAS
-    // can't run real image ops, so it stays on the kubespray rendering.
-    const talosInfo = isMock ? null : await fetchTalosInfo(envId);
-    const isTalos = !!talosInfo;
-    // Mock MAAS machines aren't real candidates — hide the Actions column there.
-    const discColspan = isMock ? 6 : 7;
-    discovered.innerHTML = `
-      <h3>Discovered (MAAS)</h3>
-      ${
-        isMock
-          ? '<p class="muted" style="font-size:.75rem">mock MAAS — machines are simulated; commission/deploy/release actions unavailable</p>'
-          : ""
-      }
-      ${
-        isTalos
-          ? `<div class="srv-talos-upload">
-              <button class="secondary btn-sm" type="button" id="srv-talos-upload" ${gate(canRun(), "operator")}>Upload talos image to MAAS</button>
-              <span class="muted srv-talos-note">one-time per MAAS — then every machine can provision with talos</span>
-              <div id="srv-talos-line" class="srv-talos-line"></div>
-            </div>`
-          : ""
-      }
-      <table>
-        <thead><tr>
-          <th>Hostname</th><th>IP</th><th>Power</th><th>Status</th><th>Roles</th><th></th>${isMock ? "" : "<th>Actions</th>"}
-        </tr></thead>
-        <tbody id="srv-disc-tbody">${
-          discRows.length
-            ? discRows
-                .map((s, i) => {
-                  const roles = Array.isArray(s.roles) ? s.roles : [];
-                  return `<tr data-row="${i}" data-sid="${esc(String(s.system_id || ""))}">
-                    <td><strong>${esc(s.hostname || s.system_id || "?")}</strong><div class="muted" style="font-size:.75rem">${esc(s.system_id || "")}</div></td>
-                    <td class="muted">${esc(s.ip || "—")}</td>
-                    <td>${esc(s.power_state || "—")}</td>
-                    <td>${esc(s.status || "—")}</td>
-                    <td><div class="row" style="gap:0">${roleBoxes("disc", i, roles)}</div></td>
-                    <td style="white-space:nowrap">
-                      <button class="secondary btn-sm" type="button" data-disc-save="${i}" ${gate(canRun(), "operator")}>Save</button>
-                      <span class="muted" style="font-size:.75rem" data-disc-save-msg="${i}"></span>
-                    </td>
-                    ${isMock ? "" : maasActionsCellHtml(s, i, isTalos)}
-                  </tr>`;
-                })
-                .join("")
-            : `<tr><td colspan="${discColspan}" class="muted">No unassigned MAAS machines.</td></tr>`
-        }</tbody>
-      </table>`;
-    discovered.querySelectorAll("button[data-disc-save]").forEach((btn) =>
-      btn.addEventListener("click", () => saveDiscoveredRow(envId, discRows[Number(btn.dataset.discSave)], btn.dataset.discSave))
-    );
-    discovered.querySelectorAll("button[data-maas-op]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const server = discRows[Number(btn.dataset.row)];
-        if (btn.dataset.maasOp === "commission") maasCommission(envId, server);
-        else if (btn.dataset.maasOp === "release") maasRelease(envId, server);
-      })
-    );
-    discovered.querySelectorAll("button[data-maas-deploy]").forEach((btn) =>
-      btn.addEventListener("click", () => maasDeploy(envId, discRows[Number(btn.dataset.maasDeploy)], btn.dataset.maasDeploy, isTalos))
-    );
-    const talosUploadBtn = document.getElementById("srv-talos-upload");
-    if (talosUploadBtn) talosUploadBtn.addEventListener("click", () => talosImageUpload(envId, talosInfo));
-  } else {
-    discovered.innerHTML = `
-      <p class="muted" style="margin:.3rem 0">Import Rise boxes from OVH above, or add a host by hostname and IP.</p>`;
-  }
+  discovered.innerHTML = `
+      <p class="muted" style="margin:.3rem 0">Import Rise boxes from OVH above, or add a host by hostname and IP. Talos is installed from the network by this console.</p>`;
 }
 
 async function saveInventoryRow(envId, server, rowIdx) {

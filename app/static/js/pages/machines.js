@@ -1,4 +1,4 @@
-// pages/machines.js — MAAS machine table + per-row power query.
+// pages/machines.js — machine table + per-row power query. Not linked from the hardware tabs.
 import { api, esc, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml } from "../store.js";
 
@@ -23,8 +23,8 @@ export async function render(root) {
   root.innerHTML = `
   <div class="card">
     <div class="toolbar">
-      <h2>MAAS machines</h2>
-      <select id="mach-env">${envOptionsHtml(null, { includeNone: true, noneLabel: "Default MAAS (config.yaml)" })}</select>
+      <h2>Machines</h2>
+      <select id="mach-env">${envOptionsHtml(null, { includeNone: true, noneLabel: "This console" })}</select>
       <button class="secondary btn-sm" id="mach-refresh" type="button">Refresh</button>
       <span id="mach-msg" class="muted"></span>
       <span id="mach-updated" class="muted" style="font-size:.75rem"></span>
@@ -41,7 +41,7 @@ export async function render(root) {
     loadMachines();
   });
   document.getElementById("mach-refresh").addEventListener("click", () => loadMachines());
-  // Background poll: power states change out-of-band (MAAS, other operators).
+  // Background poll: power states change outside this page.
   // Skip ticks while the tab is hidden (same pattern as hosts.js).
   refreshTimer = setInterval(() => {
     if (!document.hidden) loadMachines({ background: true });
@@ -65,8 +65,8 @@ async function loadMachines({ background = false } = {}) {
       // Unconfigured globally and for this env: direction, not fake machines.
       msg.textContent = "";
       tbody.innerHTML = `<tr><td colspan="6" class="muted">
-        No MAAS configured. Add maas_url + key to an environment, or register
-        bare metal from the environment's Hardware page.</td></tr>`;
+        No machines here. Register the server on the bare-metal page.
+        The console answers DHCP and serves the boot file.</td></tr>`;
       return;
     }
     msg.textContent = data.mock ? "mock inventory" : `${machines.length} machine(s)`;

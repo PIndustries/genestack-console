@@ -1,7 +1,6 @@
 // pages/hardware.js — Hardware page: one environment selector + three tabs that
 // reuse the existing modules untouched — "Discovery" (the environment_discovery
-// card), "Bare metal" (the environment_baremetal card), and "MAAS machines"
-// (the fleet-wide machines page). Tabs mount lazily on first open and stay
+// card) and "Bare metal" (the environment_baremetal card). Tabs mount lazily on first open and stay
 // mounted afterwards (their element ids don't collide); changing the env
 // selector reloads every already-mounted tab.
 import { api, esc, toast } from "../api.js";
@@ -27,7 +26,6 @@ const TABS = [
   { id: "discovery", label: "Inventory" },
   { id: "baremetal", label: "Bare metal" },
   { id: "providers", label: "Providers" },
-  { id: "maas", label: "MAAS" },
 ];
 const TAB_ALIAS = { ovh: "providers", inventory: "discovery", redfish: "discovery" };
 
@@ -61,7 +59,7 @@ export async function render(root, { query } = {}) {
         includeNone: true,
         noneLabel: "(no environment)",
       })}</select>
-      <span class="muted" style="font-size:.78rem">inventory &amp; bare metal (Redfish BMC) are per-environment; providers &amp; MAAS are fleet-wide</span>
+      <span class="muted" style="font-size:.78rem">inventory and bare metal are per-environment; providers are fleet-wide</span>
     </div>
     <div class="tab-bar" role="tablist">
       ${TABS.map(

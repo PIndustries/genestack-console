@@ -4,7 +4,7 @@ import { store, loadEnvs, envOptionsHtml, roleAtLeast, gate } from "../store.js"
 
 export const title = "Operations";
 
-const GROUP_ORDER = ["internal", "maas", "host", "genestack", "ansible"];
+const GROUP_ORDER = ["internal", "host", "genestack", "ansible", "baremetal"];
 
 // Allowlists verified against app/services/catalog.py.
 // Verified against ansible/roles/basic_ops/tasks/main.yml (ping|facts|disk_check|all).
@@ -34,7 +34,8 @@ export async function render(root, { param }) {
     </div>
   </div>`;
 
-  ops = await api("/api/v1/operations");
+  const listed = await api("/api/v1/operations");
+  ops = (Array.isArray(listed) ? listed : []).filter((op) => !String(op.id || "").startsWith("maas."));
   if (!store.envs.length) await loadEnvs().catch(() => {});
   // Cache per page-load; failures degrade the dropdowns to free-text inputs.
   const [svcRes, pipeRes] = await Promise.allSettled([

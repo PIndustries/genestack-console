@@ -1,5 +1,5 @@
 // pages/environment_baremetal.js — "Bare metal (console-managed)" card on the
-// environment detail page. Zero-touch bare-metal provisioning without MAAS: nodes
+// environment detail page. The console installs Talos from the network: nodes
 // are registered by BMC credentials (baremetal.node.register), then driven per row
 // — power on/off/restart (baremetal.node.power), next boot
 // (baremetal.node.next_boot: commission, Talos, or disk), PXE boot

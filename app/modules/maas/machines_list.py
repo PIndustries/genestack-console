@@ -1,5 +1,4 @@
-"""What: List MAAS Machines. List machines from the environment MAAS (or default console
-MAAS).
+"""What: List machines recorded for an environment.
 Where: app/modules/maas/machines_list.py. MaasModule lists this file.
 Why: One file so this step does not grow the job runner.
 """
@@ -13,12 +12,12 @@ HANDLERS = ("maas_machines_list",)
 
 OPERATION = {
     "id": "maas.machines.list",
-    "name": "List MAAS Machines",
-    "description": "List machines from the environment MAAS (or default console MAAS).",
+    "name": "List machines",
+    "description": "List machines recorded for the environment.",
     "required_role": "viewer",
     "backend": "maas",
     "params": [
-        _p("environment_id", False, "Override environment for MAAS credentials"),
+        _p("environment_id", False, "Environment whose credentials to use"),
     ],
     "handler": "maas_machines_list",
 }

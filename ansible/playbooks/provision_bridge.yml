@@ -1,18 +1,17 @@
 ---
-# Post-MAAS deploy bridge playbook.
-# After MAAS deploys a node, wait for SSH (or skip on localhost),
+# After a node is installed, wait for SSH (or skip on localhost),
 # gather facts, and record hostname / Genestack env markers.
 #
 # Local dry-run:
 #   ansible-playbook -i inventory/localhost.ini playbooks/provision_bridge.yml
 #
 # Against a real host (after deploy):
-#   ansible-playbook -i inventory/maas.yml playbooks/provision_bridge.yml \
+#   ansible-playbook -i inventory/hosts.yml playbooks/provision_bridge.yml \
 #     -l <hostname> -e genestack_env=prod
 #
 # Node roles / labels: openstack-control-plane, compute, network, storage
 
-- name: Genestack provision bridge (post-MAAS)
+- name: Genestack provision bridge
   hosts: localhost
   connection: local
   gather_facts: false

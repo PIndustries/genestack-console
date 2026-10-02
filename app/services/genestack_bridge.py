@@ -568,7 +568,7 @@ def maas_list_machines(
             "maas_configured": False,
             "machines": [],
             "count": 0,
-            "message": "MAAS not configured (set maas.url + maas.api_key in config.yaml)",
+            "message": "No machines from this call. Talos is installed by the console, from the network.",
         }
 
     if client.mock:
@@ -580,7 +580,7 @@ def maas_list_machines(
             "mock": True,
             "machines": machines,
             "count": len(machines),
-            "message": "MAAS mock inventory (set maas.url + maas.api_key in config.yaml for live)",
+            "message": "Sample machines only. Talos is installed by the console, from the network.",
         }
 
     # Live client: still honor dry_run by skipping the HTTP call if requested
@@ -638,7 +638,7 @@ def maas_power_status(
         return {
             "ok": False,
             "system_id": system_id,
-            "error": "MAAS not configured (set maas.url + maas.api_key in config.yaml)",
+            "error": "No power status from this call. Talos is installed by the console, from the network.",
             "returncode": 2,
         }
 

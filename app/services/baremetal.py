@@ -1,4 +1,4 @@
-"""Bare-metal orchestration — the MAAS-free provisioning path.
+"""Bare-metal orchestration. The console installs Talos from the network.
 
 Coordinates the registered :class:`BaremetalNode` rows, the Redfish client
 (BMC power/boot), the console-owned in-process PXE runtime, and the talos

@@ -1018,7 +1018,7 @@ def upsert_static_server(
     public_mac: str | None = None,
     nics: list | None = None,
 ) -> tuple[EnvConfigVersion, list[str]]:
-    """Upsert a static (non-MAAS) server into a NEW config version. Does not commit.
+    """Upsert a server by address into a NEW config version. Does not commit.
 
     ``source`` (default "static") must be one of VALID_SERVER_SOURCES;
     ``service_name`` is the provider-internal name (OVH) when present.

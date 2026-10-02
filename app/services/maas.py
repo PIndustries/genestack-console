@@ -292,9 +292,8 @@ class MaasClient:
         """Fail write/single-machine ops fast when MAAS is not configured."""
         if not self.configured:
             raise MaasError(
-                "MAAS is not configured for this environment "
-                "(set maas.url + maas.api_key in config.yaml; "
-                "maas.mock: true enables the dev-only mock inventory)",
+                "This call is not how a server gets Talos. "
+                "The console answers DHCP and serves the boot file.",
                 status_code=503,
             )
 

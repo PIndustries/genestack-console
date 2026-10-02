@@ -145,7 +145,7 @@ class EnvironmentBase(BaseModel):
     maas_url: Optional[str] = None
     maas_api_key_encrypted: Optional[str] = Field(
         default=None,
-        description="MAAS API key, encrypted at rest (fernet: prefix)",
+        description="Stored credential, encrypted at rest (fernet: prefix)",
     )
     kubeconfig_path: Optional[str] = None
     deployer_ssh_host: Optional[str] = None
@@ -176,7 +176,7 @@ class EnvironmentCreate(BaseModel):
     maas_url: Optional[str] = None
     maas_api_key_encrypted: Optional[str] = Field(
         default=None,
-        description="MAAS API key, encrypted at rest (fernet: prefix)",
+        description="Stored credential, encrypted at rest (fernet: prefix)",
     )
     kubeconfig_path: Optional[str] = None
     deployer_ssh_host: Optional[str] = None

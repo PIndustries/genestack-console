@@ -577,7 +577,7 @@ class HostVM(Base):
 
 
 class BaremetalNode(Base):
-    """A bare-metal server the console provisions directly (no MAAS).
+    """A bare-metal server the console installs from the network.
 
     BMC credentials drive Redfish power/boot control. PXE is served in-process
     from data_dir/pxe (disk, then commission, then one-shot Talos). The node

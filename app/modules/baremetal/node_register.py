@@ -1,5 +1,5 @@
 """What: Register Bare-Metal Node. Register a bare-metal node (BMC address + Redfish
-credentials) for console-managed provisioning — no MAAS.
+credentials). The console installs Talos from the network.
 Where: app/modules/baremetal/node_register.py. BaremetalModule lists this file.
 Why: One file so this step does not grow the job runner.
 """
@@ -14,8 +14,8 @@ OPERATION = {
     "id": "baremetal.node.register",
     "name": "Register Bare-Metal Node",
     "description": (
-        "Register a bare-metal node (BMC address + Redfish credentials) "
-        "for console-managed provisioning — no MAAS. The BMC password is "
+        "Register a bare-metal node (BMC address and Redfish credentials). "
+        "The console installs Talos from the network. The BMC password is "
         "fernet-encrypted at rest. When pxe_mac is omitted the node's "
         "ethernet MACs are probed over Redfish to autofill it (the probe "
         "is skipped on dry-run; a probe failure registers without a MAC)."

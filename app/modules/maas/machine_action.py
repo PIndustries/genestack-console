@@ -1,5 +1,4 @@
-"""What: Shared steps: Commission MAAS Machine (maas.machine.commission); Deploy MAAS
-Machine (maas.machine.deploy); Release MAAS Machine (maas.machine.release).
+"""What: Shared steps for commission, deploy, and release.
 Where: app/modules/maas/machine_action.py. MaasModule lists this file.
 Why: These handlers share one body, so they stay in one file instead of growing the job
 runner.
@@ -18,12 +17,12 @@ HANDLERS = (
 OPERATIONS = (
     {
         "id": "maas.machine.commission",
-        "name": "Commission MAAS Machine",
-        "description": "Commission a MAAS machine (op=commission) for the environment.",
+        "name": "Commission machine",
+        "description": "Commission one machine for the environment.",
         "required_role": "operator",
         "backend": "maas",
         "params": [
-            _p("system_id", True, "MAAS machine system_id"),
+            _p("system_id", True, "Machine system_id"),
         ],
         "handler": "maas_machine_commission",
         "mutating": True,
@@ -31,18 +30,15 @@ OPERATIONS = (
     },
     {
         "id": "maas.machine.deploy",
-        "name": "Deploy MAAS Machine",
+        "name": "Deploy machine",
         "description": (
-            "Deploy a MAAS machine (op=deploy) with optional hostname and Genestack "
-            "roles; renders cloud-init user-data and upserts the env config doc "
-            "servers section so deploy -> inventory is one action. With image set "
-            "(an uploaded custom boot-resource such as a Talos factory image), "
-            "deploys osystem=custom and skips cloud-init user-data."
+            "Deploy one machine with an optional hostname and Genestack roles. "
+            "Talos is installed by the console, from the network, on the bare-metal path."
         ),
         "required_role": "operator",
         "backend": "maas",
         "params": [
-            _p("system_id", True, "MAAS machine system_id"),
+            _p("system_id", True, "Machine system_id"),
             _p("hostname", False, "Hostname to set on deploy"),
             _p(
                 "roles",
@@ -62,12 +58,12 @@ OPERATIONS = (
     },
     {
         "id": "maas.machine.release",
-        "name": "Release MAAS Machine",
-        "description": "Release a MAAS machine back to the pool (op=release).",
+        "name": "Release machine",
+        "description": "Release one machine.",
         "required_role": "operator",
         "backend": "maas",
         "params": [
-            _p("system_id", True, "MAAS machine system_id"),
+            _p("system_id", True, "Machine system_id"),
         ],
         "handler": "maas_machine_release",
         "mutating": True,

@@ -1,7 +1,7 @@
-"""What: List machines and run commission, deploy, and release on a MAAS server.
+"""What: Older machine calls kept so existing clients still run.
 Where: app/modules/maas/__init__.py. This class lists the function files below, in
 order.
-Why: The console's own DHCP and boot files are the baremetal module, not this one.
+Why: Installing Talos is the baremetal module. The console answers DHCP and serves the boot file.
 """
 
 from __future__ import annotations

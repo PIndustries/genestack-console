@@ -263,14 +263,7 @@ def list_servers(
     db: Session = Depends(get_db),
     env: Environment = Depends(get_env_scoped("viewer")),
 ) -> dict[str, Any]:
-    """Union of the doc's server entries and live MAAS machines.
-
-    MAAS is only a discovery convenience: when it is not configured for the
-    environment (no env-or-global url) the response carries
-    ``maas_configured: false`` and only the doc's entries — no mock machines
-    are offered as candidates. ``mock: true`` marks the dev-only explicit
-    mock inventory (``maas.mock: true`` in config.yaml).
-    """
+    """List the servers saved for this environment."""
     client = _maas_client_for(env)
     # Only a live MAAS counts: mock machines are not real candidates.
     maas_configured = client.live
@@ -388,7 +381,7 @@ def assign_server(
     principal: Principal = Depends(require_operator),
     env: Environment = Depends(get_env_scoped("operator")),
 ) -> dict[str, Any]:
-    """Upsert a MAAS machine role assignment — stored as a new config version."""
+    """Save a role assignment as a new config version."""
     _validate_roles(body.roles)
     try:
         row, warnings = envconfig_service.assign_server(
@@ -437,7 +430,7 @@ def upsert_static_server(
     principal: Principal = Depends(require_operator),
     env: Environment = Depends(get_env_scoped("operator")),
 ) -> dict[str, Any]:
-    """Add or update a static (non-MAAS) host — stored as a new config version."""
+    """Add or update a host by address. Stored as a new config version."""
     _validate_roles(body.roles)
     try:
         row, warnings = envconfig_service.upsert_static_server(

@@ -12,7 +12,7 @@ import { canAdmin, canRun, gate, store } from "../store.js";
 const STARTER_TEMPLATE = `# Genestack environment configuration
 # The server validates this document on save; unknown keys are reported as warnings.
 provider: talos     # OVH Rise production path
-# provider: kubespray     # lab / MAAS alternative
+# provider: kubespray     # lab path, when the machines are already installed
 
 # The console drives talosctl from this host — no ssh to the nodes.
 # Nodes should boot a Talos factory image that includes the iscsi-tools and

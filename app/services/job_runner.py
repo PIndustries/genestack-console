@@ -985,8 +985,7 @@ class JobRunner:
 
         if dry:
             log(
-                f"[dry-run] would download {image_url} and upload to MAAS "
-                f"boot-resources as name={name}"
+                f"[dry-run] would download {image_url} as name={name}"
             )
             return {
                 "ok": True,
@@ -1048,7 +1047,7 @@ class JobRunner:
             "bytes": size,
             "sha256": sha256,
             "record": record,
-            "message": f"uploaded {name} ({size} bytes) to MAAS",
+            "message": f"fetched {name} ({size} bytes)",
         }
 
     def _state_export_remote(

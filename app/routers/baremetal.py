@@ -1,4 +1,4 @@
-"""Bare-metal node endpoints (console-managed provisioning, no MAAS).
+"""Bare-metal node endpoints. The console installs Talos from the network.
 
 The UI's bare-metal card reads the node list here; all mutations go through
 the job queue (baremetal.node.* catalog ops).

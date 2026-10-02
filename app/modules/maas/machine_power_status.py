@@ -1,4 +1,4 @@
-"""What: MAAS Machine Power Status. Query power status for a MAAS machine system_id.
+"""What: Query power status for one machine.
 Where: app/modules/maas/machine_power_status.py. MaasModule lists this file.
 Why: One file so this step does not grow the job runner.
 """
@@ -12,13 +12,13 @@ HANDLERS = ("maas_machine_power_status",)
 
 OPERATION = {
     "id": "maas.machine.power_status",
-    "name": "MAAS Machine Power Status",
-    "description": "Query power status for a MAAS machine system_id.",
+    "name": "Machine power status",
+    "description": "Query power status for one machine.",
     "required_role": "viewer",
     "backend": "maas",
     "params": [
-        _p("system_id", True, "MAAS machine system_id"),
-        _p("environment_id", False, "Environment providing MAAS credentials"),
+        _p("system_id", True, "Machine system_id"),
+        _p("environment_id", False, "Environment whose credentials to use"),
     ],
     "handler": "maas_machine_power_status",
 }
