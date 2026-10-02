@@ -637,7 +637,7 @@ function drawGround(bounds, w, h) {
     [maxX, y, maxZ],
     [minX, y, maxZ],
   ].map((p) => project(p[0], p[1], p[2], w, h));
-  drawPoly(corners, "rgba(18, 6, 6, 0.72)", "rgba(235, 0, 0, 0.22)", 1.2);
+  drawPoly(corners, "rgba(6, 18, 10, 0.72)", "rgba(52, 199, 89, 0.22)", 1.2);
 
   const step = 56;
   ctx.lineWidth = 1;
@@ -645,7 +645,7 @@ function drawGround(bounds, w, h) {
     const a = project(x, y, minZ, w, h);
     const b = project(x, y, maxZ, w, h);
     if (!a || !b || a.behind || b.behind) continue;
-    ctx.strokeStyle = `rgba(235,0,0,${0.05 + 0.07 * fogA((a.d + b.d) / 2)})`;
+    ctx.strokeStyle = `rgba(52,199,89,${0.05 + 0.07 * fogA((a.d + b.d) / 2)})`;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -655,7 +655,7 @@ function drawGround(bounds, w, h) {
     const a = project(minX, y, z, w, h);
     const b = project(maxX, y, z, w, h);
     if (!a || !b || a.behind || b.behind) continue;
-    ctx.strokeStyle = `rgba(235,0,0,${0.05 + 0.07 * fogA((a.d + b.d) / 2)})`;
+    ctx.strokeStyle = `rgba(52,199,89,${0.05 + 0.07 * fogA((a.d + b.d) / 2)})`;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -694,7 +694,7 @@ function drawRisers(bounds, w, h) {
     const a = project(x, y0, z, w, h);
     const b = project(x, y1, z, w, h);
     if (!a || !b || a.behind || b.behind) continue;
-    ctx.strokeStyle = `rgba(235,0,0,${0.12 + 0.18 * fogA((a.d + b.d) / 2)})`;
+    ctx.strokeStyle = `rgba(52,199,89,${0.12 + 0.18 * fogA((a.d + b.d) / 2)})`;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
@@ -1026,8 +1026,8 @@ function drawNodes(nodes, now, w, h) {
     const tw = ctx.measureText(line).width;
     const x = hover.p.x + hover.r + 8;
     const y = hover.p.y - 10;
-    ctx.fillStyle = "rgba(16, 6, 6, 0.88)";
-    ctx.strokeStyle = "rgba(235, 0, 0, 0.45)";
+    ctx.fillStyle = "rgba(6, 16, 10, 0.88)";
+    ctx.strokeStyle = "rgba(52, 199, 89, 0.45)";
     ctx.lineWidth = 1;
     if (ctx.roundRect) {
       ctx.beginPath();
@@ -1138,9 +1138,9 @@ function draw() {
   paintLiveHud(g);
 
   const fog = ctx.createLinearGradient(0, 0, 0, h);
-  fog.addColorStop(0, "rgba(8, 2, 2, 0.08)");
-  fog.addColorStop(0.55, "rgba(8, 2, 2, 0)");
-  fog.addColorStop(1, "rgba(6, 1, 1, 0.42)");
+  fog.addColorStop(0, "rgba(2, 8, 4, 0.08)");
+  fog.addColorStop(0.55, "rgba(2, 8, 4, 0)");
+  fog.addColorStop(1, "rgba(1, 8, 4, 0.42)");
   ctx.fillStyle = fog;
   ctx.fillRect(0, 0, w, h);
 

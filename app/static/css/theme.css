@@ -1,27 +1,28 @@
-/* Console theme — loaded AFTER portal.css. Black field, red glow.
-   Severity colors (ok/warn/danger) stay distinct from the brand red:
-   brand red is for accents, alert red is for alerts. */
+/* Console theme — loaded AFTER portal.css. Black field, green accent.
+   Same shop as p.industries. Severity colors stay distinct from the brand
+   green: brand green is the accent, alert red is for alerts. */
 :root {
   /* surfaces & text */
-  --bg: #0d0d0d;
-  --bg-glow: #1f0a0a; /* faint red glow at the top corner, mostly near-black */
-  --panel: #1a1a1a;
-  --panel-deep: #111111;
-  --panel2: #222222;
-  --border: #2a2a2a;
-  --text: #f5f5f5;
-  --muted: #9e9e9e;
-  --inset: #0a0a0a;
-  --shell-bg: rgba(13, 13, 13, 0.75);
-  --topbar-bg: rgba(13, 13, 13, 0.88);
+  --bg: #04060a;
+  --bg-glow: #02110a;
+  --panel: #0e1e12;
+  --panel-deep: #070e09;
+  --panel2: #122418;
+  --border: #1a3d28;
+  --text: #eafaef;
+  --muted: #7e9b86;
+  --inset: #070e09;
+  --shell-bg: rgba(4, 6, 10, 0.75);
+  --topbar-bg: rgba(4, 6, 10, 0.88);
 
-  /* brand accents (black / red) */
-  --accent: #eb0000;
-  --accent2: #3fb950; /* "done" accents track the healthy green */
-  --purple: #7a0000;  /* deep red — brand mark gradient tail */
-  --link: #f5f5f5;
-  --link-hover: #ff4d4d;
-  --selected-bg: rgba(235, 0, 0, 0.16);
+  /* brand accents (black / green) */
+  --accent: #34c759;
+  --accent2: #8df06a;
+  --purple: #159a3c;
+  --link: #8df06a;
+  --link-hover: #b6f79a;
+  --selected-bg: rgba(52, 199, 89, 0.16);
+  --mark-fg: #04130a;
 
   /* severity — deliberately NOT the brand red */
   --ok: #3fb950;
@@ -36,16 +37,74 @@
   --bad-text: #ffa198;
 }
 
-/* White text on #eb0000 is only ~4.6:1; brighten on hover instead of darkening
-   the base, and give the danger button a slightly deeper alert red so its white
-   label keeps ~4.5:1 contrast. */
-button:hover:not(:disabled) { filter: brightness(1.12); }
-button.secondary:hover:not(:disabled) { filter: none; border-color: #3a3a3a; }
-button.danger { background: #da3633; }
+/* Brand green is bright. Primary buttons take dark text so the label stays
+   readable. Secondary, danger, and chrome buttons keep light text. */
+button:not(.secondary):not(.danger):not(.nav-link):not(.linkish):not(.user-chip):not(.pill) {
+  color: var(--mark-fg);
+}
+button:hover:not(:disabled) { filter: brightness(1.08); }
+button.secondary:hover:not(:disabled) { filter: none; border-color: #245c38; color: var(--text); }
+button.danger { background: #da3633; color: #fff; }
+
+.brand-lockup {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+.brand-logo {
+  display: block;
+  width: min(100%, 12.25rem);
+  height: auto;
+  min-width: 0;
+}
+.brand-powered {
+  display: block;
+  max-width: 12.25rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+.brand-lockup-row {
+  flex-direction: row;
+  align-items: center;
+}
+.brand-lockup-row .brand-logo {
+  width: auto;
+  height: 2.15rem;
+  max-width: 9.5rem;
+}
+.brand-lockup-row .brand-powered { max-width: 11rem; }
 
 /* Alerts entry points read as alert-red, never brand-red. */
 #alerts-badge { background: var(--danger); border-color: transparent; color: #fff; }
+#dm-space3d-toggle.active { color: var(--mark-fg); }
 
-/* Role badges: drop the blue/purple tints for neutral dark + a deep red admin. */
-.badge.role-admin { color: #ff6b6b; border-color: #6b0f0f; background: #220808; }
+/* Role badges: admin reads as brand green on the dark field. */
+.badge.role-admin { color: #8df06a; border-color: #1a3d28; background: #0b1f12; }
 .badge.role-operator { color: #f5f5f5; border-color: #3a3a3a; background: #1a1a1a; }
+
+/* Bright green fills need dark labels. Covers anchors and numbered marks
+   that are not plain primary buttons. */
+.wf-num,
+.stage-num,
+.gs-welcome-num,
+.wz-step.active .wz-num,
+.wz-step.done .wz-num,
+a.wf-action.primary,
+a.fl-next,
+a.gs-cta,
+a.hero-cta:not(.alt),
+button.hero-cta:not(.alt),
+#dm-nest-toggle.active,
+#dm-space3d-toggle.active {
+  color: var(--mark-fg);
+}
+a.wf-action.primary:hover,
+a.fl-next:hover,
+a.gs-cta:hover,
+a.hero-cta:hover:not(.alt),
+button.hero-cta:hover:not(.alt) {
+  color: var(--mark-fg);
+}

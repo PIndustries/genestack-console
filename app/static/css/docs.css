@@ -10,8 +10,8 @@ body.docs-page {
   color: var(--text, #f5f5f5);
   font-family: ui-sans-serif, system-ui, sans-serif;
 }
-body.docs-page a { color: var(--link-hover, #ff4d4d); text-decoration: none; }
-body.docs-page a:hover { color: #ff8a8a; }
+body.docs-page a { color: var(--link, #8df06a); text-decoration: none; }
+body.docs-page a:hover { color: var(--link-hover, #b6f79a); }
 body.docs-page nav a,
 body.docs-page .docs-rail a { color: var(--muted); }
 body.docs-page nav a:hover,
@@ -19,7 +19,8 @@ body.docs-page .docs-rail a:hover { color: var(--text); }
 body.docs-page .topbar {
   position: sticky; top: 0; z-index: 20;
   display: flex; justify-content: space-between; align-items: center;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
   padding: 0.65rem 1.35rem;
   min-height: 3.4rem;
   border-bottom: 1px solid var(--border);
@@ -32,9 +33,10 @@ body.docs-page .brand {
 body.docs-page .brand:hover { color: var(--text); }
 body.docs-page .mark {
   width: 1.85rem; height: 1.85rem; border-radius: 0.45rem;
-  background: linear-gradient(135deg, var(--accent), #7a0000);
+  background: linear-gradient(135deg, var(--accent2, #8df06a), var(--accent, #34c759));
+  color: var(--mark-fg, #04130a);
   display: grid; place-items: center;
-  font-size: 0.72rem; font-weight: 800; color: #fff; flex: none;
+  font-size: 0.72rem; font-weight: 800; flex: none;
 }
 body.docs-page .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 body.docs-page .brand-name { font-size: 0.95rem; }
@@ -71,7 +73,7 @@ body.docs-page code {
   padding: 0.1rem 0.35rem; border-radius: 0.35rem;
 }
 body.docs-page pre {
-  background: #0a0404;
+  background: var(--inset, #070e09);
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 0.75rem 1rem;
@@ -125,7 +127,7 @@ body.docs-page pre {
 }
 .docs-layout {
   display: grid;
-  grid-template-columns: 11.5rem minmax(0, 1fr);
+  grid-template-columns: minmax(0, 11.5rem) minmax(0, 1fr);
   gap: 1.6rem;
   align-items: start;
   padding-bottom: 2rem;
@@ -170,7 +172,7 @@ body.docs-page pre {
   background: transparent; border: 0; color: inherit; font: inherit;
   padding: 0.62rem 0.75rem; cursor: pointer;
 }
-.ep-head:hover { background: rgba(235, 0, 0, 0.06); }
+.ep-head:hover { background: rgba(52, 199, 89, 0.08); }
 .verb {
   display: inline-block;
   font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em;
@@ -195,7 +197,7 @@ body.docs-page code.ep-path {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ep-body { padding: 0 0.75rem 0.75rem; border-top: 1px solid var(--border); }
-.ep-body pre { margin: 0.65rem 0 0.5rem; font-size: 0.78rem; color: #e8cfcf; }
+.ep-body pre { margin: 0.65rem 0 0.5rem; font-size: 0.78rem; color: #d7f5df; }
 .ep-copy {
   appearance: none; -webkit-appearance: none;
   background: var(--panel2); border: 1px solid var(--border); color: var(--text);
@@ -203,12 +205,35 @@ body.docs-page code.ep-path {
   font: inherit; font-size: 0.74rem; font-weight: 650; cursor: pointer;
 }
 .ep-copy:hover { border-color: var(--accent); }
+@media (max-width: 640px) {
+  body.docs-page .topbar { padding: 0.6rem 0.9rem; }
+  body.docs-page .brand.brand-lockup-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  body.docs-page .brand.brand-lockup-row .brand-logo {
+    height: 1.7rem;
+    width: auto;
+    max-width: 8.5rem;
+    min-width: 0;
+  }
+  body.docs-page .brand.brand-lockup-row .brand-powered { max-width: 16rem; }
+  body.docs-page .topbar nav {
+    flex: 1 0 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    gap: 1rem;
+  }
+}
 @media (max-width: 900px) {
   .docs-facts { grid-template-columns: 1fr; }
-  .docs-layout { grid-template-columns: 1fr; gap: 0.8rem; }
+  .docs-layout { grid-template-columns: minmax(0, 1fr); gap: 0.8rem; }
   .docs-rail {
     position: sticky; top: 3.4rem; z-index: 8;
     flex-direction: row; flex-wrap: nowrap; overflow-x: auto;
+    max-width: 100%;
+    min-width: 0;
     gap: 0.25rem; padding: 0.45rem 0 0.55rem;
     background: var(--topbar-bg);
   }

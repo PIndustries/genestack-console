@@ -2921,7 +2921,7 @@ function renderMinimap() {
   if (!m || !m.canvas.getContext) return;
   const ctx = m.canvas.getContext("2d");
   ctx.clearRect(0, 0, m.w, m.h);
-  ctx.fillStyle = "#140808";
+  ctx.fillStyle = "#070e09";
   ctx.fillRect(0, 0, m.w, m.h);
   const placed = lastGraph.nodes.filter((n) => n.x != null && n.y != null);
   if (!placed.length) return;
@@ -2938,7 +2938,7 @@ function renderMinimap() {
   const vh = flow.clientHeight / view.k;
   const vx = -view.x / view.k;
   const vy = -view.y / view.k;
-  ctx.strokeStyle = "#eb0000";
+  ctx.strokeStyle = "#34c759";
   ctx.lineWidth = 1;
   ctx.strokeRect(4 + vx * m.s, 4 + vy * m.s, vw * m.s, vh * m.s);
 }

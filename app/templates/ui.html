@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Genestack Console — Admin Portal</title>
-  <link rel="icon" href="data:," />
+  <title>Genestack Console</title>
+  <link rel="icon" href="/static/brand/p-industries-mark.png" />
   <link rel="stylesheet" href="/static/css/portal.css" />
   <link rel="stylesheet" href="/static/css/theme.css" />
   <style>
@@ -135,11 +135,10 @@
   <!-- Login screen (shown when no session token / API key in localStorage) -->
   <div id="login-view" class="login-wrap hidden">
     <div class="card login-card">
-      <div class="brand" style="margin-bottom:.35rem">
-        <div class="mark">GS</div>
-        <div>Genestack Console</div>
+      <div class="brand brand-lockup" style="margin-bottom:1rem">
+        <img class="brand-logo" src="/static/brand/p-industries.png" alt="P.Industries" />
+        <div class="brand-powered">Powered by Genestack Console by P.Industries</div>
       </div>
-      <p class="muted" style="margin:0 0 1rem;font-size:.85rem">Community console — metal, Talos, Kubernetes, OpenStack.</p>
       <h1>Sign in</h1>
       <div id="login-sso" class="hidden">
         <div style="display:grid; gap:.75rem; margin-bottom:1rem">
@@ -184,12 +183,9 @@
   <!-- Portal shell -->
   <div id="app-shell" class="shell hidden">
     <aside class="sidebar">
-      <a class="brand" href="#/fleet">
-        <div class="mark">GS</div>
-        <div>
-          <div class="brand-name">Genestack</div>
-          <div class="muted brand-sub">Console</div>
-        </div>
+      <a class="brand brand-lockup" href="#/fleet">
+        <img class="brand-logo" src="/static/brand/p-industries.png" alt="P.Industries" />
+        <span class="brand-powered">Powered by Genestack Console by P.Industries</span>
       </a>
       <nav class="nav" aria-label="Primary">
         <div class="nav-label">Fleet</div>

@@ -14,7 +14,7 @@ const LAYERS = [
 ];
 
 const MENU_COL = {
-  in: "#eb0000",
+  in: "#34c759",
   see: "#94a3b8",
   open: "#34d399",
   logs: "#fbbf24",
@@ -595,21 +595,21 @@ function draw() {
   layoutCells();
   ctx.clearRect(0, 0, w, h);
   const g = ctx.createRadialGradient(w * 0.5, h * 0.2, 20, w * 0.5, h * 0.45, Math.max(w, h) * 0.8);
-  g.addColorStop(0, "rgba(48, 12, 12, 0.4)");
-  g.addColorStop(1, "rgba(6, 1, 1, 0.7)");
+  g.addColorStop(0, "rgba(12, 48, 22, 0.4)");
+  g.addColorStop(1, "rgba(1, 8, 4, 0.7)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
   if (stageOn) {
     const well = Math.min(w, h) * 0.29;
     hexPath(w / 2, h / 2 + 6, well);
-    ctx.fillStyle = "rgba(6, 1, 1, 0.22)";
+    ctx.fillStyle = "rgba(1, 8, 4, 0.22)";
     ctx.fill();
-    ctx.strokeStyle = "rgba(235, 0, 0, 0.4)";
+    ctx.strokeStyle = "rgba(52, 199, 89, 0.4)";
     ctx.lineWidth = 2.2;
     ctx.stroke();
   }
   if (crumbCells.length > 1 && !stageOn) {
-    ctx.strokeStyle = "rgba(235,0,0,0.35)";
+    ctx.strokeStyle = "rgba(52,199,89,0.35)";
     ctx.lineWidth = 2;
     ctx.beginPath();
     crumbCells.forEach((c, i) => {
