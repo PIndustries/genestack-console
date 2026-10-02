@@ -1,25 +1,59 @@
 # Genestack Console
 
-The program you run on the deploy host, next to a [Genestack](https://github.com/rackerlabs/genestack) checkout. It runs the bootstrap, Ansible, and Talos steps. The environment, the job log, and the BMC secrets stay on that host.
+[Genestack](https://github.com/rackerlabs/genestack) is the project that installs OpenStack on Kubernetes. You clone that source onto a Linux computer, and the scripts in the checkout build the cloud.
+
+Genestack Console is a second program you install on that same computer. It is the page you open in a browser to do the install from one place:
+
+- save the settings for one cloud
+- power the physical servers on and off
+- give a server an IP address and a boot file while you are installing an operating system on it
+- run the Genestack scripts and keep the log
+
+That computer is the deploy host. The name means "the machine that performs the deploy." It is an ordinary Linux machine you control, on a network where it can reach the servers. The console, the saved settings, the job log, and the passwords for the server management ports all stay on it.
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash
 # then open http://127.0.0.1:8080/ui and follow Guided setup
 ```
 
-`get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080`. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md).
+`get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080` on the deploy host. From your laptop, `ssh -L 8080:127.0.0.1:8080 <deploy-host>` and open the same URL. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md).
 
-Sign in with a local account. To let the Apple apps and the account page reach this console, connect it to `https://my.genestack.dev`. That portal does not run a copy of the console. See [docs/hosted-mode.md](docs/hosted-mode.md).
+Sign in with a user created on that machine. `https://my.genestack.dev` is an account page you can connect later. It lets the Mac, iPhone, iPad, and Apple Watch apps reach this console, and it is where you manage that account. The cloud's settings stay on the deploy host. See [docs/hosted-mode.md](docs/hosted-mode.md).
 
-## What it does
+## The three directories
 
-- **Environments** — One cloud per environment: a lab, a rack, or a region. Jobs and credentials stay inside it.
-- **Deploy jobs** — Push the saved config to the deploy host, then run the Genestack install scripts. The job log stays on the environment.
-- **Agents** — A remote site dials out to the console. The agent does not accept inbound connections from the console.
-- **Bare metal** — Each MAC has a next boot. Disk is the default. A selected machine is commissioned, then PXE'd once into Talos. DHCP and the boot files run in the console process when it is on that L2.
-- **Accounts** — Local passwords, an API key, your own identity provider, or sign-in through `my.genestack.dev`.
+| Path | What it is |
+| --- | --- |
+| `/opt/genestack` | The Genestack git checkout. The console runs the install scripts from here. |
+| `/etc/genestack` | Inventory and the settings those scripts read. Genestack's `bootstrap.sh` creates this tree. |
+| `/opt/genestack-console` | This program. It sits next to the Genestack checkout. It is not a folder inside it. |
 
-## Quick start
+An environment is one cloud: a lab, one rack, or one site. You create it in the UI. The settings and the job log for that cloud stay inside it. You point the environment at `/opt/genestack` and `/etc/genestack` on the deploy host.
+
+## How a physical server gets an operating system
+
+The deploy host and the servers share a network. On that network the console answers DHCP. DHCP is the service that hands a machine an IP address when it asks. The console also serves a boot file. A server that is told to boot from the network downloads that file from the console and runs it. Both of those services run inside the console process. You do not set up a separate DHCP appliance for this.
+
+Each server has two addresses you enter:
+
+- The management port, often called the BMC, iLO, or iDRAC. It is a small controller in the server that stays on when the main computer is off. The console uses it to power the server and to request one network boot.
+- The port on the same network as the deploy host. DHCP matches the MAC address of that port.
+
+A server you have not selected boots from its own disk. The console leaves it alone.
+
+When you install one server:
+
+1. The console writes a boot file for that MAC and asks the management port for one network boot. The file is a small program that runs in memory, wipes the disks, and sends one report back to the console.
+2. After that report, the console writes a Talos boot file for the same MAC and asks for one more network boot. Talos is the operating system Kubernetes runs on for this install.
+3. The deploy job then runs the Genestack scripts from `/opt/genestack`: inventory, Kubernetes, then OpenStack.
+
+A site on the far side of a firewall cannot hear the deploy host's DHCP. Put the console agent on a computer that is on that site's network. The agent opens a connection out to the console. DHCP and the boot files for those servers run on the agent.
+
+Skyline is the OpenStack dashboard people use after the cloud is up. The console is the program the operator uses to build it.
+
+## Run from source
+
+Use this when you are changing the console. Installing Genestack uses the binary above, not this checkout.
 
 ```bash
 git clone https://github.com/PIndustries/genestack-console.git
@@ -40,12 +74,12 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 # API clients authenticate with an API key from config.yaml (X-API-Key header).
 ```
 
-## Architecture
+## Where to read next
 
-- **Console** on the deploy host — FastAPI, the UI, and SQLite. The longer map is [docs/architecture.md](docs/architecture.md).
-- **Worker** — Runs the jobs: config push, deploy, bare-metal boot.
-- **Agent** — Dial-out WebSocket from a remote site. Serves PXE there when the console is not on that L2.
-- **PXE** — In-process DHCP and boot-file HTTP. There is no PXE sidecar.
+- [docs/install.md](docs/install.md) — the install on Linux, and the laptop lab on a Mac or Windows.
+- [docs/architecture.md](docs/architecture.md) — the processes on the deploy host, the boot sequence, and the job runner.
+- [docs/genestack-guide.md](docs/genestack-guide.md) — the same story, written as a chapter of the Genestack manual.
+- [docs/hosted-mode.md](docs/hosted-mode.md) — connecting a console you already run to `https://my.genestack.dev`.
 
 ## API
 

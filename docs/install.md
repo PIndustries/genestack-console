@@ -1,6 +1,12 @@
 # Install the Genestack Console
 
-One command. A compiled binary. The console runs on a machine you operate.
+Genestack Console is the program that drives a Genestack install. Read [the README](../README.md) if you have not seen what it does yet.
+
+Install it on the Linux computer that will hold two other trees: the Genestack checkout at `/opt/genestack`, and the Genestack settings at `/etc/genestack`. This guide calls that computer the deploy host. It is the machine that can reach the servers you are installing. The console listens on `127.0.0.1:8080` on that machine. You open the UI on the deploy host, or from a laptop with `ssh -L 8080:127.0.0.1:8080 <deploy-host>`.
+
+A laptop is a lab copy of the same program. It is the right place to click through the UI. It is the wrong place to boot a rack of servers, because those servers have to be on a network with the machine that answers DHCP.
+
+One command. A compiled binary.
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash

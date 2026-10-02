@@ -1,67 +1,83 @@
 # Genestack Console Architecture
 
-The console runs on the deploy host, next to a Genestack checkout at `/opt/genestack` and inventory at `/etc/genestack`. An environment is one cloud. A job in that environment pushes config and runs the install scripts. The UI, the job log, and the BMC secrets stay on that host.
+The [README](../README.md) is the introduction. This page is the map of what runs after you have installed the console.
 
-Skyline is still the OpenStack dashboard for project users. This program is for the people operating the deploy.
+Genestack is the checkout that installs OpenStack on Kubernetes. The console is the program that drives that checkout. Both live on one Linux computer, the deploy host: the machine you picked because it can reach the servers.
 
-`https://my.genestack.dev` is an optional account link for the Apple apps and for support. It does not run a copy of this console. See [hosted-mode.md](hosted-mode.md).
+| Path | What it is |
+| --- | --- |
+| `/opt/genestack-console` | This program. The UI, the API, a SQLite database, and a worker process. |
+| `/opt/genestack` | The Genestack checkout. The worker runs scripts from here. |
+| `/etc/genestack` | Inventory and overrides. A job renders the saved config into this tree before the install scripts run. |
+
+An environment is one cloud. Its settings are one versioned document in the console database. A job writes the rendered files to `/etc/genestack` and then runs the Genestack pipeline. Users, the job log, and the management-port passwords stay in that database on the deploy host.
+
+Skyline is the OpenStack dashboard people use once the cloud answers. The console is how the operator builds the cloud.
+
+`https://my.genestack.dev` is an optional account page. The Apple apps sign in there and are forwarded to your console. The environment and the management-port passwords stay on the deploy host. See [hosted-mode.md](hosted-mode.md).
+
+```
+your browser
+    |
+    |  http://127.0.0.1:8080 on the deploy host, or an SSH tunnel
+    v
+deploy host
+    /opt/genestack-console    UI, API, database, worker
+    /opt/genestack            Genestack scripts
+    /etc/genestack            inventory and overrides
+    |
+    |  same network as the servers
+    v
+physical servers
+    management port     console powers the machine (BMC / iLO / iDRAC)
+    server port         console answers DHCP and serves the boot file
+```
+
+DHCP is how a server asks for an IP address. The boot file is what the server downloads when its network card is told to start from the network. Both are served by the console process (`app/services/pxe_runtime.py`). The files it serves are rendered by `app/services/pxe.py` under the console data directory.
+
+When the servers are on a network the deploy host cannot see, install the agent on a computer that is on that network. The agent opens the connection out to the console. DHCP and the boot files for that site run on the agent.
 
 ## Boot order
 
-Each machine's next boot is its own.
+Each server has its own next boot. The MAC address is the id of the network port DHCP is watching.
 
-- **disk** is the default, including a MAC the console has never been asked to install. The machine boots its local disk.
-- **commission** is a RAM disk. It wipes fixed-disk headers and posts one report.
-- **talos** is served for that MAC only after the report is accepted. Machine config is pushed after the wipe. It is not placed on the kernel command line.
+- **disk** is the default, including a MAC the console has never been asked to install. The server boots its local disk.
+- **commission** is a small system that runs from memory. It wipes the starts of the fixed disks and posts one report to the console.
+- **talos** is served for that MAC only after the report is accepted. Talos is the operating system Kubernetes runs on for this install. The machine config is pushed after the wipe. It is not placed on the kernel command line.
 
-An ISO boot is rejected for this path because it does not wipe the disks. DHCP and the boot files are served by the console process (`app/services/pxe_runtime.py`) when the host is on the same L2 as the machines. A site behind a firewall runs the agent. The agent dials out and serves PXE on that L2.
+An ISO boot is rejected for this path because it does not wipe the disks.
 
 ## Jobs
 
-A job is one operation on one environment: push config, deploy, PXE a machine, or talk to a BMC. The worker runs it. Two mutating jobs for the same environment do not run at the same time. The catalog and the runner live in `app/services/job_runner.py`. The long deploy job is `app/services/deploy.py`: push the config document, then run the Genestack pipeline.
+A job is one operation on one environment. Pushing config, deploying, sending a boot file, and powering a server are all jobs. You start a job from the UI or the API. The worker process runs it, so a long install is not stuck inside the web request. Two jobs that change the same environment do not run at the same time.
 
-MAAS, OVH, and the Apple native API are adapters on that same job system. They are described further down.
+The catalog and the runner live in `app/services/job_runner.py`. The long deploy job is `app/services/deploy.py`: push the config document, then run the Genestack pipeline.
+
+OVH and the Apple native API are extra ways to reach the same job system. They are described further down. Booting a server uses the bare-metal path above.
 
 ## Layers
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Genestack Console                        │
-│  FastAPI  ·  API keys (admin/operator/viewer)  ·  SQLite     │
-│  Operation catalog  ·  Environments  ·  Jobs  ·  Audit       │
-└───────────────┬─────────────────┬────────────────┬──────────┘
-                │                 │                │
-                ▼                 ▼                ▼
-         ┌────────────┐   ┌─────────────┐  ┌──────────────────┐
-         │    MAAS    │   │   Ansible   │  │  Genestack root  │
-         │  (mock or  │   │  playbooks  │  │  bin/*.sh        │
-         │   real)    │   │  preflight  │  │  openstack-      │
-         │  machines  │   │  basic_ops  │  │  components.yaml │
-         └────────────┘   └─────────────┘  └──────────────────┘
-```
 
 | Layer | Responsibility |
 |-------|----------------|
 | **Console API** | Auth (API keys + user sessions), RBAC, tenants/memberships, env registry, job queue/runner, audit trail, operation catalog, env config documents |
 | **Aggregation services** | Read-only rollups over env state: descriptor (`app/services/descriptor.py`), guided workflow (`app/services/workflow.py` — six lifecycle steps), fleet board (`app/services/fleet.py` — compact per-env step states, no synchronous probes) |
 | **Telemetry** | Worker-side collector writing per-env cluster snapshots, in-process event bus + SSE stream, alert rules/events, optional metric samples — see [Telemetry & real-time subsystem](#telemetry--real-time-subsystem) |
-| **Agent channel** | Hub-and-spoke dial-out WebSocket per env (`app/services/agents.py`, `agent/`): HMAC enrollment handshake, heartbeats, allowlisted commands — see [Agent channel](#agent-channel-hub-and-spoke) |
-| **MAAS adapter** | List machines + power status; commission/deploy/release; Talos factory-image upload (mock when `maas.url` empty in config.yaml — write ops get deterministic mock transitions) |
-| **Bare-metal adapter** | Per-MAC boot order (disk, commission, talos), Redfish BMC client (`app/services/redfish.py`), node registry (`app/services/baremetal.py`), in-process PXE/DHCP (`app/services/pxe_runtime.py`, files rendered by `app/services/pxe.py`) |
-| **Ansible adapter** | Run allow-listed playbooks (`host_preflight.yml`, `basic_ops.yml`, …) |
+| **Agent channel** | A machine on a remote site opens a WebSocket out to the console (`app/services/agents.py`, `agent/`): HMAC enrollment handshake, heartbeats, allowlisted commands — see [Agent channel](#agent-channel-hub-and-spoke) |
+| **Bare metal** | Per-MAC boot order (disk, commission, talos), Redfish client for the management port (`app/services/redfish.py`), node registry (`app/services/baremetal.py`), DHCP and boot files in-process (`app/services/pxe_runtime.py`, files rendered by `app/services/pxe.py`) |
+| **Ansible** | Run allow-listed playbooks (`host_preflight.yml`, `basic_ops.yml`, …) |
 | **Genestack bridge** | Read `openstack-components.yaml`, list `bin/` scripts, enable services via allowlist, run pipeline stages; inventory + curated run of repo utility scripts (`app/services/repo_scripts.py`) |
 
 ## Multi-environment model
 
 An **environment** is a named ops context (lab, staging, production-rack-a).
-Jobs always run in the scope of an environment so credentials, inventory, and
-MAAS profiles stay isolated.
+Jobs always run in the scope of an environment so credentials and inventory
+stay isolated.
 
 ```
 Environment
   ├── id, name, description, labels
   ├── tenant_id              (owning tenant; existing envs backfilled to "default")
-  ├── optional MAAS / inventory overrides
+  ├── inventory and deploy-host overrides
   ├── genestack_config_dir   (per-env /etc/genestack path)
   ├── kubeconfig_data        (kubeconfig blob, encrypted at rest)
   ├── dry_run                (per-env override; null = inherit global)
