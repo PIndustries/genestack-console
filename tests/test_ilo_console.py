@@ -1,4 +1,4 @@
-"""In-portal iLO HTML5 console session store, JS rewrite, and HTTP proxy."""
+"""iLO HTML5 console session store, JS rewrite, and HTTP proxy."""
 
 from __future__ import annotations
 

@@ -50,7 +50,7 @@ def _payload(row: HardwareAccount) -> dict[str, Any]:
 
 @router.get("/providers")
 def list_providers(principal: Principal = Depends(require_viewer)) -> dict[str, Any]:
-    """What Hardware can take metal from. Same set the portal demo shows."""
+    """What Hardware can take metal from. Same set the console shows."""
     _ = principal
     return {
         "ok": True,

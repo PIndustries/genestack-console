@@ -1,4 +1,4 @@
-"""In-portal OpenStack noVNC console: session mint, HTML/asset proxy, websockify.
+"""OpenStack noVNC in the console UI: session mint, HTML/asset proxy, websockify.
 
 GET/WS under ``/cloud/console/{session_id}/`` are unauthenticated besides the
 unguessable session id (iframe and <script> tags cannot send X-API-Key).

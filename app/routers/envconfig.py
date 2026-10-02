@@ -1,4 +1,4 @@
-"""Portal-managed environment config document + server assignment endpoints.
+"""Environment config document and server assignment endpoints.
 
 All routes are env-scoped via ``get_env_scoped`` (tenant membership enforced).
 """

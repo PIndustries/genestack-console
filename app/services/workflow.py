@@ -1,6 +1,6 @@
 """Guided lifecycle workflow view for one environment (read-only).
 
-Aggregates everything the portal needs to render the "where is this
+Aggregates everything the console UI needs to render the "where is this
 environment in its lifecycle" stepper: six steps (connect, inventory,
 config, push, deploy, operate), each with a traffic-light state
 (``done`` / ``attention`` / ``pending``), a one-line plain-English

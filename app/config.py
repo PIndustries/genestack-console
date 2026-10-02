@@ -137,6 +137,10 @@ class Settings(BaseModel):
     )
     genestack_root: str = ""
     ansible_root: str = ""
+    # Extra operation modules. Each entry is a directory with __init__.py
+    # (a Module subclass) and one Python file per operation. Relative paths
+    # in config.yaml are resolved from that file's directory.
+    module_paths: list[str] = Field(default_factory=list)
     dry_run: bool = True
     # First-boot walkthrough tenant/env. Installer sets true; tests stay false.
     seed_demo: bool = False
@@ -344,6 +348,24 @@ def load_settings(config_path: Path | None = None) -> Settings:
     else:
         ansible_root = str(_default_ansible_root())
 
+    modules_section = raw.get("modules") if isinstance(raw.get("modules"), dict) else {}
+    raw_paths = modules_section.get("paths", [])
+    if isinstance(raw_paths, str):
+        module_path_items = [item.strip() for item in raw_paths.split(",") if item.strip()]
+    elif isinstance(raw_paths, list):
+        module_path_items = [str(item).strip() for item in raw_paths if str(item).strip()]
+    else:
+        module_path_items = []
+    module_base = path.parent if path.is_file() else Path.cwd()
+    module_paths: list[str] = []
+    for item in module_path_items:
+        module_path = Path(item).expanduser()
+        if not module_path.is_absolute():
+            module_path = (module_base / module_path).resolve()
+        else:
+            module_path = module_path.resolve()
+        module_paths.append(str(module_path))
+
     maas = raw.get("maas") if isinstance(raw.get("maas"), dict) else {}
     maas_url = str(maas.get("url") or raw.get("maas_url") or "").strip()
     maas_api_key = str(maas.get("api_key") or raw.get("maas_api_key") or "").strip()
@@ -520,6 +542,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         api_keys=keys,
         genestack_root=genestack_root,
         ansible_root=ansible_root,
+        module_paths=module_paths,
         dry_run=bool(dry_run),
         seed_demo=bool(seed_demo),
         maas_url=maas_url,

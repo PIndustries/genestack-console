@@ -251,46 +251,73 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Health is unauthenticated for probes
+    # Route map. Registration order stays as it is.
+    #   probes and UI: health, update, ui, agent install script
+    #   core: auth, tenants, operations, environments, config, jobs, audit
+    #   bare metal: baremetal, ilo, pxe, discovery
+    #   lifecycle: descriptor, workflow, fleet
+    #   providers: maas, ovh, hardware
+    #   genestack reads: services, state, and the aliases registered below
+    #   native Apple API: native, native_kubernetes, native_consoles
+    #   observe: observe, dashboards, livestate, stream, alerts, metrics
+    #   cloud and nodes: vms, cloud, novnc, k8s, platform, apps, host vms, agents, terminal
+
+    # Probes. Health is unauthenticated.
     app.include_router(health.router)
     app.include_router(update.router)
 
-    # Operator UI (static page; API calls use X-API-Key from the browser)
+    # Operator UI (static page; API calls use X-API-Key from the browser).
     app.include_router(ui.router)
 
-    # Agent install script (unauthenticated; self-hosts the curl-pipe one-liner)
+    # Agent install script (unauthenticated; the curl-pipe one-liner).
     app.include_router(agents.install_router)
 
-    # Authenticated API routers
+    # Core: accounts, tenants, environments, and config.
     app.include_router(auth.router)
     app.include_router(tenants.router)
     app.include_router(operations.router)
     app.include_router(environments.router)
     app.include_router(envconfig.router)
     app.include_router(overlays.router)
+
+    # Bare metal and in-process PXE.
     app.include_router(baremetal.router)
     app.include_router(ilo_console.router)
     app.include_router(pxe.router)
     app.include_router(discovery.router)
+
+    # Lifecycle and fleet views.
     app.include_router(descriptor.router)
     app.include_router(workflow.router)
     app.include_router(fleet.router)
+
+    # Logs and dashboards, then jobs.
     app.include_router(observe.router)
     app.include_router(obs_proxy.router)
     app.include_router(jobs.router)
+
+    # Providers: MAAS, OVH, and hardware accounts.
     app.include_router(maas.router)
     app.include_router(ovh.router)
     app.include_router(hardware_accounts.router)
+
+    # Audit and Genestack service/state reads.
     app.include_router(audit.router)
     app.include_router(genestack_services.router)
     app.include_router(state.router)
+
+    # Native API the Apple apps use, through my.genestack.dev.
     app.include_router(native.router)
     app.include_router(native_kubernetes.router)
     app.include_router(native_consoles.router)
+
+    # Live state, the event stream, alerts, and metrics.
     app.include_router(livestate.router)
     app.include_router(stream.router)
     app.include_router(alerts.router)
     app.include_router(metrics.router)
+
+    # OpenStack, Kubernetes, apps, host VMs, agents, and the terminal.
     app.include_router(vms.router)
     app.include_router(cloud.router)
     app.include_router(novnc.router)

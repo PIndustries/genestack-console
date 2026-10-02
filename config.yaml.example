@@ -54,11 +54,22 @@ genestack:
 ansible:
   root: null
 
-# MAAS integration: empty url => mock inventory (no separate mock flag).
-# For real MAAS, set url and api_key.
+# Extra operation modules. Each path is a folder with an __init__.py that
+# lists one Python file per operation. The console loads these on startup,
+# after the built-in modules under app/modules/. A relative path is from
+# this file's directory. Empty means built-ins only.
+# See docs/modules.md.
+modules:
+  paths: []
+
+# Optional MAAS server. Leave url empty when you do not use MAAS.
+# An empty url does not invent machines. The console's own DHCP and boot
+# files are the bare-metal page, not this section. mock: true is a dev-only
+# stand-in and stays off unless you set it.
 maas:
   url: ""
   api_key: ""
+  mock: false
 
 # OVH dedicated-server import (optional). The app key/secret identify this
 # console as an OVH "application" — create one at https://eu.api.ovh.com/createApp/

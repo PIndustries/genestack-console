@@ -1,4 +1,4 @@
-"""Portal-managed environment config document (Phase 6, Milestone B).
+"""Environment config document (Phase 6, Milestone B).
 
 Each environment's entire config lives in the console DB as one flat,
 versioned YAML document (``EnvConfigVersion`` rows). The document is the
@@ -65,14 +65,14 @@ absent sections never wipe existing files):
                          eight files (all.yml, docker.yml, …), k8s_cluster/
                          uses a dashed k8s-cluster.yml, and etcd is a
                          top-level etcd.yml *file*, not a directory — so the
-                         portal uses its own name for every group. Safe
+                         the console uses its own name for every group. Safe
                          because ansible loads every *.yml in a group dir
                          (and merges a same-named dir with etcd.yml).
     network           -> nothing rendered; its keys flow to pipeline/install
                          commands as env vars instead (see doc_env).
-    pxe               -> nothing rendered here; consumed by app/services/pxe.py,
-                         which writes dnsmasq.conf/boot.ipxe/talos assets under
-                         <data_dir>/pxe for the pxe sidecar container.
+    pxe               -> nothing rendered here; consumed by app/services/pxe.py
+                         and pxe_runtime.py, which serve dnsmasq.conf, boot.ipxe,
+                         and Talos assets from <data_dir>/pxe in-process.
      storage           -> the cinder_* keys (cinder_backend_name,
                           cinder_worker_name) merge into
                           inventory/group_vars/cinder_storage_nodes/console-rendered.yml,
@@ -90,7 +90,7 @@ absent sections never wipe existing files):
                          matching bin/create-secrets.sh's shape; values
                          base64-encoded plaintext like the generated file)
 
-The ``console-rendered.yaml`` filename keeps portal output separate from
+The ``console-rendered.yaml`` filename keeps this output separate from
 hand-maintained files (helm picks up every file in the directory).
 
 ``kubesecrets.yaml`` is an exception to the plain-overwrite rule: genestack's
@@ -260,9 +260,9 @@ TALOS_KUBE_OVN_HELM = {
     "ipv4": {"SVC_CIDR": "10.96.0.0/12"},
 }
 
-# pxe: console-owned DHCP/PXE provisioning (app/services/pxe.py + the pxe
-# sidecar container). interface/range_start/range_end are required when the
-# section is present; the rest are optional (dnsmasq/sidecar defaults apply).
+# pxe: console-owned DHCP/PXE provisioning (app/services/pxe.py and
+# pxe_runtime.py, in-process). interface/range_start/range_end are required
+# when the section is present; the rest are optional.
 # Unknown keys warn (loose validation).
 KNOWN_PXE_KEYS = frozenset(
     {
@@ -281,7 +281,7 @@ REQUIRED_PXE_KEYS = frozenset({"interface", "range_start", "range_end"})
 
 VALID_SERVER_ROLES = frozenset(SERVER_ROLE_GROUPS)
 
-# Filename used for all portal-rendered output inside existing config dirs
+# Filename used for console-rendered output inside existing config dirs
 RENDERED_FILENAME = "console-rendered.yaml"
 
 # group_vars files use the .yml extension, matching genestack's own

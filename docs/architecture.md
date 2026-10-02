@@ -51,7 +51,7 @@ An ISO boot is rejected for this path because it does not wipe the disks.
 
 A job is one operation on one environment. Pushing config, deploying, sending a boot file, and powering a server are all jobs. You start a job from the UI or the API. The worker process runs it, so a long install is not stuck inside the web request. Two jobs that change the same environment do not run at the same time.
 
-The catalog and the runner live in `app/services/job_runner.py`. The long deploy job is `app/services/deploy.py`: push the config document, then run the Genestack pipeline.
+Each operation is a Python file under `app/modules/`. The folder is one area. The folder's `__init__.py` lists those files, in order. The runner in `app/services/job_runner.py` sets up the environment and calls the function for that operation. A module you add uses the same shape. Put the folder on `modules.paths` in `config.yaml`. The layout is in [Modules](modules.md). The long deploy job is `app/services/deploy.py`: push the config document, then run the Genestack pipeline.
 
 OVH and the Apple native API are extra ways to reach the same job system. They are described further down. Booting a server uses the bare-metal path above.
 
@@ -292,6 +292,8 @@ The operate step of the workflow surfaces the latest `genestack.verify` job
 verify-level buttons with a live result pill plus the day-2 buttons there.
 
 ## MAAS provisioning (write actions)
+
+MAAS is optional. The console boots a server itself with DHCP and a boot file. That path is the next section. This section is only for a site that already runs a MAAS server. The operations live in `app/modules/maas/`.
 
 Beyond inventory reads, the MAAS adapter (`app/services/maas.py`) supports
 `commission` / `deploy` / `release` (operator, mutating, per-op timeouts
@@ -800,7 +802,7 @@ Service enablement is **allow-listed** (e.g. `placement` ok; `rm` rejected).
 | Control | Default | Notes |
 |---------|---------|-------|
 | `dry_run` in config.yaml | `true` | Destructive steps are logged, not executed; per-env `dry_run` field overrides |
-| empty `maas.url` | mock | Deterministic fake machines without a flag |
+| empty `maas.url` | not configured | No fake machines. Set `maas.mock: true` only for a dev stand-in. Booting a server does not use MAAS. |
 | API keys + roles | config.yaml | `X-API-Key` header; viewer < operator < admin; static keys = platform-admin break-glass |
 | Tenant isolation | enforced | Env lists filtered by membership; cross-tenant access → 403 |
 | User sessions | 12 h TTL | PBKDF2-SHA256 (600k) passwords; `auth.session_ttl_hours`; logout invalidates |

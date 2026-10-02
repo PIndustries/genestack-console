@@ -579,10 +579,11 @@ class HostVM(Base):
 class BaremetalNode(Base):
     """A bare-metal server the console provisions directly (no MAAS).
 
-    BMC credentials drive Redfish power/boot control; the console-owned PXE
-    sidecar boots the Talos factory image; the node then lands in the env
-    config doc servers section (source "baremetal") for the talos bootstrap
-    flow. ``bmc_password`` is fernet-encrypted at rest like the other stored
+    BMC credentials drive Redfish power/boot control. PXE is served in-process
+    from data_dir/pxe (disk, then commission, then one-shot Talos). The node
+    then lands in the env config doc servers section (source "baremetal") for
+    the talos bootstrap flow. ``bmc_password`` is fernet-encrypted at rest like
+    the other stored
     secrets. ``expected_ip`` is the IP reserved for the node from the PXE
     pool at provision time.
     """

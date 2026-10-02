@@ -101,7 +101,7 @@ def build_inventory_from_environment(
     system_id, hostname, fqdn, ip_addresses, power_state, status_name, tags.
 
     ``servers`` optional doc servers section (hostname -> {system_id, ip,
-    ssh_user, roles, source}) from the portal-managed config document. Roles
+    ssh_user, roles, source}) from the environment config document. Roles
     map to groups via SERVER_ROLE_GROUPS and supersede MAAS-tag-based
     grouping for those hosts. Static and terraform entries (source
     "static"/"terraform") get ansible_host=ip and ansible_user=ssh_user

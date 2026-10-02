@@ -1,4 +1,4 @@
-"""In-portal noVNC sessions and kube-apiserver proxy helpers.
+"""noVNC sessions and kube-apiserver proxy helpers for the console UI.
 
 Nova's noVNC URL (novnc.cluster.local / VLAN 100) is not reachable from the
 operator browser or the console host. HTTP assets and the websockify tunnel

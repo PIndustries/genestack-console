@@ -1,4 +1,4 @@
-"""In-portal Horizon proxy: session mint, auto-login, HTML/cookie rewrite.
+"""Horizon proxy for the console UI: session mint, auto-login, HTML/cookie rewrite.
 
 The operator browser cannot reach horizon.<domain> on the cluster fabric.
 Console logs into Horizon with the Keystone admin secret (never sent to the

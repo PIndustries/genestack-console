@@ -1,4 +1,4 @@
-"""In-portal iLO 4 HTML5 remote console: session mint, asset proxy, KVM WebSocket.
+"""iLO 4 HTML5 remote console in the console UI: session mint, asset proxy, KVM WebSocket.
 
 GET/WS under ``/baremetal/console/{session_id}/`` are unauthenticated besides
 the unguessable session id (iframe <script> cannot send X-API-Key).

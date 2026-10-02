@@ -1,4 +1,4 @@
-"""In-portal iLO HTML5 remote console (IRC) sessions.
+"""iLO HTML5 remote console (IRC) sessions for the console UI.
 
 The operator browser cannot reach BMC addresses on the hardware network.
 The Console host can. Sessions are in-memory (like noVNC): an unguessable

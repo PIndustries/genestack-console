@@ -1,4 +1,4 @@
-"""In-portal noVNC session store, HTML rewrite, and kube proxy helpers."""
+"""noVNC session store, HTML rewrite, and kube proxy helpers."""
 
 from __future__ import annotations
 

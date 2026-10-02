@@ -8,7 +8,7 @@ frames. Fully standalone: the only dependency is ``websockets``.
 
 Configuration (environment variables):
     GSC_HUB_URL      ws:// or wss://host[:port] of the console hub (required)
-    GSC_AGENT_TOKEN  one-time enrollment token from the portal (required)
+    GSC_AGENT_TOKEN  one-time enrollment token from the console (required)
     GSC_AGENT_NAME   display name (default: hostname)
     GSC_PXE_LEASES   path to a dnsmasq leases file to watch (optional); new or
                      changed leases are reported as ``pxe_request`` events
@@ -133,7 +133,7 @@ def load_config(env: dict | None = None) -> AgentConfig:
         )
     if not token:
         raise ConfigError(
-            "GSC_AGENT_TOKEN is required (create an agent token in the portal "
+            "GSC_AGENT_TOKEN is required (create an agent token in the console "
             "or set GSC_AGENT_TOKEN_FILE to a token provisioning path)"
         )
     return AgentConfig(

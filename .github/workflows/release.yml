@@ -132,6 +132,8 @@ jobs:
           files: |
             dist/genestack-console-linux-*
             dist/version.json
+            dist/console.sh
+            dist/console.ps1
           body: |
             Genestack Console ${{ steps.ver.outputs.version }} for Linux.
 

@@ -1,6 +1,6 @@
 """Deploy-host terminal: an interactive ssh shell pty-bridged over WebSocket.
 
-Operators open a tab in the portal and get a shell on the environment's deploy
+Operators open a tab in the console and get a shell on the environment's deploy
 host without leaving the app. The server spawns a pty running
 ``ssh -o BatchMode=yes -o ConnectTimeout=10 <user>@<host>`` and bridges frames:
 
