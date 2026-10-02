@@ -2,14 +2,16 @@
 
 [Genestack](https://github.com/rackerlabs/genestack) is the project that installs OpenStack on Kubernetes. The scripts in that checkout build the cloud. The cluster is that cloud: the Kubernetes nodes, and the OpenStack services that run on them.
 
-Genestack Console is a second program. The recommended place for it is a dedicated Linux server, on the same Ethernet network as the bare-metal machines, with no router between them. That is Layer 2. Clone Genestack onto that server and install the console beside the checkout. The console is the page you open in a browser to do the install from one place:
+Genestack Console is a second program. The recommended place for it is a dedicated Linux server that is L2 with the servers in that environment. L2 means the console and those servers share a local network, so the console answers DHCP and serves PXE itself. DHCP is how a machine asks for an IP address. PXE is the network boot. Clone Genestack onto that server and install the console beside the checkout. The console is the page you open in a browser to do the install from one place:
 
 - save the settings for one cloud
 - power the physical servers on and off
 - give a server an IP address and a boot file while you are installing an operating system on it
 - run the Genestack scripts and keep the log
 
-That server is the deploy host. The name means the machine that performs the deploy. It sits just outside the cluster and never joins it. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on that same Ethernet network and through each server's management port, not through the cluster. A management port is the controller in the server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers, hand out a boot file, and run the install scripts. The console, the saved settings, the job log, and the passwords for the server management ports all stay on it.
+That server is the deploy host. The name means the machine that performs the deploy. It sits just outside the cluster and never joins it. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on their L2 network and through each server's management port, not through the cluster. A management port is the controller in the server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers, hand out a boot file, and run the install scripts. The console, the saved settings, the job log, and the passwords for the server management ports all stay on it.
+
+If the console cannot be L2 with the servers, install the Genestack Console agent on a computer that is L2 with them. The agent answers DHCP and serves PXE there, and it opens a connection out to the console. You still manage the environment from the console. One console often runs many environments this way. A private cloud with several datacenters is the usual case: an agent in each remote datacenter, and this server stays outside every cluster.
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash
@@ -32,12 +34,12 @@ An environment is one cloud: a lab, one rack, or one site. You create it in the 
 
 ## How a physical server gets an operating system
 
-The deploy host and the servers are on the same Ethernet network, with no router between them. On that network the console answers DHCP. DHCP is the service that hands a machine an IP address when it asks. The console also serves a boot file. A server that is told to boot from the network downloads that file from the console and runs it. Both of those services run inside the console process. You do not set up a separate DHCP appliance for this.
+Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. A server that is told to boot from the network downloads that file from the console and runs it. Both of those services run inside the console process. You do not set up a separate DHCP appliance for this.
 
 Each server has two addresses you enter:
 
 - The management port, often called the BMC, iLO, or iDRAC. It is a small controller in the server that stays on when the main computer is off. The console uses it to power the server and to request one network boot.
-- The port on the same network as the deploy host. DHCP matches the MAC address of that port.
+- The port on the L2 network. The console, or the agent at a remote site, matches the MAC address of that port.
 
 A server you have not selected boots from its own disk. The console leaves it alone.
 
@@ -47,7 +49,7 @@ When you install one server:
 2. After that report, the console writes a Talos boot file for the same MAC and asks for one more network boot. Talos is the operating system Kubernetes runs on for this install.
 3. The deploy job then runs the Genestack scripts from `/opt/genestack`: inventory, Kubernetes, then OpenStack.
 
-A site on the far side of a firewall cannot hear the deploy host's DHCP. Put the console agent on a computer that is on that site's network. The agent opens a connection out to the console. DHCP and the boot files for those servers run on the agent.
+When the deploy host cannot be L2 with a site, put the Genestack Console agent on a computer that is L2 with those servers. The agent opens a connection out to the console. DHCP and PXE for that environment run on the agent. You still manage the environment from the console. Several datacenters in one private cloud are the usual case.
 
 Skyline is the OpenStack dashboard people use after the cloud is up. The console is the program the operator uses to build it.
 

@@ -4,7 +4,9 @@ Genestack Console is the program that drives a Genestack install. Read [the READ
 
 Install it on a dedicated Linux server. That server holds two other trees: the Genestack checkout at `/opt/genestack`, and the Genestack settings at `/etc/genestack`. This guide calls that computer the deploy host.
 
-Put the deploy host on the same Ethernet network as the bare-metal servers, with no router between them. That is Layer 2. Leave the deploy host outside the cluster. The cluster is the Kubernetes and OpenStack cloud those servers become. The deploy host never joins that cluster. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on that same Ethernet network and through each server's management port. A management port is the controller inside a server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers and run the install.
+The recommendation is that the deploy host is L2 with the bare-metal servers. L2 means they share a local network, so this machine answers DHCP and serves PXE for that environment. Leave the deploy host outside the cluster. The cluster is the Kubernetes and OpenStack cloud those servers become. The deploy host never joins that cluster. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on their L2 network and through each server's management port. A management port is the controller inside a server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers and run the install.
+
+When the deploy host cannot be L2 with a site, install the console agent on a computer that is. The agent answers DHCP and serves PXE there, and it opens a connection out to the console. You still manage that environment from the console. One console often covers several datacenters this way.
 
 The console listens on `127.0.0.1:8080` on that machine. You open the UI on the deploy host, or from a laptop with `ssh -L 8080:127.0.0.1:8080 <deploy-host>`.
 
