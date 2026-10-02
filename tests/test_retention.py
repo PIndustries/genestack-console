@@ -309,6 +309,7 @@ def test_sweep_smoke_empty_tables(db, settings):
         "jobs",
         "audit_logs",
         "session_tokens",
+        "oauth_authorization_codes",
         "agent_commands",
         "alert_events",
         "env_config_versions",

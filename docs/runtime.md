@@ -19,7 +19,7 @@ The API process does not run the install. It writes a row and returns. A long de
 
 ## What the API does with a click
 
-1. The route checks the login. A session is a Bearer token from `POST /api/v1/auth/login`. An API key is the `X-API-Key` header. Passwords are stored as a PBKDF2-SHA256 hash. They are not encrypted with `secret_key`. The session life is `auth.session_ttl_hours`, 12 hours unless you change it. Each login is its own session. `POST /api/v1/auth/refresh` replaces that session's bearer and its refresh token. The other login stays. The refresh token lasts `auth.refresh_ttl_hours`, 168 hours unless you change it.
+1. The route checks the login. A session is an OAuth 2 access token from `POST /api/v1/oauth/token`, sent as a Bearer token. `POST /api/v1/auth/login` issues the same session. An API key is the `X-API-Key` header. Passwords are stored as a PBKDF2-SHA256 hash. They are not encrypted with `secret_key`. The access token lasts `auth.session_ttl_hours`, 12 hours unless you change it. Each login is its own session. `grant_type=refresh_token` replaces that session's access token and its refresh token. The other login stays. The refresh token lasts `auth.refresh_ttl_hours`, 168 hours unless you change it.
 2. A route that names an environment checks your membership in that environment's tenant. A person from another tenant is refused.
 3. A read returns JSON from the database, or from the last snapshot the collector wrote.
 4. A change calls `execute_operation` in `app/services/job_runner.py`. That inserts a job row with status `queued` and returns the job id. The default is not to run the job inside the request.

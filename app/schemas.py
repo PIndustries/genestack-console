@@ -125,6 +125,11 @@ class LoginResponse(BaseModel):
     refresh_token: str
     refresh_expires_at: datetime
     user: LoginUser
+    # Same session, named the way an OAuth 2 token response names it.
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+    scope: str = "console"
 
 
 class TicketResponse(BaseModel):

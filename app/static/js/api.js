@@ -52,10 +52,16 @@ async function refreshSession() {
     refreshInFlight = (async () => {
       let res;
       try {
-        res = await fetch("/api/v1/auth/refresh", {
+        res = await fetch("/api/v1/oauth/token", {
           method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refresh }),
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: refresh,
+          }),
         });
       } catch {
         return false;
@@ -71,12 +77,13 @@ async function refreshSession() {
       } catch {
         return false;
       }
-      if (!data || !data.token || !data.refresh_token) {
+      const access = data && (data.access_token || data.token);
+      if (!data || !access || !data.refresh_token) {
         clearKey();
         clearRefresh();
         return false;
       }
-      setKey(data.token);
+      setKey(access);
       setRefresh(data.refresh_token);
       return true;
     })().finally(() => {
@@ -176,7 +183,9 @@ export async function api(path, opts = {}) {
     const skipRefresh =
       path === "/api/v1/auth/login" ||
       path === "/api/v1/auth/refresh" ||
-      path === "/api/v1/auth/logout";
+      path === "/api/v1/auth/logout" ||
+      path === "/api/v1/oauth/token" ||
+      path === "/api/v1/oauth/revoke";
     if (res.status === 401 && !retried && !skipRefresh && getRefresh()) {
       const renewed = await refreshSession();
       if (renewed) return api(path, { ...opts, _retried: true });

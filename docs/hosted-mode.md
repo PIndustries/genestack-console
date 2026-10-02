@@ -69,7 +69,7 @@ For a console that operators open directly, with no portal in the path:
 
 ### Authentication
 
-- **Password Login Always Available**: Local username/password accounts work out of the box via `POST /api/v1/auth/login`. The response includes a refresh token for that login. A second login is a second session.
+- **Password Login Always Available**: Local username/password accounts work out of the box. `POST /api/v1/oauth/token` with `grant_type=password` is the OAuth 2 login. The response includes a refresh token for that login. A second login is a second session. Authorization code with PKCE is on `GET /api/v1/oauth/authorize`.
 - **Static API Keys**: Platform-admin break-glass credentials defined in `config.yaml` under `auth.api_keys`.
 - **Optional OIDC**: You may enable OIDC with your own identity provider (Keycloak, Auth0, Okta, etc.) while keeping password login as a fallback.
 

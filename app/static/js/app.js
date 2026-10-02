@@ -357,20 +357,47 @@ async function doLogin() {
     return;
   }
   try {
-    const res = await api("/api/v1/auth/login", {
+    // OAuth 2 resource-owner password grant. The access token is what the
+    // rest of the page sends as X-API-Key, same as a static key.
+    const res = await fetch("/api/v1/oauth/token", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        grant_type: "password",
+        username,
+        password,
+        client_id: "genestack-console",
+        scope: "console",
+      }),
     });
-    // Session tokens resolve through the same X-API-Key header as static keys,
-    // so the token goes into the existing storage slot untouched.
-    setKey(res.token);
-    setRefresh(res.refresh_token);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    if (!res.ok || !data || !data.access_token) {
+      clearKey();
+      clearRefresh();
+      const invalid = res.status === 400 || res.status === 401;
+      loginError(
+        invalid
+          ? "Invalid username or password."
+          : (data && (data.error_description || data.detail)) || "Sign-in failed."
+      );
+      return;
+    }
+    setKey(data.access_token);
+    setRefresh(data.refresh_token);
     await establishSession();
     await enterApp();
   } catch (e) {
     clearKey();
     clearRefresh();
-    loginError(e.status === 401 ? "Invalid username or password." : e.message || String(e));
+    loginError(e.message || String(e));
   }
 }
 

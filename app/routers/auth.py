@@ -37,7 +37,7 @@ from app.schemas import (
     TenantMembershipRead,
     TicketResponse,
 )
-from app.services import accounts, oidc, tickets
+from app.services import accounts, oauth2, oidc, tickets
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -155,6 +155,10 @@ def _login_response(
         expires_at=expires_at,
         refresh_token=refresh_token,
         refresh_expires_at=refresh_expires_at,
+        access_token=token,
+        token_type="Bearer",
+        expires_in=oauth2.expires_in(expires_at),
+        scope=oauth2.SCOPE,
         user=LoginUser(
             username=user.username,
             platform_admin=user.platform_admin,

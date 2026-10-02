@@ -57,6 +57,7 @@ from app.routers import (
     novnc,
     observe,
     obs_proxy,
+    oauth,
     operations,
     overlays,
     ovh,
@@ -274,6 +275,8 @@ def create_app() -> FastAPI:
 
     # Core: accounts, tenants, environments, and config.
     app.include_router(auth.router)
+    app.include_router(oauth.router)
+    app.include_router(oauth.metadata_router)
     app.include_router(tenants.router)
     app.include_router(operations.router)
     app.include_router(environments.router)

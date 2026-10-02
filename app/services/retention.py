@@ -24,6 +24,7 @@ from app.models import (
     EnvConfigVersion,
     Job,
     JobStatus,
+    OAuthAuthorizationCode,
     SessionToken,
 )
 
@@ -69,6 +70,11 @@ def run_retention_sweep(db: Session, settings: Settings) -> dict[str, int]:
                 ),
             )
         )
+    ).rowcount
+
+    # Authorization codes live for about a minute. Drop whatever is left over.
+    counts["oauth_authorization_codes"] = db.execute(
+        delete(OAuthAuthorizationCode).where(OAuthAuthorizationCode.expires_at < now)
     ).rowcount
 
     # Agent command relay rows: short-lived plumbing, 7 days by default.

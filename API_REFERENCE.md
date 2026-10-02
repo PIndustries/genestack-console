@@ -31,7 +31,90 @@ curl http://localhost:8000/health
 
 ---
 
+## OAuth 2
+
+The console is an OAuth 2 authorization server. Discovery is `GET /.well-known/oauth-authorization-server`.
+
+Two logins work at the same time. Each login is its own session. Refresh and revoke touch only the session whose token you sent.
+
+The token endpoint takes `application/x-www-form-urlencoded`. The same field names work as JSON. There is no client secret. The only scope is `console`.
+
+### POST `/api/v1/oauth/token`
+
+**Password grant**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password&username=admin&password=password&scope=console"
+```
+
+**Response:**
+```json
+{
+  "access_token": "<opaque access token>",
+  "token_type": "Bearer",
+  "expires_in": 43200,
+  "refresh_token": "<opaque refresh token>",
+  "refresh_expires_in": 604800,
+  "scope": "console"
+}
+```
+
+Send `access_token` as `Authorization: Bearer <access_token>`.
+
+**Refresh grant.** The access token is not required. The refresh token you send stops working. The other login stays.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=refresh_token&refresh_token=<opaque refresh token>"
+```
+
+**Authorization code grant.** `code` comes from the authorize redirect. `code_verifier` is the PKCE verifier that produced `code_challenge`. The code works once.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code&code=<code>&redirect_uri=http://127.0.0.1:53682/callback&client_id=genestack-console&code_verifier=<verifier>"
+```
+
+A bad grant returns `400` with `{"error":"invalid_grant"}`. A client secret returns `401` with `{"error":"invalid_client"}`.
+
+### GET `/api/v1/oauth/authorize`
+
+Browser start for the authorization-code grant.
+
+Query: `response_type=code`, `client_id`, `redirect_uri`, `state`, `code_challenge`, `code_challenge_method=S256`.
+
+`redirect_uri` is this console's `/ui`, or a loopback address (`127.0.0.1`, `localhost`, or `::1`) for a program on the same machine. The person signs in on the page the console returns. The browser is then sent to `redirect_uri?code=...&state=...`.
+
+### POST `/api/v1/oauth/revoke`
+
+Drops that one session. An unknown token still returns `200`.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/oauth/revoke \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "token=<access token or refresh token>"
+```
+
+### POST `/api/v1/oauth/introspect`
+
+The caller must already be signed in. `{"active": false}` when the token is unknown, expired, or belongs to someone else.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/oauth/introspect \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "token=$TOKEN"
+```
+
+---
+
 ## Auth
+
+`POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` issue the same session for a client that already calls them. Prefer the OAuth 2 token endpoint above.
 
 ### POST `/api/v1/auth/login`
 
@@ -51,9 +134,13 @@ The bearer and the refresh token are opaque strings. A second login returns a se
 ```json
 {
   "token": "<opaque session token>",
+  "access_token": "<opaque session token>",
+  "token_type": "Bearer",
+  "expires_in": 43200,
   "expires_at": "2025-01-15T12:00:00Z",
   "refresh_token": "<opaque refresh token>",
   "refresh_expires_at": "2025-01-22T00:00:00Z",
+  "scope": "console",
   "user": {
     "username": "admin",
     "platform_admin": true,

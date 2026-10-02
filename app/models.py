@@ -411,6 +411,33 @@ class SessionToken(Base):
     )
 
 
+class OAuthAuthorizationCode(Base):
+    """One-time authorization code for the OAuth 2 authorization-code grant.
+
+    The raw code is returned once. This row stores its SHA-256 hex, the PKCE
+    challenge, and the redirect URI that must match at the token endpoint.
+    """
+
+    __tablename__ = "oauth_authorization_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    client_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    redirect_uri: Mapped[str] = mapped_column(String(512), nullable=False)
+    code_challenge: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
 class EnvConfigVersion(Base):
     """Versioned flat YAML config document per environment (used by config push)."""
 
