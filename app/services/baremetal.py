@@ -444,10 +444,13 @@ def set_next_boot(
 ) -> dict[str, Any]:
     """Choose the next image for one MAC. ``boot_now`` power-cycles into it."""
     choice = str(target or "").strip().lower()
-    if choice not in ("commission", "talos", "disk"):
+    if choice not in ("commission", "talos", "ubuntu", "disk"):
         return {
             "ok": False,
-            "error": f"next_boot must be commission, talos, or disk (got {target!r})",
+            "error": (
+                "next_boot must be commission, talos, ubuntu, or disk "
+                f"(got {target!r})"
+            ),
             "returncode": 2,
         }
     if dry_run:
@@ -493,6 +496,8 @@ def set_next_boot(
         db.add(node)
         db.flush()
         return booted
+    if boot_now and choice == "ubuntu":
+        return pxe_boot(db, node, dry_run=False, log=log, settings=settings)
     if boot_now and choice == "disk":
         return power_action(
             db, node, "restart", dry_run=False, log=log, settings=settings

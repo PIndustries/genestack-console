@@ -73,6 +73,9 @@ CATALOG_ORDER = (
     "k8s.node.drain",
     "k8s.apply",
     "app.deploy",
+    "hosts.ubuntu.prepare",
+    "hosts.microk8s.install",
+    "hosts.kubespray.adopt",
 )
 
 

@@ -1,4 +1,4 @@
-// pages/admin.js — platform-admin console: tenants, users, and reach.
+// pages/admin.js — platform-admin console: tenants, users, reach, and the database.
 //
 // Gated on store.platformAdmin (from /api/v1/auth/whoami); non-admins get a
 // 403-style note instead of the management UI. The endpoints themselves
@@ -664,6 +664,7 @@ async function loadData() {
   renderTenantPicker();
   loadOvhAccounts();
   loadReach();
+  loadDatabase();
 }
 
 async function loadReach() {
@@ -712,6 +713,42 @@ async function stopReach(kind) {
     const row = await api(`/api/v1/reach/${kind}/stop`, { method: "POST" });
     toast(row.detail || row.status, "ok");
     await loadReach();
+  } catch (e) {
+    toast(e.message, "bad");
+  }
+}
+
+let databaseNotice = "";
+
+async function loadDatabase() {
+  const host = document.getElementById("adm-db-status");
+  if (!host) return;
+  try {
+    const row = await api("/api/v1/database");
+    const note = databaseNotice ? `<div class="muted">${esc(databaseNotice)}</div>` : "";
+    host.innerHTML =
+      `<div><strong>${esc(row.kind)}</strong> <span class="muted">${esc(row.url)}</span></div>${note}`;
+  } catch (e) {
+    host.innerHTML = `<div class="error">${esc(e.message)}</div>`;
+  }
+}
+
+async function moveDatabase(form) {
+  const input = form.elements.target_url;
+  const targetUrl = input.value.trim();
+  input.value = "";
+  if (!targetUrl) {
+    toast("Target URL is required", "bad");
+    return;
+  }
+  try {
+    const res = await api("/api/v1/database/move", {
+      method: "POST",
+      body: JSON.stringify({ target_url: targetUrl }),
+    });
+    databaseNotice = `Restart the console to use ${res.target}.`;
+    toast("Move finished. Restart the console.", "ok");
+    await loadDatabase();
   } catch (e) {
     toast(e.message, "bad");
   }
@@ -836,6 +873,22 @@ export async function render(root) {
       <button class="secondary btn-sm" type="button" id="adm-reach-cf-apply">Apply</button>
       <button class="secondary btn-sm" type="button" id="adm-reach-cf-stop">Stop</button>
     </form>
+  </div>
+  <div class="card" style="margin-top:1rem">
+    <div class="toolbar">
+      <h2>Database</h2>
+      <button class="secondary btn-sm" id="adm-db-refresh" type="button">Refresh</button>
+    </div>
+    <p class="muted" style="font-size:.78rem">
+      Where this console stores its own data. SQLite is the default. Postgres is the other
+      supported database. Move copies every table, writes database_url, and does not switch
+      the running process. Restart the console after it finishes. The password is not shown.
+    </p>
+    <div id="adm-db-status"><div class="muted">Loading…</div></div>
+    <form id="adm-db-move" class="adm-inline-form" style="margin-top:.75rem">
+      <input name="target_url" type="password" placeholder="target database URL" autocomplete="off" />
+      <button class="secondary btn-sm" type="submit">Move</button>
+    </form>
   </div>`;
 
   document.getElementById("adm-refresh").addEventListener("click", () => loadData());
@@ -892,6 +945,11 @@ export async function render(root) {
   document.getElementById("adm-reach-ts-apply").addEventListener("click", () => applyReach("tailscale"));
   document.getElementById("adm-reach-cf-apply").addEventListener("click", () => applyReach("cloudflare"));
   document.getElementById("adm-reach-cf-stop").addEventListener("click", () => stopReach("cloudflare"));
+  document.getElementById("adm-db-refresh").addEventListener("click", () => loadDatabase());
+  document.getElementById("adm-db-move").addEventListener("submit", (e) => {
+    e.preventDefault();
+    moveDatabase(e.target);
+  });
 
   await loadData();
 }

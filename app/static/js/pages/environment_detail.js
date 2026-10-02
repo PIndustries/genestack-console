@@ -19,6 +19,7 @@ import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCa
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";
 import { reachCardHtml, wireReachCard, loadReachCard, destroyReachCard } from "./environment_reach.js";
+import { hostsCardHtml, wireHostsCard, loadHostsCard, destroyHostsCard } from "./environment_hosts.js";
 import { appsCardHtml, wireAppsCard, loadAppsCard, destroyAppsCard } from "./environment_apps.js?v=slot2";
 import { observeCardHtml, wireObserveCard, loadObserveCard, destroyObserveCard } from "./environment_observe.js";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
@@ -241,8 +242,8 @@ let activeTab = "workflow";
 const TAB_LOADERS = {
   workflow: [loadDeployMap, loadProgressCard, loadTerminalCard],
   observe: [loadObserveCard],
-  settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
-  inventory: [loadSshKeysCard, loadAgentsCard, loadReachCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
+  settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
+  inventory: [loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
   config: [loadConfigCard],
   apps: [loadAppsCard],
   expert: [loadComponentsCard],
@@ -357,6 +358,7 @@ export async function render(root, { param, query } = {}) {
       <div class="env-grid" style="margin-top:.75rem">
         ${agentsCardHtml()}
         ${reachCardHtml()}
+        ${hostsCardHtml()}
       </div>
       <details class="card" style="margin-top:.75rem">
         <summary>Bare metal provisioning (optional)</summary>
@@ -534,6 +536,7 @@ export async function render(root, { param, query } = {}) {
   wirePxeCard(() => envId);
   wireAgentsCard(() => envId);
   wireReachCard(() => envId);
+  wireHostsCard(() => envId);
   wireComponentsCard(() => envId);
   wireTerminalCard(() => envId);
   wireSshKeysCard(() => envId);
@@ -567,6 +570,7 @@ export function destroy() {
   destroyTerminalCard();
   destroyAgentsCard();
   destroyReachCard();
+  destroyHostsCard();
   destroyServersCard();
   destroyBaremetalCard();
   destroyDiscoveryCard();

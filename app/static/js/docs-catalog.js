@@ -104,6 +104,34 @@
       ],
     },
     {
+      id: "database",
+      title: "Database",
+      blurb: "Where this console stores its own data. SQLite is the default. Postgres is the other supported database. The password is not returned.",
+      routes: [
+        { m: "GET", p: "/api/v1/database", d: "Engine kind, sqlite or postgresql, and the URL with the password replaced. Platform admin." },
+        {
+          m: "POST",
+          p: "/api/v1/database/move",
+          d: "Copy every table onto an empty target, create the schema, and write database_url. Restart the console after. Platform admin. The password is not returned.",
+          body: '{"target_url":"postgresql+psycopg://console@127.0.0.1:5432/console"}',
+        },
+      ],
+    },
+    {
+      id: "traces",
+      title: "Traces",
+      blurb: "Spans of this console process and of modules people add. In memory. A restart clears them. Admin only. No tokens. On main. Not in the v2026.10.03 binary.",
+      routes: [
+        { m: "GET", p: "/api/v1/traces", d: "Recent spans, newest last. limit defaults to 50 and caps at 200." },
+        {
+          m: "POST",
+          p: "/api/v1/traces",
+          d: "Append one span. status is ok or error. name is at most 128 characters.",
+          body: '{"name":"hello.say","duration_ms":1.5,"status":"ok"}',
+        },
+      ],
+    },
+    {
       id: "hardware",
       title: "Hardware",
       blurb: "Inventory and provision. Terraform bare metal (Rackspace, AWS, Azure, GCP), OVH via API, PXE, SSH, BMC/Redfish.",

@@ -77,7 +77,7 @@ OPERATIONS = (
             _p(
                 "next_boot",
                 True,
-                "commission, talos, or disk",
+                "commission, talos, ubuntu, or disk",
                 enum=["commission", "talos", "disk"],
             ),
             _p(

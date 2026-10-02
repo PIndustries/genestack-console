@@ -39,6 +39,7 @@ from app.routers import (
     auth,
     baremetal,
     cloud,
+    database,
     descriptor,
     discovery,
     envconfig,
@@ -68,6 +69,7 @@ from app.routers import (
     stream,
     tenants,
     terminal,
+    traces,
     ui,
     update,
     vms,
@@ -332,6 +334,8 @@ def create_app() -> FastAPI:
     app.include_router(hostvms.router)
     app.include_router(agents.router)
     app.include_router(reach.router)
+    app.include_router(database.router)
+    app.include_router(traces.router)
     app.include_router(terminal.router)
 
     # Frontend static assets (check_dir=False: the dir may be absent pre-build)

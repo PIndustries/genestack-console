@@ -38,6 +38,8 @@ A route that names an environment checks your membership in that environment's t
 | `app/routers/ui.py` | The web page at `/ui`, and `/docs` on the console itself. |
 | `app/routers/agents.py` | The agent install script, unauthenticated, and the agent API. The install script is the curl the remote machine runs. The agent then connects out. |
 | `app/routers/reach.py` | WireGuard, Tailscale, and Cloudflare Tunnel on this deploy host, and the address used for one environment. A platform admin saves the hub. An operator attaches an environment. Private keys, auth keys, and tunnel tokens are not returned. A WireGuard client config is returned once, when the peer is created. On `main`. Not in the `v2026.10.03` binary. |
+| `app/routers/database.py` | Copy this console's database between SQLite and Postgres. A platform admin reads the engine and the masked URL, or moves every table onto an empty target and writes `database_url`. The console must be restarted. The password is not returned. On `main`. Not in the `v2026.10.03` binary. |
+| `app/routers/traces.py` | Spans of this process and of modules people add. `GET /api/v1/traces` and `POST /api/v1/traces`. Admin only. The buffer is in memory and a restart clears it. No tokens. On `main`. Not in the `v2026.10.03` binary. |
 
 `GET /` redirects a browser to `/ui`.
 

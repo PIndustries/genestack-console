@@ -1,4 +1,4 @@
-"""Per-MAC PXE boot choice: commission RAM disk, Talos, or the local disk.
+"""Per-MAC PXE boot choice: commission RAM disk, Talos, Ubuntu, or the local disk.
 
 The commission image is a RAM disk. It never mounts a hard drive. When
 ``gsc_wipe=1`` it clears the front of each fixed disk so the old bootloader
@@ -14,7 +14,7 @@ import tarfile
 from datetime import datetime, timezone
 from typing import Any
 
-NEXT_BOOTS = ("commission", "talos", "disk")
+NEXT_BOOTS = ("commission", "talos", "ubuntu", "disk")
 STOP_AFTER = ("", "commission", "talos")
 
 # Pinned Alpine netboot. The kernel, initramfs, and modloop are fetched once
@@ -169,6 +169,23 @@ boot
 """
 
 
+def render_ubuntu_ipxe(assets_base_url: str) -> str:
+    """Ubuntu autoinstall. user-data is served from this console's PXE tree."""
+    base = assets_base_url.rstrip("/")
+    seed = f"{base}/ubuntu/"
+    return (
+        "#!ipxe\n"
+        "# profile: ubuntu\n"
+        "# Ubuntu autoinstall. Cloud-init reads user-data and meta-data\n"
+        "# from the seed URL. No OpenStack and no Kubernetes in this boot.\n"
+        "echo Genestack Console: Ubuntu autoinstall\n"
+        f"kernel {base}/ubuntu/vmlinuz initrd=initrd ip=dhcp autoinstall "
+        f"ds=nocloud-net\\;s={seed} ---\n"
+        f"initrd {base}/ubuntu/initrd\n"
+        "boot\n"
+    )
+
+
 def render_profile_ipxe(
     next_boot: str, assets_base_url: str, token: str | None
 ) -> str:
@@ -177,6 +194,8 @@ def render_profile_ipxe(
         return render_commission_ipxe(assets_base_url, token or "")
     if choice == "talos":
         return render_talos_ipxe(assets_base_url)
+    if choice == "ubuntu":
+        return render_ubuntu_ipxe(assets_base_url)
     return render_disk_ipxe()
 
 

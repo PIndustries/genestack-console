@@ -37,6 +37,7 @@ _BUILTINS = (
     "app.modules.apps",
     "app.modules.hardware",
     "app.modules.platform",
+    "app.modules.hosts",
 )
 
 _ENTRY_GROUP = "genestack_console.modules"

@@ -17,7 +17,7 @@ The sidebar is:
 | Hardware | `#/hardware` | `app/static/js/pages/hardware.js` | Inventory, bare metal, and provider accounts. |
 | Activity | `#/activity` | `app/static/js/pages/activity.js` | Jobs, alerts, and the audit log. Three tabs. |
 | Catalog | `#/operations` | `app/static/js/pages/operations.js` | Every operation the console can run. The same list as `GET /api/v1/operations`. |
-| Admin | `#/admin` | `app/static/js/pages/admin.js` | People, tenants, memberships, and, on `main`, Reach. Hidden unless you are a platform admin. |
+| Admin | `#/admin` | `app/static/js/pages/admin.js` | People, tenants, memberships, and, on `main`, Reach and Database. Hidden unless you are a platform admin. |
 
 Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. That is the first screen after a new install. It creates the environment and points it at `/opt/genestack` and `/etc/genestack`. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
 
@@ -44,7 +44,7 @@ Settings is four more tabs.
 | --- | --- |
 | Config | The settings document. Saving a version does not edit `/etc/genestack`. A push job does that. `environment_config.js`. |
 | Apps | An application to deploy onto a cloud that is already up. `environment_apps.js`. |
-| Access | SSH keys, agents, Reach, and the bare-metal cards. `environment_sshkeys.js`, `environment_agents.js`, `environment_reach.js`, `environment_baremetal.js`, `environment_pxe.js`. |
+| Access | SSH keys, agents, Reach, Hosts, and the bare-metal cards. `environment_sshkeys.js`, `environment_agents.js`, `environment_reach.js`, `environment_hosts.js`, `environment_baremetal.js`, `environment_pxe.js`. |
 | Expert | The fields that do not have their own card. |
 
 The bare-metal cards are also on the Hardware page. Hardware has three tabs: Inventory, Bare metal, and Providers. Inventory is the servers you have typed in. Bare metal is the boot service and the management ports. Providers is a saved login for OVH, Rackspace, AWS, Azure, or GCP. The secret stays on the deploy host.
@@ -60,6 +60,12 @@ Activity has three tabs.
 A notification channel is a Slack, Discord, or Teams webhook, or a Resend or Twilio credential. An admin saves it on the Alerts tab. The secret is encrypted and is not shown again. A rule can send through that channel and through its own webhook URL. This is on `main`. The `v2026.10.03` binary does not have that card.
 
 On `main`, Admin has a Reach card for the deploy host, and Settings → Access has a Reach card for one environment. A WireGuard client config is shown once. A Tailscale auth key and a Cloudflare tunnel token are not shown again. The `v2026.10.03` binary does not have those cards.
+
+On `main`, Admin has a Database card that shows SQLite or Postgres, the URL with the password hidden, and Move. Move copies every table onto an empty target, writes `database_url`, and tells you to restart. The `v2026.10.03` binary does not have that card.
+
+Traces are API-only. An admin reads and posts spans at `/api/v1/traces`. There is no traces screen. This is on `main`. It is not in the `v2026.10.03` binary.
+
+On `main`, Settings → Access has a Hosts card. It prepares an Ubuntu autoinstall seed, queues a MicroK8s install, or records a Kubespray cluster that already exists. Talos stays on its own card. The `v2026.10.03` binary does not have the Hosts card.
 
 ## What the other screen files are
 

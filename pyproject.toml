@@ -43,8 +43,8 @@ dev = [
 genestack-console-worker = "app.worker.runner:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["app*"]
+where = [".", "sdk"]
+include = ["app*", "genestack_sdk*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "app.version.VERSION" }

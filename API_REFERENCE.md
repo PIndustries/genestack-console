@@ -131,6 +131,36 @@ curl -X PUT http://localhost:8000/api/v1/reach/wireguard \
 
 ---
 
+## Database
+
+`GET /api/v1/database` returns the engine, `sqlite` or `postgresql`, and the URL with the password replaced by `***`. Platform admin.
+
+`POST /api/v1/database/move` copies every table onto an empty SQLite or Postgres database, writes `database_url`, and leaves the running process on the old database. Restart the console after. The target must have no rows. The password is not returned.
+
+This is on `main`. The `v2026.10.03` binary does not include these routes.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/database/move \
+  -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"target_url":"sqlite:///./data/console-next.db"}'
+```
+
+---
+
+## Traces
+
+`GET /api/v1/traces` returns recent spans, newest last. `POST /api/v1/traces` appends one span. Admin only. The buffer is in memory. A restart clears it. The payload has no tokens.
+
+This is on `main`. The `v2026.10.03` binary does not include these routes.
+
+```bash
+curl http://localhost:8000/api/v1/traces \
+  -H "X-API-Key: $KEY"
+```
+
+---
+
 ## Auth
 
 `POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` issue the same session for a client that already calls them. Prefer the OAuth 2 token endpoint above.
