@@ -2,7 +2,7 @@
 
 The [README](../README.md) is the introduction. This page is the map of what runs after you have installed the console.
 
-Genestack is the checkout that installs OpenStack on Kubernetes. The console is the program that drives that checkout. Both live on one Linux computer, the deploy host: the machine you picked because it can reach the servers.
+Genestack is the checkout that installs OpenStack on Kubernetes. The cluster is that cloud. The console is the program that drives the checkout. Both live on one dedicated Linux server, the deploy host. Put that server on the same Ethernet network as the bare metal, with no router between them. That is Layer 2. The deploy host sits just outside the cluster and never joins it. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on that same Ethernet network and through each server's management port (the BMC, iLO, or iDRAC), so it can still power them and run the install when the cluster is down.
 
 | Path | What it is |
 | --- | --- |
@@ -21,16 +21,16 @@ your browser
     |
     |  http://127.0.0.1:8080 on the deploy host, or an SSH tunnel
     v
-deploy host
-    /opt/genestack-console    UI, API, database, worker
-    /opt/genestack            Genestack scripts
-    /etc/genestack            inventory and overrides
+deploy host                    dedicated server, outside the cluster
+    /opt/genestack-console     UI, API, database, worker
+    /opt/genestack             Genestack scripts
+    /etc/genestack             inventory and overrides
     |
-    |  same network as the servers
+    |  out of band: same Ethernet as the servers, no router
     v
-physical servers
-    management port     console powers the machine (BMC / iLO / iDRAC)
-    server port         console answers DHCP and serves the boot file
+physical servers               these machines become the cluster
+    management port            console powers the machine (BMC / iLO / iDRAC)
+    server port                console answers DHCP and serves the boot file
 ```
 
 DHCP is how a server asks for an IP address. The boot file is what the server downloads when its network card is told to start from the network. Both are served by the console process (`app/services/pxe_runtime.py`). The files it serves are rendered by `app/services/pxe.py` under the console data directory.

@@ -1,15 +1,15 @@
 # Genestack Console
 
-[Genestack](https://github.com/rackerlabs/genestack) is the project that installs OpenStack on Kubernetes. You clone that source onto a Linux computer, and the scripts in the checkout build the cloud.
+[Genestack](https://github.com/rackerlabs/genestack) is the project that installs OpenStack on Kubernetes. The scripts in that checkout build the cloud. The cluster is that cloud: the Kubernetes nodes, and the OpenStack services that run on them.
 
-Genestack Console is a second program you install on that same computer. It is the page you open in a browser to do the install from one place:
+Genestack Console is a second program. The recommended place for it is a dedicated Linux server, on the same Ethernet network as the bare-metal machines, with no router between them. That is Layer 2. Clone Genestack onto that server and install the console beside the checkout. The console is the page you open in a browser to do the install from one place:
 
 - save the settings for one cloud
 - power the physical servers on and off
 - give a server an IP address and a boot file while you are installing an operating system on it
 - run the Genestack scripts and keep the log
 
-That computer is the deploy host. The name means "the machine that performs the deploy." It is an ordinary Linux machine you control, on a network where it can reach the servers. The console, the saved settings, the job log, and the passwords for the server management ports all stay on it.
+That server is the deploy host. The name means the machine that performs the deploy. It sits just outside the cluster and never joins it. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on that same Ethernet network and through each server's management port, not through the cluster. A management port is the controller in the server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers, hand out a boot file, and run the install scripts. The console, the saved settings, the job log, and the passwords for the server management ports all stay on it.
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash
@@ -32,7 +32,7 @@ An environment is one cloud: a lab, one rack, or one site. You create it in the 
 
 ## How a physical server gets an operating system
 
-The deploy host and the servers share a network. On that network the console answers DHCP. DHCP is the service that hands a machine an IP address when it asks. The console also serves a boot file. A server that is told to boot from the network downloads that file from the console and runs it. Both of those services run inside the console process. You do not set up a separate DHCP appliance for this.
+The deploy host and the servers are on the same Ethernet network, with no router between them. On that network the console answers DHCP. DHCP is the service that hands a machine an IP address when it asks. The console also serves a boot file. A server that is told to boot from the network downloads that file from the console and runs it. Both of those services run inside the console process. You do not set up a separate DHCP appliance for this.
 
 Each server has two addresses you enter:
 

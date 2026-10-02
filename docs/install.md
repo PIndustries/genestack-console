@@ -2,7 +2,11 @@
 
 Genestack Console is the program that drives a Genestack install. Read [the README](../README.md) if you have not seen what it does yet.
 
-Install it on the Linux computer that will hold two other trees: the Genestack checkout at `/opt/genestack`, and the Genestack settings at `/etc/genestack`. This guide calls that computer the deploy host. It is the machine that can reach the servers you are installing. The console listens on `127.0.0.1:8080` on that machine. You open the UI on the deploy host, or from a laptop with `ssh -L 8080:127.0.0.1:8080 <deploy-host>`.
+Install it on a dedicated Linux server. That server holds two other trees: the Genestack checkout at `/opt/genestack`, and the Genestack settings at `/etc/genestack`. This guide calls that computer the deploy host.
+
+Put the deploy host on the same Ethernet network as the bare-metal servers, with no router between them. That is Layer 2. Leave the deploy host outside the cluster. The cluster is the Kubernetes and OpenStack cloud those servers become. The deploy host never joins that cluster. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on that same Ethernet network and through each server's management port. A management port is the controller inside a server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers and run the install.
+
+The console listens on `127.0.0.1:8080` on that machine. You open the UI on the deploy host, or from a laptop with `ssh -L 8080:127.0.0.1:8080 <deploy-host>`.
 
 A laptop is a lab copy of the same program. It is the right place to click through the UI. It is the wrong place to boot a rack of servers, because those servers have to be on a network with the machine that answers DHCP.
 
