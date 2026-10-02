@@ -114,6 +114,11 @@ jobs:
           print(data["binary"])
           PY
 
+      - name: Stage installer scripts
+        run: |
+          cp scripts/genestack-console.sh dist/console.sh
+          cp scripts/console.ps1 dist/console.ps1
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -132,3 +137,4 @@ jobs:
 
             The asset `genestack-console-linux-amd64` is the single binary.
             `version.json` names that asset for the update check.
+            `console.sh` and `console.ps1` are the installers. `get.genestack.dev` redirects to them.

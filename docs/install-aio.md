@@ -178,17 +178,16 @@ credentials). Interactive runs ask for confirmation first.
 
 ## Hosting `genestack-console.sh` at a stable URL
 
-The script is a plain static file — host it anywhere that serves files over
-HTTPS:
+The release workflow copies `scripts/genestack-console.sh` to the GitHub
+Release as `console.sh`. The live one-liner follows that asset:
 
-- **GitHub raw** — zero extra infrastructure:
-  `https://raw.githubusercontent.com/PIndustries/genestack-console/main/scripts/genestack-console.sh`
-- **Any static host / object store** — nginx, GitHub Pages, S3+CDN, etc.
-- **The console itself** — drop it under `app/static/` and it is served by
-  the same FastAPI app.
+```shell
+curl -fsSL https://get.genestack.dev/console.sh | bash
+```
 
-`https://genestack.dev/console.sh` is the live one-liner, served by the
-Genestack site. The script it runs is `scripts/genestack-console.sh` in this repo.
+`get.genestack.dev` and `genestack.dev` redirect to
+`https://github.com/PIndustries/genestack-console/releases/latest/download/console.sh`.
+The script in the repository is the file those URLs serve.
 
 ## Verifying the installer
 
