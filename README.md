@@ -84,6 +84,7 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 - [docs/architecture.md](docs/architecture.md) — the processes on the deploy host, the boot sequence, and the job runner.
 - [docs/modules.md](docs/modules.md) — where each operation lives, and how to add a module of your own.
 - [docs/genestack-guide.md](docs/genestack-guide.md) — the same story, written as a chapter of the Genestack manual.
+- [docs/program.md](docs/program.md), [docs/runtime.md](docs/runtime.md), [docs/jobs.md](docs/jobs.md), [docs/http.md](docs/http.md), and [docs/ui.md](docs/ui.md) — the two processes, how a job runs, every operation, the HTTP routes, and the web page.
 - [docs/hosted-mode.md](docs/hosted-mode.md) — connecting a console you already run to `https://my.genestack.dev`.
 
 ## API

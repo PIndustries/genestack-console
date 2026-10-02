@@ -95,3 +95,5 @@ The value is the `Module` subclass. The worked copy of this layout is `examples/
 For every job, the runner resolves the environment, the deploy host, the timeout, and whether the command goes through an agent, SSH, or the console itself. Then it calls `run` in the file for that handler. The function returns the result dict. The runner stores the log and the audit row around that call.
 
 A function file can import helpers from `app.services`. It should not import `app.services.job_runner` at the top of the file. The runner imports the modules, so a top-level import of the runner loops. If a step needs a helper that lives on the runner, import it inside `run`, the way `app/modules/genestack/k8s_upgrade.py` does.
+
+Every built-in operation is listed in [Jobs](jobs.md). How the worker claims a job, and where the command runs, is [How a job runs](runtime.md).
