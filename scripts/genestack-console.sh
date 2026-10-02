@@ -9,7 +9,7 @@
 #
 # Safe to re-run. The UI binds loopback only — SSH tunnel or VPN.
 set -euo pipefail
-# Stamped at publish time by get.genestack.dev/deploy.sh / the release workflow.
+# Stamped at publish time when the installer is deployed.
 GSC_INSTALLER_REV="${GSC_INSTALLER_REV:-dev}"
 
 # ---------------------------------------------------------------------------
