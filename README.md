@@ -1,11 +1,11 @@
 # Genestack Console
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash
+curl -fsSL https://genestack.dev/console.sh | bash
 # then open http://127.0.0.1:8080/ui and follow Guided setup
 ```
 
-`get.genestack.dev` is the live installer. Checkout install: [docs/install.md](docs/install.md).
+The installer is served by the Genestack site. Checkout install: [docs/install.md](docs/install.md).
 Compiled Linux binaries are GitHub Release assets: [docs/releasing.md](docs/releasing.md).
 
 Operator fleet control plane for managing [Genestack](https://github.com/rackerlabs/genestack) environments.

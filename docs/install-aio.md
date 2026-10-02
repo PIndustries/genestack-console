@@ -3,7 +3,7 @@
 The **default community path** is the fleet hub only — see [install.md](install.md):
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash
+curl -fsSL https://genestack.dev/console.sh | bash
 ```
 
 Then open Guided setup and deploy OVH Rise with Talos. `--with-aio-vm` stays a
@@ -17,14 +17,14 @@ With the AIO dev VM:
 **Linux** (needs KVM — bare metal or a VM with nested virtualization):
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --with-aio-vm
+curl -fsSL https://genestack.dev/console.sh | bash -s -- --with-aio-vm
 ```
 
 **macOS** (Docker Desktop for the Console, QEMU/HVF for the VM — Apple Silicon
 or Intel):
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --dev
+curl -fsSL https://genestack.dev/console.sh | bash -s -- --dev
 ```
 
 `--dev` is the same flag as `--with-aio-vm`. Installs to `~/genestack-console`,
@@ -187,8 +187,8 @@ HTTPS:
 - **The console itself** — drop it under `app/static/` and it is served by
   the same FastAPI app.
 
-`https://get.genestack.dev/console.sh` is the live one-liner. The file it
-serves is `scripts/genestack-console.sh` in this repo.
+`https://genestack.dev/console.sh` is the live one-liner, served by the
+Genestack site. The script it runs is `scripts/genestack-console.sh` in this repo.
 
 ## Verifying the installer
 

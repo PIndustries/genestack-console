@@ -3,7 +3,7 @@
 One command. A compiled binary. No git clone of the portal.
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash
+curl -fsSL https://genestack.dev/console.sh | bash
 ```
 
 This installs the Console on a machine you operate, with local password authentication.
@@ -28,7 +28,7 @@ Prefix is `~/genestack-console`. First boot still seeds tenant **demo** /
 environment **walkthrough**. For a real local VM as well:
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --dev
+curl -fsSL https://genestack.dev/console.sh | bash -s -- --dev
 ```
 
 That is `--with-aio-vm` on a Mac: QEMU + Hypervisor.framework, Ubuntu cloud
@@ -40,13 +40,13 @@ running and `brew install qemu`. Not a production rack — a laptop lab.
 ```powershell
 wsl --install -d Ubuntu
 wsl
-curl -fsSL https://get.genestack.dev/console.sh | bash
+curl -fsSL https://genestack.dev/console.sh | bash
 ```
 
 Or from PowerShell (jumps into WSL2):
 
 ```powershell
-irm https://get.genestack.dev/console.ps1 | iex
+irm https://genestack.dev/console.ps1 | iex
 ```
 
 Git Bash + Docker Desktop also runs the hub (seeded walkthrough, no AIO VM).
@@ -120,7 +120,7 @@ docker run --rm --name genestack-console \
 Or let the installer load that image and write compose (no git checkout):
 
 ```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --docker
+curl -fsSL https://genestack.dev/console.sh | bash -s -- --docker
 ```
 
 PXE DHCP and boot-file HTTP run **inside the console process** (Python).
@@ -128,7 +128,7 @@ There is no PXE sidecar. Bare metal: run the binary on the box (needs the
 provisioning NIC and privilege to bind UDP/67). A container can do the same
 only with `--network host --cap-add NET_ADMIN`.
 
-`get.genestack.dev/console.sh` always fetches the compiled binary by default.
+`https://genestack.dev/console.sh` always fetches the compiled binary by default.
 
 ## Publishing the binary (maintainers)
 

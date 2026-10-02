@@ -5,7 +5,7 @@
 # You do not get a source tree. Optional: --docker loads a binary-wrapped
 # image (still no source) for operators who want a container.
 #
-#   curl -fsSL https://get.genestack.dev/console.sh | bash
+#   curl -fsSL https://genestack.dev/console.sh | bash
 #
 # Safe to re-run. The UI binds loopback only — SSH tunnel or VPN.
 set -euo pipefail
@@ -164,8 +164,8 @@ Reach the UI over an SSH tunnel or VPN (binds 127.0.0.1). Then Guided setup
 or the seeded demo/walkthrough tenant.
 
 Usage:
-  curl -fsSL https://get.genestack.dev/console.sh | bash
-  curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --dev
+  curl -fsSL https://genestack.dev/console.sh | bash
+  curl -fsSL https://genestack.dev/console.sh | bash -s -- --dev
   genestack-console.sh --install [--prefix DIR] [--port N] [--advertise-url URL]
   genestack-console.sh --uninstall [--prefix DIR] [--non-interactive]
   genestack-console.sh --update [--prefix DIR]   # pull a newer binary if published
