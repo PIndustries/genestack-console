@@ -1,6 +1,6 @@
 # Connect a console to my.genestack.dev
 
-The console always runs on a machine you operate. `https://my.genestack.dev` is the account portal in front of that console. It is how the Apple apps reach the console, and it is where the account holder manages the account and asks us for support.
+The console runs on a dedicated Linux server you operate. Put that server on the same Ethernet as the bare metal, with no router between them, and leave it outside the cluster. It never joins the cluster. `https://my.genestack.dev` is the account portal in front of that console. It is how the Apple apps reach the console, and it is where the account holder manages the account and asks us for support.
 
 The portal does not run a copy of this deployer. An environment, a job, a BMC secret, and the cluster stay on your console. On my.genestack.dev you manage the account and the link to a console you already installed.
 
