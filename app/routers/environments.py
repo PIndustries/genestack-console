@@ -22,7 +22,6 @@ from app.models import Environment, Job, Membership, Tenant
 from app.config import get_settings
 from app.schemas import (
     MASKED_KUBECONFIG_DATA,
-    MASKED_MAAS_API_KEY,
     EnvironmentCreate,
     EnvironmentRead,
     EnvironmentUpdate,
@@ -95,9 +94,6 @@ def create_environment(
     settings = get_settings()
 
     # Encrypt secrets at rest before storing (same treatment as update)
-    maas_api_key_encrypted = body.maas_api_key_encrypted
-    if maas_api_key_encrypted:
-        maas_api_key_encrypted = encrypt_secret(maas_api_key_encrypted)
     kubeconfig_data = body.kubeconfig_data
     if kubeconfig_data:
         kubeconfig_data = encrypt_secret(kubeconfig_data)
@@ -115,8 +111,6 @@ def create_environment(
         region=body.region,
         tier=body.tier,
         description=body.description,
-        maas_url=body.maas_url,
-        maas_api_key_encrypted=maas_api_key_encrypted,
         kubeconfig_path=body.kubeconfig_path,
         deployer_ssh_host=body.deployer_ssh_host,
         deployer_ssh_user=body.deployer_ssh_user,
@@ -181,15 +175,11 @@ def update_environment(
     # Map metadata -> metadata_json
     if "metadata" in data:
         env.metadata_json = data.pop("metadata")
-    # Masked sentinel means "unchanged" — keep the stored key
-    if data.get("maas_api_key_encrypted") == MASKED_MAAS_API_KEY:
-        data.pop("maas_api_key_encrypted")
+    # Masked sentinel means "unchanged" — keep the stored kubeconfig
     if data.get("kubeconfig_data") == MASKED_KUBECONFIG_DATA:
         data.pop("kubeconfig_data")
-    # Encrypt secrets at rest before storing
-    for key in ("maas_api_key_encrypted", "kubeconfig_data"):
-        if data.get(key):
-            data[key] = encrypt_secret(data[key])
+    if data.get("kubeconfig_data"):
+        data["kubeconfig_data"] = encrypt_secret(data["kubeconfig_data"])
     if "name" in data and data["name"] != env.name:
         clash = db.scalar(
             select(Environment).where(

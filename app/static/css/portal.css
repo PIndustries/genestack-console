@@ -546,7 +546,7 @@ a.wf-action.primary:hover { filter: brightness(1.15); color: #fff; }
   .wf-flash { animation: none; }
 }
 
-/* ---------- servers card: MAAS machine actions ---------- */
+/* ---------- servers card: deploy actions ---------- */
 .srv-deploy { display: inline-block; }
 .srv-deploy[open] summary { margin-bottom: 0.35rem; }
 .srv-deploy-form {

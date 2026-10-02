@@ -1,4 +1,4 @@
-"""Build inventory dictionaries from environment hosts / MAAS machines.
+"""Build inventory dictionaries from environment hosts.
 
 Doc server roles map onto the group layout the parent genestack repo consumes
 (see ansible/inventory/genestack/inventory.yaml.example):
@@ -60,15 +60,6 @@ _STORAGE_GROUPS = frozenset(
     {"longhorn_storage_nodes", "ceph_storage_nodes", "cinder_storage_nodes"}
 )
 
-# MAAS tag -> doc role, for hosts not covered by the doc servers section
-_MAAS_TAG_ROLES = {
-    "compute": "compute",
-    "controller": "control",
-    "controllers": "control",
-    "storage": "storage",
-}
-
-
 def _add_to_group(children: dict[str, Any], group: str, name: str) -> None:
     """Place host ``name`` in ``group``, creating the nesting genestack expects."""
     if group in _K8S_CLUSTER_GROUPS:
@@ -90,23 +81,19 @@ def _add_to_group(children: dict[str, Any], group: str, name: str) -> None:
 
 def build_inventory_from_environment(
     env: Environment,
-    hosts: list[dict[str, Any]] | None = None,
     servers: dict[str, Any] | None = None,
     include_deployer: bool = True,
 ) -> dict[str, Any]:
     """
     Build a simple ansible-style inventory dict for an environment.
 
-    ``hosts`` optional list of machine dicts (e.g. from MAAS) with keys:
-    system_id, hostname, fqdn, ip_addresses, power_state, status_name, tags.
-
     ``servers`` optional doc servers section (hostname -> {system_id, ip,
     ssh_user, roles, source}) from the environment config document. Roles
-    map to groups via SERVER_ROLE_GROUPS and supersede MAAS-tag-based
-    grouping for those hosts. Static and terraform entries (source
-    "static"/"terraform") get ansible_host=ip and ansible_user=ssh_user
-    (default "ubuntu"); legacy
-    system_id-keyed entries are still understood.
+    map to groups via SERVER_ROLE_GROUPS. Static and terraform entries
+    (source "static"/"terraform") get ansible_host=ip and
+    ansible_user=ssh_user (default "ubuntu"). An older record whose source
+    is "maas" still renders. Legacy system_id-keyed entries are still
+    understood.
 
     ``include_deployer`` adds the env's deploy host under a console-side
     ``deployers`` group; the rendered /etc/genestack inventory passes False
@@ -178,9 +165,7 @@ def build_inventory_from_environment(
             _add_to_group(inventory["all"]["children"], str(g), name)
 
     # Doc servers section: explicit role assignments keyed by hostname.
-    # These supersede MAAS-tag-based grouping for the hosts they cover.
     servers = servers or {}
-    covered_system_ids: set[str] = set()
     for key, server in servers.items():
         if not isinstance(server, dict):
             continue
@@ -189,20 +174,14 @@ def build_inventory_from_environment(
             and "system_id" not in server
             and server.get("hostname")
         ):
-            # Legacy keying: the mapping key is the MAAS system_id
-            system_id = key
+            # Legacy keying: the mapping key is a system id.
             name = str(server["hostname"])
         else:
-            system_id = server.get("system_id")
             name = str(server.get("hostname") or key)
-        source = server.get("source") or ("maas" if system_id else "static")
-        if system_id:
-            covered_system_ids.add(str(system_id))
+        source = server.get("source") or "static"
         entry = {"ansible_host": server.get("ip") or name}
         if source in ("static", "terraform"):
             entry["ansible_user"] = server.get("ssh_user") or "ubuntu"
-        if system_id:
-            entry["maas_system_id"] = system_id
         inventory["all"]["hosts"][name] = {
             k: v for k, v in entry.items() if v is not None
         }
@@ -222,48 +201,6 @@ def build_inventory_from_environment(
         for role in server.get("roles") or []:
             for group in SERVER_ROLE_GROUPS.get(str(role).lower()) or ():
                 _add_to_group(children, group, name)
-
-    # MAAS-sourced hosts
-    for m in hosts or []:
-        if str(m.get("system_id")) in covered_system_ids:
-            # Covered by the doc servers section above; doc roles win over
-            # tag-based grouping for this host.
-            continue
-        name = m.get("hostname") or m.get("fqdn") or m.get("system_id") or m.get("name")
-        if not name:
-            continue
-        ips = m.get("ip_addresses") or m.get("ip_addresses_list") or []
-        ip = None
-        if isinstance(ips, list) and ips:
-            ip = ips[0] if isinstance(ips[0], str) else (ips[0] or {}).get("ip")
-        elif isinstance(ips, str):
-            ip = ips
-
-        entry = {
-            "ansible_host": ip or name,
-            "maas_system_id": m.get("system_id"),
-            "power_state": m.get("power_state"),
-            "status_name": m.get("status_name") or m.get("status"),
-            "tags": m.get("tag_names") or m.get("tags") or [],
-        }
-        inventory["all"]["hosts"][name] = {
-            k: v for k, v in entry.items() if v is not None
-        }
-        host_vars = inventory["all"]["hosts"][name]
-        host_vars["ansible_ssh_private_key_file"] = "/etc/genestack/.ssh/id_ed25519"
-        host_vars["ansible_ssh_common_args"] = '"-o StrictHostKeyChecking=accept-new"'
-        children = inventory["all"]["children"]
-        _add_to_group(children, "ungrouped_maas", name)
-
-        tags = entry.get("tags") or []
-        tag_list = tags if isinstance(tags, list) else [tags]
-        for tag in tag_list:
-            t = str(tag).lower()
-            if t in ("deployer", "deployers"):
-                _add_to_group(children, "deployers", name)
-            else:
-                for group in SERVER_ROLE_GROUPS.get(_MAAS_TAG_ROLES.get(t) or "") or ():
-                    _add_to_group(children, group, name)
 
     return inventory
 

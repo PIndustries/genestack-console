@@ -63,19 +63,6 @@ if [[ "$code" == "200" ]]; then
   pass=$((pass + 1))
 fi
 
-# MAAS mock machines (when mock mode enabled)
-code=$(curl -sS -o /tmp/smoke-maas.json -w "%{http_code}" \
-  -H "X-API-Key: ${API_KEY}" "${API_BASE}/api/v1/maas/machines" || echo 000)
-if [[ "$code" == "200" ]]; then
-  echo "OK  maas machines (${code})"
-  pass=$((pass + 1))
-elif [[ "$code" == "404" ]]; then
-  echo "SKIP maas machines (route not mounted yet)"
-else
-  echo "FAIL maas machines (${code})"
-  fail=$((fail + 1))
-fi
-
 echo "[smoke] pass=${pass} fail=${fail}"
 if [[ "$fail" -gt 0 ]]; then
   exit 1

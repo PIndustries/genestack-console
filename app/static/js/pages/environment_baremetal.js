@@ -7,8 +7,7 @@
 // (baremetal.node.provision, admin-gated: commission wipe, then Talos, then
 // inventory). Data comes from GET /api/v1/environments/{id}/baremetal; every
 // action is a job (confirm → POST → amber running pill +
-// #/activity?tab=jobs&job=<id> link → 5s poll → reload on terminal), mirroring
-// the verify/maas patterns in environment_workflow.js / environment_servers.js.
+// #/activity?tab=jobs&job=<id> link → 5s poll → reload on terminal).
 // Defensive: the endpoint may 404 (backend not deployed yet) or return partial
 // payloads — every path degrades to a muted note, never a page break.
 import { api, esc, fmtTime, toast } from "../api.js";
@@ -83,8 +82,7 @@ function setBmRowBusy(nodeId, busy) {
   });
 }
 
-// Poll a baremetal.node.* job every 5s (mirrors pollMaasJob in
-// environment_servers.js): update the row's job line while queued/running; on a
+// Poll a baremetal.node.* job every 5s: update the row's job line while queued/running; on a
 // terminal state toast once and reload the card so the node's new state shows.
 async function pollBmJob(envId, nodeId, jobId, label) {
   if (!document.getElementById("bm-card")) return; // navigated away

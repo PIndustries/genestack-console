@@ -997,8 +997,8 @@ def _ovh_resolve_service_names(
     """Map the env's OVH-owned servers to OVH service names.
 
     Explicit ``source: ovh`` rows are always selected (unresolvable → error).
-    In an OVH-bound environment, ``static`` (and other non-MAAS/baremetal)
-    rows that match live inventory by IP or hostname are selected too, so
+    In an OVH-bound environment, ``static`` rows that are not already
+    bare-metal or terraform match live inventory by IP or hostname, so
     a fleet imported before source tagging still BYOI-reinstalls. Unmatched
     static rows are skipped, not failed — they are not OVH boxes.
 

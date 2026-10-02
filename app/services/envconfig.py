@@ -6,16 +6,17 @@ source of truth; ``render_to_files`` maps it onto the deploy host's
 ``/etc/genestack`` tree and ``push_rendered`` writes those files (locally or
 over the ssh executor), backing up pre-existing files first.
 
-Documented top-level schema (loose validation — unknown keys warn, not reject)::
+Documented top-level schema (loose validation — unknown keys warn, not reject).
+A leftover ``maas:`` block in an older file is ignored and dropped on the next save.
+Older server rows may still say ``source: maas``; they still load::
 
     provider: kubespray
-    deploy: {ssh_host, ssh_user, ssh_password, dry_run}  # push syncs these onto the Environment row (ssh_password encrypted, masked on read)
-    maas: {url, api_key}                       # api_key encrypted at rest (fernet:), masked on read
+    deploy: {ssh_host, ssh_user, ssh_password, dry_run}  # push syncs ssh_host and ssh_user onto the Environment row (ssh_password encrypted, masked on read)
     servers:                                   # role assignments, hostname keyed
-      <hostname>: {system_id: <maas id|null>, ip, ssh_user,
+      <hostname>: {system_id: <id|null>, ip, ssh_user,
                    roles: [k8s_control_plane|etcd|control|compute|network|
                            storage|storage-ceph|storage-cinder],
-                   source: maas|static|baremetal|ovh|terraform,
+                   source: static|baremetal|ovh|terraform,
                    service_name: <ovh internal name|null>,
                    public_ip, private_ip, private_mac, vrack_vni>}
     ovh: {vrack, vlan_id, private_cidr}        # dedicated/Rise fabric (802.1q on private NIC)
@@ -225,7 +226,7 @@ def _rook_overlay_kustomization(external_pvc: bool = False) -> str:
 
 
 # talos: settings for the provider=talos bootstrap flow (app/services/talos.py);
-# image_url is the Talos factory image URL (OVH BYOI, MAAS upload, PXE assets);
+# image_url is the Talos factory image URL (OVH BYOI and the PXE assets);
 # efi_bootloader_path is the OVH BYOI EFI path (default \EFI\BOOT\BOOTX64.EFI).
 KNOWN_TALOS_KEYS = frozenset(
     {
@@ -394,12 +395,12 @@ def _normalize_servers(servers: dict[Any, Any], warnings: list[str]) -> dict[str
     """Normalize the ``servers:`` section to hostname-keyed entries.
 
     Current shape (per hostname key): ``{system_id, ip, ssh_user, ssh_auth_method,
-    ssh_password, roles, source, service_name}`` with source "maas", "static",
-    "baremetal", "ovh", or "terraform" (service_name: the OVH internal server name).
-    Legacy documents keyed by MAAS system_id (entries carrying a ``hostname`` field
+    ssh_password, roles, source, service_name}`` with source "static",
+    "baremetal", "ovh", or "terraform". Older records may still say "maas".
+    Legacy documents keyed by system id (entries carrying a ``hostname`` field
     and no ``source``) are rewritten on read: the hostname becomes the key and the
-    old key is kept as ``system_id`` with source "maas". When ``source`` is absent
-    it is inferred: "maas" when a system_id is present, else "static".
+    old key is kept as ``system_id``. When ``source`` is absent and a system_id
+    is present, the stored source stays "maas" so an older document still loads.
     """
     normalized: dict[str, Any] = {}
     for key, assignment in servers.items():
@@ -407,7 +408,7 @@ def _normalize_servers(servers: dict[Any, Any], warnings: list[str]) -> dict[str
             raise ConfigValidationError(f"servers.{key} must be a mapping")
         entry = dict(assignment)
         if "source" not in entry and "system_id" not in entry and entry.get("hostname"):
-            # Legacy keying: the mapping key is the MAAS system_id
+            # Legacy keying: the mapping key is a system id.
             hostname = str(entry.pop("hostname"))
             entry["system_id"] = key
             entry["source"] = "maas"
@@ -709,30 +710,15 @@ def _encrypt_deploy_password(
     return True
 
 
-def _encrypt_maas_api_key(
-    doc: dict[str, Any], previous_doc: dict[str, Any] | None
-) -> bool:
-    """Encrypt ``maas.api_key`` in place, like a ``secrets:`` value.
+def _drop_ignored_maas(doc: dict[str, Any]) -> bool:
+    """Drop a leftover ``maas:`` block. Returns True when the doc changed.
 
-    The sentinel passthrough mirrors the secrets: section: an api_key equal
-    to SECRET_MASK keeps the previously stored (already encrypted) value;
-    a sentinel with no previous value is left as a literal (same tradeoff).
-    encrypt_secret is idempotent, so re-PUTs of an already fernet:-prefixed
-    key are safe. Returns True when the doc changed.
+    Older documents may still contain that key. It is not used. Dropping it
+    on write keeps the credential out of the next stored version.
     """
-    maas = doc.get("maas")
-    if not isinstance(maas, dict):
+    if "maas" not in doc:
         return False
-    api_key = maas.get("api_key")
-    if not isinstance(api_key, str) or not api_key:
-        return False
-    if api_key == SECRET_MASK:
-        previous = (previous_doc or {}).get("maas") or {}
-        if not previous.get("api_key"):
-            return False
-        maas["api_key"] = previous["api_key"]
-        return True
-    maas["api_key"] = encrypt_secret(api_key)
+    doc.pop("maas", None)
     return True
 
 
@@ -772,14 +758,13 @@ def _encrypt_server_passwords(doc: dict[str, Any]) -> bool:
 
 
 def mask_document(doc: dict[str, Any]) -> dict[str, Any]:
-    """Copy of ``doc`` with secrets, maas.api_key, server ssh_passwords, and
-    deploy.ssh_password masked.
+    """Copy of ``doc`` with secrets, server ssh_passwords, and
+    deploy.ssh_password masked. A leftover ``maas:`` block is omitted.
 
     Returns ``doc`` itself when there is nothing to mask.
     """
     secrets = doc.get("secrets")
-    maas = doc.get("maas")
-    mask_maas = isinstance(maas, dict) and bool(maas.get("api_key"))
+    drop_maas = "maas" in doc
     deploy = doc.get("deploy")
     mask_deploy = isinstance(deploy, dict) and bool(deploy.get("ssh_password"))
     servers = doc.get("servers")
@@ -788,14 +773,13 @@ def mask_document(doc: dict[str, Any]) -> dict[str, Any]:
     )
     if (
         not isinstance(secrets, dict)
-        and not mask_maas
+        and not drop_maas
         and not mask_servers
         and not mask_deploy
     ):
         return doc
     masked = dict(doc)
-    if mask_maas:
-        masked["maas"] = {**maas, "api_key": SECRET_MASK}
+    masked.pop("maas", None)
     if mask_deploy:
         masked["deploy"] = {**deploy, "ssh_password": SECRET_MASK}
     if isinstance(secrets, dict):
@@ -819,7 +803,7 @@ def mask_document(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def mask_yaml_text(yaml_text: str) -> str:
-    """Stored document text with secrets and maas.api_key masked for API responses."""
+    """Stored document text with secrets masked for API responses."""
     doc, _warnings = parse_document(yaml_text)
     masked = mask_document(doc)
     if masked is doc:
@@ -868,11 +852,11 @@ def put_version(
 ) -> tuple[EnvConfigVersion, list[str]]:
     """Validate and store a new config version. Does not commit.
 
-    Secrets under ``secrets:`` and the ``maas.api_key`` are encrypted at rest
-    before storing — the stored yaml_text never holds plaintext. Values equal
-    to SECRET_MASK keep the previously stored (encrypted) value for that key.
-    Server-level ``ssh_password`` values and ``deploy.ssh_password`` are also
-    encrypted at rest.
+    Secrets under ``secrets:`` are encrypted at rest before storing — the
+    stored yaml_text never holds plaintext. Values equal to SECRET_MASK keep
+    the previously stored (encrypted) value for that key. Server-level
+    ``ssh_password`` values and ``deploy.ssh_password`` are also encrypted
+    at rest. A leftover ``maas:`` block is dropped and not stored.
     """
     doc, warnings = parse_document(yaml_text)
     if expected_version is not None:
@@ -891,7 +875,6 @@ def put_version(
     current: tuple[dict[str, Any], EnvConfigVersion] | None = None
     if (
         isinstance(doc.get("secrets"), dict)
-        or isinstance(doc.get("maas"), dict)
         or isinstance(doc.get("servers"), dict)
         or isinstance(doc.get("deploy"), dict)
     ):
@@ -901,7 +884,7 @@ def put_version(
         _resolve_secret_sentinels(doc, current[0] if current else None)
         _encrypt_document_secrets(doc)
         changed = True
-    if _encrypt_maas_api_key(doc, current[0] if current else None):
+    if _drop_ignored_maas(doc):
         changed = True
     if _encrypt_deploy_password(doc, current[0] if current else None):
         changed = True
@@ -967,14 +950,12 @@ def assign_server(
     hostname: str | None = None,
     roles: list[str] | None = None,
     ip: str | None = None,
-    source: str = "maas",
+    source: str = "static",
 ) -> tuple[EnvConfigVersion, list[str]]:
     """Upsert a server assignment into a NEW config version.
 
-    Entries are keyed by hostname (falling back to the system_id). MAAS
-    deploys pass ``source="maas"`` with the MAAS ``system_id``; the
-    console-managed bare-metal path (baremetal.node.provision) passes
-    ``source="baremetal"`` with no system_id. Does not commit.
+    Entries are keyed by hostname (falling back to the system_id). The
+    bare-metal path passes ``source="baremetal"``. Does not commit.
     """
     if source not in VALID_SERVER_SOURCES:
         raise ConfigValidationError(

@@ -31,7 +31,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
 from sqlalchemy import select
@@ -39,9 +39,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-
-if TYPE_CHECKING:
-    from app.services.maas import MaasClient
 
 from app.models import AuditLog, EnvMutex, Environment, HostVM, Job, JobStatus
 from app.schemas import OperationSpec
@@ -93,7 +90,7 @@ class ConflictError(RuntimeError):
         self.job_id = job_id
 
 
-class MaasDownloadError(RuntimeError):
+class ImageDownloadError(RuntimeError):
     """Factory image download failed (HTTP error or size bound exceeded)."""
 
 
@@ -151,11 +148,10 @@ def download_factory_image(
 
     The bytes stream straight to disk (1 MiB chunks): a 2 GiB factory image
     must not be held in process memory (the previous in-RAM version peaked
-    near 4 GiB in the worker container). Raises :class:`MaasDownloadError`
+    near 4 GiB in the worker container). Raises :class:`ImageDownloadError`
     on HTTP errors, when the size bound is exceeded, or when the
     destination is not writable — the partial file is removed on failure.
-    Shared by the MAAS image-upload op (``maas.talos.image_upload``) and the
-    PXE asset fetch (app/services/pxe.py).
+    The PXE asset fetch (app/services/pxe.py) uses this.
     """
     import hashlib
 
@@ -174,19 +170,19 @@ def download_factory_image(
             with httpx.Client(follow_redirects=True, timeout=600.0) as http:
                 with http.stream("GET", url) as response:
                     if response.status_code >= 400:
-                        raise MaasDownloadError(
+                        raise ImageDownloadError(
                             f"download failed: HTTP {response.status_code} from {url}"
                         )
                     for chunk in response.iter_bytes(1024 * 1024):
                         total += len(chunk)
                         if total > max_bytes:
-                            raise MaasDownloadError(
+                            raise ImageDownloadError(
                                 f"download exceeds {max_bytes} byte limit"
                             )
                         digest.update(chunk)
                         out.write(chunk)
     except httpx.HTTPError as exc:
-        raise MaasDownloadError(f"download failed: {exc}") from exc
+        raise ImageDownloadError(f"download failed: {exc}") from exc
     finally:
         # A partial file must not be mistaken for a completed image by a
         # later run (the PXE fetcher skips downloads when assets exist).
@@ -689,366 +685,6 @@ class JobRunner:
             self.db.refresh(job)
 
         return job
-
-    def _maas_creds(self, env: Environment | None) -> tuple[str, str]:
-        if env:
-            url = env.maas_url or self.settings.maas_url
-            key = (
-                decrypt_secret(env.maas_api_key_encrypted) or self.settings.maas_api_key
-            )
-            return url or "", key or ""
-        return self.settings.maas_url or "", self.settings.maas_api_key or ""
-
-    def _maas_client(self, env: Environment | None) -> MaasClient:
-        """MAAS client for an env: per-env creds, global mock only as fallback.
-
-        The dev-only mock inventory (``maas.mock: true``) applies only when no
-        MAAS URL is configured for the env or globally — never silently.
-        """
-        from app.services.maas import MaasClient
-
-        url, key = self._maas_creds(env)
-        mock = bool(getattr(self.settings, "maas_mock", False)) and not url
-        return MaasClient.from_settings(
-            {"maas_url": url, "maas_api_key": key, "maas_mock": mock}
-        )
-
-    def _maas_machine_action(
-        self,
-        handler: str,
-        job: Job,
-        env: Environment | None,
-        params: dict[str, Any],
-        log,
-        dry: bool,
-    ) -> dict[str, Any]:
-        """commission/deploy/release a MAAS machine (write ops, per-env creds)."""
-        action = handler.removeprefix("maas_machine_")  # commission|deploy|release
-        op_id = f"maas.machine.{action}"
-        if env is None:
-            return {
-                "ok": False,
-                "error": f"{op_id} requires an environment",
-                "returncode": 2,
-            }
-        system_id = str(params.get("system_id", "")).strip()
-        if not system_id:
-            return {
-                "ok": False,
-                "error": f"{op_id}: system_id is required",
-                "returncode": 2,
-            }
-        hostname = str(params.get("hostname") or "").strip() or None
-        # Custom image name (uploaded boot-resource, e.g. a Talos factory
-        # image); deploy-only.
-        image = str(params.get("image") or "").strip() or None
-        raw_roles = params.get("roles") or []
-        if isinstance(raw_roles, str):
-            raw_roles = raw_roles.split(",")
-        roles = [str(r).strip().lower() for r in raw_roles if str(r).strip()]
-        url, _ = self._maas_creds(env)  # url only feeds the dry-run log line
-
-        from app.services import envconfig as envconfig_service
-
-        if action == "deploy" and roles:
-            invalid = [
-                r for r in roles if r not in envconfig_service.VALID_SERVER_ROLES
-            ]
-            if invalid:
-                valid = ", ".join(sorted(envconfig_service.VALID_SERVER_ROLES))
-                return {
-                    "ok": False,
-                    "error": f"{op_id}: unknown role(s) {', '.join(invalid)} (valid: {valid})",
-                    "returncode": 2,
-                }
-
-        if dry:
-            log(
-                f"[dry-run] would POST machines/{system_id}/ op={action} "
-                f"hostname={hostname or '-'} roles={','.join(roles) or '-'} "
-                f"image={image or '-'} "
-                f"against {url or 'MAAS (not configured)'}"
-            )
-            return {
-                "ok": True,
-                "dry_run": True,
-                "action": action,
-                "system_id": system_id,
-                "message": f"[dry-run] would {action} machine {system_id}",
-            }
-
-        from app.services.maas import MaasError
-
-        client = self._maas_client(env)
-        is_mock = client.mock
-        try:
-            # Resolve the machine first: validates system_id and provides the
-            # fallback hostname for user-data rendering / doc upsert.
-            machine = client.get_machine(system_id)
-            target_hostname = hostname or str(machine.get("hostname") or system_id)
-            user_data_b64 = None
-            if action == "deploy" and image:
-                # Custom-image deploys (talos) don't consume cloud-init
-                # user-data — deploy with osystem=custom instead.
-                log(
-                    f"[maas] deploy system_id={system_id} image={image} "
-                    "(osystem=custom) — skipping cloud-init user-data "
-                    "(talos doesn't use it)"
-                )
-            elif action == "deploy" and (roles or hostname):
-                from app.services.maas_userdata import render_userdata
-
-                # GENESTACK_ENV / GENESTACK_ROLE markers land in
-                # /etc/genestack/env on the node — provision_bridge.yml
-                # (genestack-console/ansible/playbooks) reads them post-deploy.
-                user_data = render_userdata(
-                    hostname=target_hostname,
-                    genestack_env=env.name,
-                    genestack_role=",".join(roles) if roles else None,
-                )
-                user_data_b64 = base64.b64encode(user_data.encode()).decode()
-            if action == "commission":
-                machine = client.commission(system_id, user_data_b64=user_data_b64)
-            elif action == "deploy":
-                machine = client.deploy(
-                    system_id,
-                    user_data_b64=user_data_b64,
-                    hostname=hostname,
-                    image=image,
-                )
-            else:
-                machine = client.release(system_id)
-        except MaasError as exc:
-            log(f"[maas] {action} system_id={system_id} failed: {exc}")
-            return {
-                "ok": False,
-                "error": str(exc),
-                "action": action,
-                "system_id": system_id,
-                "returncode": 2,
-            }
-        finally:
-            client.close()
-
-        status_name = machine.get("status_name")
-        log(
-            f"[maas] {action} system_id={system_id} -> status={status_name} mock={is_mock}"
-        )
-        result: dict[str, Any] = {
-            "ok": True,
-            "dry_run": False,
-            "mock": is_mock,
-            "action": action,
-            "system_id": system_id,
-            "status": status_name,
-            "machine": machine,
-            "message": f"{action} {system_id}: {status_name}",
-        }
-
-        if action == "deploy":
-            # Deploy -> inventory in one action: upsert the machine into the
-            # env config doc servers section (source maas, new config version).
-            row, warnings = envconfig_service.assign_server(
-                self.db,
-                env,
-                job.created_by or "system",
-                system_id=system_id,
-                hostname=target_hostname,
-                roles=roles,
-            )
-            for warning in warnings:
-                log(f"[deploy] config warning: {warning}")
-            log(
-                f"[deploy] upserted servers.{target_hostname} (source=maas) "
-                f"in config version {row.version}"
-            )
-            result["hostname"] = target_hostname
-            result["roles"] = roles
-            result["config_version"] = row.version
-            if image:
-                result["image"] = image
-        elif action == "release":
-            # Release -> inventory cleanup: drop the machine from the env
-            # config doc servers section (new config version). Best-effort —
-            # a doc cleanup failure must not fail the release itself.
-            try:
-                removed = envconfig_service.remove_server(
-                    self.db,
-                    env,
-                    job.created_by or "system",
-                    hostname=target_hostname,
-                )
-                if removed is None:
-                    log(
-                        f"[release] servers.{target_hostname} already absent from env config doc"
-                    )
-                else:
-                    log(
-                        f"[release] removed servers.{target_hostname} from config version {removed.version}"
-                    )
-                    result["config_version"] = removed.version
-            except Exception as exc:  # noqa: BLE001 — cleanup must not mask the release
-                log(f"[release] env config cleanup for {target_hostname} failed: {exc}")
-        return result
-
-    # Upper bound for a downloaded Talos factory image (2 GiB).
-    MAX_TALOS_IMAGE_BYTES = MAX_TALOS_IMAGE_BYTES
-
-    def _download_factory_image(
-        self, url: str, log, dest_dir: str | Path, filename: str | None = None
-    ) -> tuple[Path, str]:
-        """Download a Talos factory image to disk; returns (path, sha256)."""
-        return download_factory_image(
-            url,
-            log,
-            dest_dir=dest_dir,
-            filename=filename,
-            max_bytes=self.MAX_TALOS_IMAGE_BYTES,
-        )
-
-    @staticmethod
-    def _talos_image_name(image_url: str) -> str:
-        """Derive a MAAS boot-resource name from the factory image URL."""
-        import re
-        from urllib.parse import urlparse
-
-        stem = Path(urlparse(image_url).path).name
-        # Strip known image/archive extensions, longest suffix first.
-        for ext in (
-            ".tar.gz",
-            ".raw.xz",
-            ".tgz",
-            ".raw",
-            ".qcow2",
-            ".img",
-            ".xz",
-            ".gz",
-        ):
-            if stem.endswith(ext):
-                stem = stem[: -len(ext)]
-                break
-        stem = re.sub(r"[^a-z0-9._-]+", "-", stem.lower()).strip("-.")
-        if not stem:
-            stem = "talos-genestack"
-        if not stem.startswith("talos"):
-            stem = f"talos-{stem}"
-        return stem
-
-    def _maas_talos_image_upload(
-        self,
-        job: Job,
-        env: Environment | None,
-        params: dict[str, Any],
-        log,
-        dry: bool,
-    ) -> dict[str, Any]:
-        """Download a Talos factory image and upload it to the env's MAAS."""
-        from urllib.parse import urlparse
-
-        op_id = "maas.talos.image_upload"
-        if env is None:
-            return {
-                "ok": False,
-                "error": f"{op_id} requires an environment",
-                "returncode": 2,
-            }
-
-        image_url = str(params.get("image_url") or "").strip()
-        if not image_url:
-            # Default from the env config doc talos.image_url (zero-touch chain).
-            from app.services import envconfig as envconfig_service
-
-            current = envconfig_service.get_current(self.db, env)
-            if current is not None:
-                talos = current[0].get("talos")
-                if isinstance(talos, dict):
-                    image_url = str(talos.get("image_url") or "").strip()
-        if not image_url:
-            return {
-                "ok": False,
-                "error": (
-                    f"{op_id}: image_url is required "
-                    "(param or env config doc talos.image_url)"
-                ),
-                "returncode": 2,
-            }
-        if urlparse(image_url).scheme != "https":
-            return {
-                "ok": False,
-                "error": f"{op_id}: image_url must be an https:// URL",
-                "returncode": 2,
-            }
-        name = self._talos_image_name(image_url)
-        # Download to disk under the job's workspace so the 2 GiB factory
-        # image never sits in process memory; uploaded by file handle.
-        download_dir = Path(get_settings().data_dir) / "jobs" / job.id / "images"
-
-        if dry:
-            log(
-                f"[dry-run] would download {image_url} as name={name}"
-            )
-            return {
-                "ok": True,
-                "dry_run": True,
-                "image_url": image_url,
-                "image": name,
-                "message": f"[dry-run] would upload {name} from {image_url}",
-            }
-
-        try:
-            image_path, sha256 = self._download_factory_image(
-                image_url, log, download_dir
-            )
-        except (MaasDownloadError, OSError) as exc:
-            log(f"[talos-image] {exc}")
-            return {"ok": False, "error": str(exc), "returncode": 2}
-
-        from app.services.maas import MaasError
-
-        client = self._maas_client(env)
-        is_mock = client.mock
-        try:
-            record = client.upload_image(
-                name, image_path, title=f"Talos factory image ({env.name})"
-            )
-        except MaasError as exc:
-            log(f"[talos-image] upload name={name} failed: {exc}")
-            return {"ok": False, "error": str(exc), "image": name, "returncode": 2}
-        finally:
-            client.close()
-
-        size = image_path.stat().st_size
-        image_path.unlink(missing_ok=True)
-        log(
-            f"[talos-image] uploaded name={name} bytes={size} sha256={sha256} mock={is_mock}"
-        )
-        self.write_audit(
-            actor=job.created_by or "system",
-            action="env.talos_image_upload",
-            resource_type="environment",
-            resource_id=env.id,
-            environment_id=env.id,
-            details={
-                "image": name,
-                "image_url": image_url,
-                "bytes": size,
-                "sha256": sha256,
-                "mock": is_mock,
-                "dry_run": dry,
-            },
-            success=True,
-        )
-        return {
-            "ok": True,
-            "dry_run": False,
-            "mock": is_mock,
-            "image": name,
-            "image_url": image_url,
-            "bytes": size,
-            "sha256": sha256,
-            "record": record,
-            "message": f"fetched {name} ({size} bytes)",
-        }
 
     def _state_export_remote(
         self,

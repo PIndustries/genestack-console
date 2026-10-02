@@ -75,10 +75,6 @@ class Environment(Base):
     )  # e.g. prod/lab/dev
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    maas_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    # Encrypted at rest (fernet: prefix); legacy plaintext values still decrypt
-    maas_api_key_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
     # OVH per-environment consumer key, encrypted at rest (fernet: prefix).
     # This authorises THIS environment's operator to list their OVH dedicated
     # servers. The app credentials it was created under live on the OvhAccount
@@ -538,6 +534,27 @@ class AlertRule(Base):
     severity: Mapped[str] = mapped_column(String(16), default="warning", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     webhook_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Optional notify_channels.id. Null keeps webhook_url-only delivery.
+    channel_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class NotifyChannel(Base):
+    """A notification credential stored on this console.
+
+    ``kind`` is slack, discord, teams, resend, or twilio. ``config_encrypted``
+    is fernet JSON. API responses mask the secret fields.
+    """
+
+    __tablename__ = "notify_channels"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    config_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )

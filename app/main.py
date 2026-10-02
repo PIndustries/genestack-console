@@ -52,8 +52,8 @@ from app.routers import (
     jobs,
     k8s,
     livestate,
-    maas,
     metrics,
+    notify,
     novnc,
     observe,
     obs_proxy,
@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
     if get_settings().secret_key == DEFAULT_SECRET_KEY:
         log.warning(
             "secret_key is the built-in default — stored secrets (kubeconfig_data, "
-            "maas_api_key_encrypted) are encrypted with a publicly known key. "
+            "notification credentials) are encrypted with a publicly known key. "
             "Set a unique secret_key in config.yaml."
         )
     dev_keys_in_use = set(DEFAULT_DEV_API_KEYS) & set(get_settings().parsed_api_keys())
@@ -256,7 +256,7 @@ def create_app() -> FastAPI:
     #   core: auth, tenants, operations, environments, config, jobs, audit
     #   bare metal: baremetal, ilo, pxe, discovery
     #   lifecycle: descriptor, workflow, fleet
-    #   providers: maas, ovh, hardware
+    #   providers: ovh, hardware
     #   genestack reads: services, state, and the aliases registered below
     #   native Apple API: native, native_kubernetes, native_consoles
     #   observe: observe, dashboards, livestate, stream, alerts, metrics
@@ -296,8 +296,7 @@ def create_app() -> FastAPI:
     app.include_router(obs_proxy.router)
     app.include_router(jobs.router)
 
-    # Providers: MAAS, OVH, and hardware accounts.
-    app.include_router(maas.router)
+    # Providers: OVH and hardware accounts.
     app.include_router(ovh.router)
     app.include_router(hardware_accounts.router)
 
@@ -315,6 +314,7 @@ def create_app() -> FastAPI:
     app.include_router(livestate.router)
     app.include_router(stream.router)
     app.include_router(alerts.router)
+    app.include_router(notify.router)
     app.include_router(metrics.router)
 
     # OpenStack, Kubernetes, apps, host VMs, agents, and the terminal.

@@ -15,7 +15,7 @@ from app.deps import (
     require_operator,
     require_viewer,
 )
-from app.models import AlertEvent, AlertRule, Environment, Membership
+from app.models import AlertEvent, AlertRule, Environment, Membership, NotifyChannel
 from app.schemas import (
     AlertConditionName,
     AlertEventOut,
@@ -51,6 +51,9 @@ class AlertRulePatch(BaseModel):
     severity: Optional[AlertSeverityName] = None
     enabled: Optional[bool] = None
     webhook_url: Optional[str] = Field(default=None, max_length=512)
+    channel_id: Optional[str] = Field(
+        default=None, description="Saved notification channel. Empty string clears it."
+    )
 
 
 def _visible_env_ids(db: Session, principal: Principal) -> list[str] | None:
@@ -90,6 +93,21 @@ def _get_rule_scoped(db: Session, principal: Principal, rule_id: int) -> AlertRu
         raise HTTPException(status_code=404, detail="Alert rule not found")
     _check_env_write_access(db, principal, rule.environment_id)
     return rule
+
+
+def _checked_channel_id(db: Session, channel_id: Optional[str]) -> Optional[str]:
+    """Return a stored channel id, or None when the caller clears it.
+
+    An unknown id is a 400. An empty string clears the link.
+    """
+    if channel_id is None:
+        return None
+    channel_id = channel_id.strip()
+    if not channel_id:
+        return None
+    if db.get(NotifyChannel, channel_id) is None:
+        raise HTTPException(status_code=400, detail="Unknown notification channel")
+    return channel_id
 
 
 def _event_out(db: Session, event: AlertEvent) -> AlertEventOut:
@@ -141,6 +159,7 @@ def create_rule(
         severity=body.severity,
         enabled=body.enabled,
         webhook_url=body.webhook_url,
+        channel_id=_checked_channel_id(db, body.channel_id),
     )
     db.add(rule)
     db.flush()
@@ -174,6 +193,8 @@ def update_rule(
         _check_env_write_access(db, principal, data["environment_id"])
     if "webhook_url" in data:
         _assert_safe_webhook_url(data["webhook_url"])
+    if "channel_id" in data:
+        data["channel_id"] = _checked_channel_id(db, data["channel_id"])
 
     for key, value in data.items():
         setattr(rule, key, value)

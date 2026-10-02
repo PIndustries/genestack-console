@@ -36,13 +36,11 @@ def test_list_operations_non_empty(client, admin_headers):
 
 
 def test_catalog_includes_expected_operations(client, admin_headers):
-    """Catalog includes maas.machines.list and genestack.service.enable."""
+    """Catalog includes genestack.service.enable and no leftover installer ids."""
     resp = client.get("/api/v1/operations", headers=admin_headers)
     assert resp.status_code == 200
     names = _op_names(_extract_ops(resp.json()))
     assert (
-        "maas.machines.list" in names
-    ), f"missing maas.machines.list in {sorted(names)}"
-    assert (
         "genestack.service.enable" in names
     ), f"missing genestack.service.enable in {sorted(names)}"
+    assert not any(name.startswith("maas.") for name in names)

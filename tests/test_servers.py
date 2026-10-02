@@ -1,4 +1,4 @@
-"""Servers endpoints (source-agnostic inventory: MAAS union + static hosts) and drift."""
+"""Servers endpoints (saved inventory) and drift."""
 
 from __future__ import annotations
 
@@ -10,57 +10,6 @@ import yaml
 
 from app.models import Environment
 from app.services.inventory import build_inventory_from_environment
-
-_MAAS_MACHINES = [
-    {
-        "system_id": "abc123",
-        "hostname": "gs-control-01",
-        "status_name": "Deployed",
-        "power_state": "on",
-        "ip_addresses": ["10.20.0.11"],
-    },
-    {
-        "system_id": "def456",
-        "hostname": "gs-compute-01",
-        "status_name": "Ready",
-        "power_state": "off",
-        "ip_addresses": ["10.20.0.21"],
-    },
-    {
-        "system_id": "ghi789",
-        "hostname": "gs-storage-01",
-        "status_name": "Commissioning",
-        "power_state": "on",
-        "ip_addresses": ["10.20.0.31"],
-    },
-]
-
-
-class _FakeMaasClient:
-    """Stands in for MaasClient when MAAS is configured (mock=False)."""
-
-    mock = False
-    live = True
-    configured = True
-
-    def __init__(self, machines):
-        self._machines = machines
-
-    def list_machines(self):
-        return [dict(m) for m in self._machines]
-
-    def close(self):
-        pass
-
-
-@pytest.fixture
-def maas_configured(monkeypatch):
-    """PATCH the envconfig router to talk to a fake configured MAAS."""
-    monkeypatch.setattr(
-        "app.routers.envconfig._maas_client_for",
-        lambda env: _FakeMaasClient(_MAAS_MACHINES),
-    )
-    return _MAAS_MACHINES
 
 
 def _suffix() -> str:
@@ -113,20 +62,19 @@ def _write_disk_inventory(config_dir: Path, host_names: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# List: without MAAS only doc entries surface (no mock machines)
+# List: saved hosts only
 # ---------------------------------------------------------------------------
 
 
-def test_servers_list_no_maas_returns_doc_only(client, admin_headers):
+def test_servers_list_returns_saved_hosts(client, admin_headers):
     env = _create_env(client, admin_headers)
     resp = client.get(
         f"/api/v1/environments/{env['id']}/servers", headers=admin_headers
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["mock"] is True
-    assert body["maas_configured"] is False
-    # Mock machines are NOT offered as candidates when MAAS is not configured
+    assert "maas_configured" not in body
+    assert "mock" not in body
     assert body["servers"] == []
 
     assert (
@@ -138,52 +86,18 @@ def test_servers_list_no_maas_returns_doc_only(client, admin_headers):
     body = client.get(
         f"/api/v1/environments/{env['id']}/servers", headers=admin_headers
     ).json()
-    assert body["mock"] is True
+    assert "mock" not in body
     assert body["ovh_bound"] is False
     assert [s["hostname"] for s in body["servers"]] == ["bare-01"]
 
 
-def test_servers_list_maas_configured_union(client, admin_headers, maas_configured):
-    env = _create_env(client, admin_headers, maas_url="http://maas.example.com:5240")
-
-    resp = _assign(
-        client, admin_headers, env["id"], system_id="abc123", roles=["control"]
-    )
-    assert resp.status_code == 201, resp.text
-    assert (
-        _static(
-            client, admin_headers, env["id"], hostname="bare-01", ip="10.30.0.5"
-        ).status_code
-        == 201
-    )
-
-    body = client.get(
-        f"/api/v1/environments/{env['id']}/servers", headers=admin_headers
-    ).json()
-    assert body["maas_configured"] is True
-    assert body["mock"] is False
-    by_hostname = {s["hostname"]: s for s in body["servers"]}
-    # Live MAAS machines, annotated from the doc
-    assert by_hostname["gs-control-01"]["source"] == "maas"
-    assert by_hostname["gs-control-01"]["assigned"] is True
-    assert by_hostname["gs-control-01"]["roles"] == ["control"]
-    assert by_hostname["gs-control-01"]["power_state"] == "on"
-    assert by_hostname["gs-compute-01"]["assigned"] is False
-    assert by_hostname["gs-compute-01"]["roles"] == []
-    # Static doc entry in the union
-    assert by_hostname["bare-01"]["source"] == "static"
-    assert by_hostname["bare-01"]["assigned"] is True
-    assert by_hostname["bare-01"]["power_state"] is None
-    assert by_hostname["bare-01"]["status"] is None
-
-
 # ---------------------------------------------------------------------------
-# Assign (MAAS) + list merge
+# Assign
 # ---------------------------------------------------------------------------
 
 
-def test_assign_upserts_doc_and_merges(client, admin_headers, maas_configured):
-    env = _create_env(client, admin_headers, maas_url="http://maas.example.com:5240")
+def test_assign_upserts_doc(client, admin_headers):
+    env = _create_env(client, admin_headers)
 
     resp = _assign(
         client,
@@ -196,7 +110,7 @@ def test_assign_upserts_doc_and_merges(client, admin_headers, maas_configured):
     assert resp.status_code == 201, resp.text
     assert resp.json()["version"] == 1
     assert resp.json()["server"]["assigned"] is True
-    assert resp.json()["server"]["source"] == "maas"
+    assert resp.json()["server"]["source"] == "static"
 
     resp = _assign(
         client,
@@ -216,20 +130,19 @@ def test_assign_upserts_doc_and_merges(client, admin_headers, maas_configured):
     by_hostname = {s["hostname"]: s for s in servers.json()["servers"]}
     assert by_hostname["gs-control-01"]["assigned"] is True
     assert by_hostname["gs-control-01"]["roles"] == ["control"]
-    # doc ip wins when set; otherwise the MAAS-reported ip is used
-    assert by_hostname["gs-control-01"]["ip"] == "10.20.0.11"
+    assert by_hostname["gs-control-01"]["source"] == "static"
+    assert by_hostname["gs-control-01"]["ip"] in (None, "")
     assert by_hostname["gs-compute-01"]["assigned"] is True
     assert by_hostname["gs-compute-01"]["roles"] == ["compute", "storage"]
     assert by_hostname["gs-compute-01"]["ip"] == "10.20.0.21"
-    assert by_hostname["gs-storage-01"]["assigned"] is False
+    assert "gs-storage-01" not in by_hostname
 
-    # The assignment lives in the current config document, keyed by hostname
     config = client.get(
         f"/api/v1/environments/{env['id']}/config", headers=admin_headers
     )
     doc = yaml.safe_load(config.json()["yaml"])
     assert doc["servers"]["gs-control-01"]["system_id"] == "abc123"
-    assert doc["servers"]["gs-control-01"]["source"] == "maas"
+    assert doc["servers"]["gs-control-01"]["source"] == "static"
     assert doc["servers"]["gs-control-01"]["roles"] == ["control"]
     assert doc["servers"]["gs-compute-01"]["ip"] == "10.20.0.21"
 
@@ -273,7 +186,7 @@ def test_assign_invalid_role_422(client, admin_headers):
 
 
 def test_assign_unknown_machine_still_listed(client, admin_headers):
-    """An assignment for a machine MAAS does not report still surfaces."""
+    """An assignment is saved from the posted fields. Nothing else is merged in."""
     env = _create_env(client, admin_headers)
     resp = _assign(
         client,
@@ -291,7 +204,7 @@ def test_assign_unknown_machine_still_listed(client, admin_headers):
     by_hostname = {s["hostname"]: s for s in servers.json()["servers"]}
     assert by_hostname["retired-01"]["assigned"] is True
     assert by_hostname["retired-01"]["system_id"] == "zzz999"
-    assert by_hostname["retired-01"]["source"] == "maas"
+    assert by_hostname["retired-01"]["source"] == "static"
     assert by_hostname["retired-01"]["power_state"] is None
 
 
@@ -492,44 +405,37 @@ def test_static_hosts_in_rendered_inventory(client, admin_headers):
     assert k8s_children["storage_nodes"]["children"]["longhorn_storage_nodes"][
         "hosts"
     ] == {"bare-02": {}}
-    # MAAS-sourced entries keep current behavior (no ansible_user)
-    assert hosts["ctrl-1"]["maas_system_id"] == "abc123"
-    assert "ansible_user" not in hosts["ctrl-1"]
+    # An assign with no address uses the hostname. Source is static, so the
+    # default ansible user is written.
+    assert hosts["ctrl-1"]["ansible_host"] == "ctrl-1"
+    assert hosts["ctrl-1"]["ansible_user"] == "ubuntu"
+    assert "maas_system_id" not in hosts["ctrl-1"]
     assert k8s_children["openstack_control_plane"]["hosts"] == {"ctrl-1": {}}
 
 
-def test_servers_param_supersedes_maas_tag_grouping():
-    """build_inventory_from_environment: doc servers win over MAAS tags."""
+def test_saved_servers_group_by_role():
+    """build_inventory_from_environment groups the saved document only."""
     env = Environment(id="env-x", name="env-x")
-    maas_hosts = [
-        {
-            "system_id": "abc123",
-            "hostname": "gs-control-01",
-            "ip_addresses": ["10.20.0.11"],
-            "tag_names": ["compute"],  # tag says compute; doc says control
-        },
-        {
-            "system_id": "def456",
-            "hostname": "gs-compute-01",
-            "ip_addresses": ["10.20.0.21"],
-            "tag_names": ["compute"],
-        },
-    ]
     servers = {
         "gs-control-01": {
             "system_id": "abc123",
             "roles": ["control"],
             "ip": "10.20.0.11",
             "source": "maas",
-        }
+        },
+        "gs-compute-01": {
+            "roles": ["compute"],
+            "ip": "10.20.0.21",
+            "source": "maas",
+        },
     }
-    inventory = build_inventory_from_environment(env, hosts=maas_hosts, servers=servers)
+    inventory = build_inventory_from_environment(env, servers=servers)
     children = inventory["all"]["children"]
     k8s_children = children["k8s_cluster"]["children"]
-    # Doc-assigned host lands in openstack_control_plane only (tags ignored for it)
     assert k8s_children["openstack_control_plane"]["hosts"] == {"gs-control-01": {}}
     assert k8s_children["openstack_compute_nodes"]["hosts"] == {"gs-compute-01": {}}
-    assert children["ungrouped_maas"]["hosts"] == {"gs-compute-01": {}}
+    assert "ungrouped_maas" not in children
+    assert "maas_system_id" not in inventory["all"]["hosts"]["gs-control-01"]
 
 
 # ---------------------------------------------------------------------------

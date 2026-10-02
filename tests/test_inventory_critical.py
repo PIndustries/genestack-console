@@ -307,51 +307,23 @@ class TestStaticHosts:
         assert "static-host" in inv["all"]["hosts"]
 
 
-class TestMaasHosts:
-    """MAAS-sourced hosts."""
+class TestSavedServerSource:
+    """An older saved server still renders from the document."""
 
-    def test_maas_host_included(self):
-        env = _make_env()
-        hosts = [
-            {
-                "system_id": "abc123",
-                "hostname": "maas-node",
-                "ip_addresses": ["10.0.0.1"],
-                "power_state": "custom",
-                "status_name": "Deployed",
-                "tag_names": ["compute"],
-            }
-        ]
-        inv = build_inventory_from_environment(env, hosts=hosts, include_deployer=False)
-        assert "maas-node" in inv["all"]["hosts"]
-        assert inv["all"]["hosts"]["maas-node"]["maas_system_id"] == "abc123"
-
-    def test_maas_host_covered_by_servers_skipped(self):
-        """If a MAAS host is covered by the servers doc, doc roles win."""
+    def test_older_source_renders_without_live_merge(self):
         env = _make_env()
         servers = {
-            "maas-node": {
+            "node-a": {
                 "system_id": "abc123",
+                "ip": "10.0.0.1",
                 "roles": ["compute"],
                 "source": "maas",
-            },
-        }
-        hosts = [
-            {
-                "system_id": "abc123",
-                "hostname": "maas-node",
-                "ip_addresses": ["10.0.0.1"],
-                "status_name": "Deployed",
-                "tag_names": ["controller"],
             }
-        ]
+        }
         inv = build_inventory_from_environment(
-            env, hosts=hosts, servers=servers, include_deployer=False
+            env, servers=servers, include_deployer=False
         )
-        children = inv["all"]["children"]
-        k8s = children["k8s_cluster"]["children"]
-        # Should be in compute groups, not control groups
-        assert "maas-node" in k8s["openstack_compute_nodes"]["hosts"]
-        assert "maas-node" not in k8s.get("openstack_control_plane", {}).get(
-            "hosts", {}
-        )
+        assert inv["all"]["hosts"]["node-a"]["ansible_host"] == "10.0.0.1"
+        assert "maas_system_id" not in inv["all"]["hosts"]["node-a"]
+        k8s = inv["all"]["children"]["k8s_cluster"]["children"]
+        assert "node-a" in k8s["openstack_compute_nodes"]["hosts"]

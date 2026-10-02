@@ -221,6 +221,14 @@ def _evaluate_rule(
         payload = _event_payload("alert_fired", rule, env, event)
         publish_sync("alerts", payload)
         fire_webhook(rule.webhook_url, payload)
+        # A saved channel is optional. A missing one is logged inside
+        # fire_channel and does not fail evaluation.
+        try:
+            from app.services.notify import fire_channel
+
+            fire_channel(db, rule.channel_id, payload)
+        except Exception:  # noqa: BLE001
+            log.warning("alert channel delivery skipped for rule %s", rule.id, exc_info=True)
         return event
 
     if existing is not None:

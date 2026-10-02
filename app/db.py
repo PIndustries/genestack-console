@@ -53,6 +53,10 @@ _HARDWARE_ACCOUNT_COLUMN_MIGRATIONS = {
     "tenant_id": "VARCHAR(36) REFERENCES tenants(id)",
 }
 
+_ALERT_RULE_COLUMN_MIGRATIONS = {
+    "channel_id": "VARCHAR(36)",
+}
+
 _BAREMETAL_NODE_COLUMN_MIGRATIONS = {
     "next_boot": "VARCHAR(16) DEFAULT 'disk' NOT NULL",
     "boot_stage": "VARCHAR(32) DEFAULT 'new' NOT NULL",
@@ -228,6 +232,7 @@ def _column_migrations() -> tuple[tuple[str, dict[str, str]], ...]:
         ("agent_credentials", _AGENT_CREDENTIAL_COLUMN_MIGRATIONS),
         ("hardware_accounts", _HARDWARE_ACCOUNT_COLUMN_MIGRATIONS),
         ("baremetal_nodes", _BAREMETAL_NODE_COLUMN_MIGRATIONS),
+        ("alert_rules", _ALERT_RULE_COLUMN_MIGRATIONS),
     )
 
 

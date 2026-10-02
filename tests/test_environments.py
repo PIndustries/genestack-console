@@ -136,64 +136,27 @@ def test_delete_environment_admin_only(
     assert again.status_code == 404
 
 
-def test_maas_api_key_masked_in_responses(client, admin_headers, viewer_headers):
-    """Stored MAAS API key is masked in create/detail/list responses."""
-    from app.db import SessionLocal
-    from app.models import Environment
-
+def test_legacy_maas_fields_are_ignored(client, admin_headers, viewer_headers):
+    """A leftover installer field on create is ignored and not returned."""
     name = f"env-mask-{uuid.uuid4().hex[:10]}"
-    real_key = "consumer-key:token-key:token-secret"
     create = client.post(
         "/api/v1/environments",
         headers=admin_headers,
-        json={"name": name, "maas_api_key_encrypted": real_key},
-    )
-    assert create.status_code in (200, 201), create.text
-    eid = create.json()["id"]
-    assert create.json()["maas_api_key_encrypted"] == "********"
-
-    got = client.get(f"/api/v1/environments/{eid}", headers=viewer_headers)
-    assert got.status_code == 200, got.text
-    assert got.json()["maas_api_key_encrypted"] == "********"
-
-    listed = client.get("/api/v1/environments", headers=viewer_headers)
-    assert listed.status_code == 200
-    match = [e for e in listed.json() if e.get("id") == eid]
-    assert match, f"env {eid} not in list"
-    assert match[0]["maas_api_key_encrypted"] == "********"
-
-    # PATCH echoing the masked sentinel leaves the stored key unchanged
-    patch = client.patch(
-        f"/api/v1/environments/{eid}",
-        headers=admin_headers,
         json={
-            "maas_api_key_encrypted": "********",
-            "description": "sentinel round-trip",
+            "name": name,
+            "maas_api_key_encrypted": "consumer-key:token-key:token-secret",
+            "description": "legacy field ignored",
         },
     )
-    assert patch.status_code == 200, patch.text
-    assert patch.json()["maas_api_key_encrypted"] == "********"
+    assert create.status_code in (200, 201), create.text
+    body = create.json()
+    assert "maas_api_key_encrypted" not in body
+    assert "maas_url" not in body
+    assert body["description"] == "legacy field ignored"
 
-    db = SessionLocal()
-    try:
-        env = db.get(Environment, eid)
-        assert env is not None
-        # Stored encrypted at rest (fernet:); decrypts back to the real key
-        from app.services.crypto import decrypt_secret
-
-        assert env.maas_api_key_encrypted.startswith("fernet:")
-        assert decrypt_secret(env.maas_api_key_encrypted) == real_key
-    finally:
-        db.close()
-
-    # Env without a key returns null, not the mask
-    bare = client.post(
-        "/api/v1/environments",
-        headers=admin_headers,
-        json={"name": f"env-nomask-{uuid.uuid4().hex[:10]}"},
-    )
-    assert bare.status_code in (200, 201), bare.text
-    assert bare.json()["maas_api_key_encrypted"] is None
+    got = client.get(f"/api/v1/environments/{body['id']}", headers=viewer_headers)
+    assert got.status_code == 200, got.text
+    assert "maas_api_key_encrypted" not in got.json()
 
 
 def test_env_handle_fields_masked_and_encrypted(client, admin_headers, viewer_headers):

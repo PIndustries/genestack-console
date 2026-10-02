@@ -53,9 +53,6 @@ smoke:
 	@echo "==> GET /api/v1/operations (admin)"
 	@curl -sf -H "X-API-Key: dev-admin-key" http://127.0.0.1:8080/api/v1/operations \
 		| head -c 500; echo
-	@echo "==> GET /api/v1/maas/machines (mock when maas.url empty)"
-	@curl -sf -H "X-API-Key: dev-admin-key" http://127.0.0.1:8080/api/v1/maas/machines \
-		| head -c 500; echo
 	@echo "smoke complete"
 
 lint:

@@ -254,9 +254,9 @@ def test_ensure_assets_and_config_missing_pxe_section(tmp_path):
 
 def test_ensure_assets_and_config_download_failure_never_raises(tmp_path, monkeypatch):
     def _fail(url, log, dest_dir, filename=None, max_bytes=0):
-        from app.services.job_runner import MaasDownloadError
+        from app.services.job_runner import ImageDownloadError
 
-        raise MaasDownloadError("download failed: HTTP 404")
+        raise ImageDownloadError("download failed: HTTP 404")
 
     monkeypatch.setattr(pxe, "download_factory_image", _fail)
     doc = {

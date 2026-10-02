@@ -20,7 +20,6 @@ from app.services.envconfig import (
     _encrypt_document_secrets,
     _resolve_secret_sentinels,
     _resolve_server_password_sentinels,
-    _encrypt_maas_api_key,
     mask_document,
     parse_document,
     upsert_static_server,
@@ -151,7 +150,7 @@ class TestNormalizeServers:
 
 
 class TestMaskDocument:
-    """mask_document — secrets, maas.api_key, server ssh_password."""
+    """mask_document — secrets and server ssh_password. A maas block is dropped."""
 
     def test_nothing_to_mask_returns_same_doc(self):
         doc = {"provider": "kubespray"}
@@ -172,13 +171,15 @@ class TestMaskDocument:
         assert result["secrets"]["db-creds"]["data"]["password"] == SECRET_MASK
         assert result["secrets"]["db-creds"]["data"]["token"] == SECRET_MASK
 
-    def test_masks_maas_api_key(self):
+    def test_drops_maas_block(self):
         doc = {
             "maas": {"url": "http://maas.local", "api_key": "ck:real:token"},
+            "provider": "kubespray",
         }
         result = mask_document(doc)
-        assert result["maas"]["api_key"] == SECRET_MASK
-        assert result["maas"]["url"] == "http://maas.local"
+        assert "maas" not in result
+        assert result["provider"] == "kubespray"
+        assert "maas" in doc
 
     def test_masks_server_ssh_passwords(self):
         doc = {
@@ -205,9 +206,11 @@ class TestMaskDocument:
         assert result is not doc
         assert result["secrets"] == {}
 
-    def test_empty_maas_api_key_no_mask(self):
+    def test_drops_empty_maas_block(self):
         doc = {"maas": {"url": "http://maas.local", "api_key": ""}}
-        assert mask_document(doc) is doc
+        result = mask_document(doc)
+        assert "maas" not in result
+        assert result is not doc
 
     def test_server_no_password_no_mask(self):
         doc = {"servers": {"node01": {"ip": "10.0.0.1", "roles": ["compute"]}}}
@@ -529,35 +532,6 @@ class TestEncryptDocumentSecrets:
     def test_no_secrets_section(self):
         doc = {"provider": "kubespray"}
         _encrypt_document_secrets(doc)
-
-
-class TestEncryptMaasApiKey:
-    """_encrypt_maas_api_key — encrypt and sentinel passthrough."""
-
-    def test_encrypts_plaintext_key(self):
-        doc = {"maas": {"api_key": "ck:plain:token"}}
-        _encrypt_maas_api_key(doc, None)
-        assert doc["maas"]["api_key"].startswith(FERNET_PREFIX)
-
-    def test_sentinel_passthrough(self):
-        previous_key = encrypt_secret("old_key")
-        previous = {"maas": {"api_key": previous_key}}
-        doc = {"maas": {"api_key": SECRET_MASK}}
-        _encrypt_maas_api_key(doc, previous)
-        assert doc["maas"]["api_key"] == previous_key
-
-    def test_sentinel_no_previous(self):
-        doc = {"maas": {"api_key": SECRET_MASK}}
-        _encrypt_maas_api_key(doc, None)
-        assert doc["maas"]["api_key"] == SECRET_MASK
-
-    def test_returns_true_when_changed(self):
-        doc = {"maas": {"api_key": "new_key"}}
-        assert _encrypt_maas_api_key(doc, None) is True
-
-    def test_no_maas_section(self):
-        doc = {"provider": "kubespray"}
-        assert _encrypt_maas_api_key(doc, None) is False
 
 
 class TestResolveSecretSentinels:

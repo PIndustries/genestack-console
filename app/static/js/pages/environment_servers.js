@@ -46,303 +46,9 @@ const REQUIRED_ROLE_SETS = [
   { label: "Storage", role: "storage", min: 1 },
 ];
 
-// ---------- older machine actions, not shown on the inventory card ----------
-
-const ROW_JOB_ACTIVE = new Set(["queued", "running"]);
-const ROW_POLL_MS = 5000;
-
 let serversLoadedEnvId = ""; // env the card last rendered — guards against env switches
 let adoptingOvh = false; // re-entrancy guard for auto-adopt on load
 let vrackPollTimer = null; // ovh.vrack.attach job poll
-const maasRowJobs = new Map(); // system_id -> active job id (row buttons disabled while set)
-const maasTimers = new Map(); // system_id -> pending poll timeout
-const maasDoneIds = new Set(); // terminal jobs already toasted/reloaded for
-
-function clearMaasTimers() {
-  maasTimers.forEach((t) => clearTimeout(t));
-  maasTimers.clear();
-}
-
-// Status → which actions the row offers. Ready and Allocated are commissioned
-// machines; Deployed is post-deploy (re-deploy allowed); release is always offered.
-function maasCanCommission(status) {
-  const s = String(status || "").toLowerCase();
-  return s === "ready" || s === "allocated";
-}
-function maasCanDeploy(status) {
-  const s = String(status || "").toLowerCase();
-  return s === "ready" || s === "allocated" || s === "deployed";
-}
-
-function maasRunningHtml(label, jobId, status) {
-  const id = String(jobId || "");
-  return (
-    `<span class="pill warn">${esc(label)} ${esc(status)}…</span> ` +
-    `<a href="#/activity?tab=jobs&job=${esc(id)}">job ${esc(id.slice(0, 8))}…</a>`
-  );
-}
-
-function setMaasJobLine(sid, html) {
-  const el = document.querySelector(`#srv-card [data-maas-job="${sid}"]`);
-  if (el) el.innerHTML = html;
-}
-
-function setMaasRowBusy(sid, busy) {
-  document
-    .querySelectorAll(`#srv-card tr[data-sid="${sid}"] button`)
-    .forEach((b) => {
-      b.disabled = busy || !canRun();
-    });
-}
-
-// Poll a maas.machine.* job every 5s (mirrors pollVerifyJob in environment_workflow.js):
-// update the row's job line while queued/running; on a terminal state toast once and
-// reload the servers card so the machine's new status/assignment shows.
-async function pollMaasJob(envId, sid, jobId, label) {
-  if (!document.getElementById("srv-card")) return; // navigated away
-  let job;
-  try {
-    job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
-  } catch {
-    // Transient fetch failure: keep the line as-is and retry on the next tick.
-    maasTimers.set(sid, setTimeout(() => pollMaasJob(envId, sid, jobId, label), ROW_POLL_MS));
-    return;
-  }
-  if (!document.getElementById("srv-card") || serversLoadedEnvId !== envId) return;
-  const status = String(job && job.status ? job.status : "").toLowerCase();
-  if (ROW_JOB_ACTIVE.has(status)) {
-    setMaasJobLine(sid, maasRunningHtml(label, jobId, status));
-    maasTimers.set(sid, setTimeout(() => pollMaasJob(envId, sid, jobId, label), ROW_POLL_MS));
-    return;
-  }
-  // Terminal state: stop polling, re-enable the row, reload the card once.
-  maasRowJobs.delete(sid);
-  if (maasDoneIds.has(jobId)) return;
-  maasDoneIds.add(jobId);
-  toast(
-    `${label} ${status === "success" ? "succeeded" : status || "finished"}`,
-    status === "success" ? "ok" : "bad"
-  );
-  await loadServersCard(envId);
-}
-
-async function startMaasJob(envId, server, operation, label, params) {
-  const sid = String((server && server.system_id) || "");
-  const host = (server && (server.hostname || server.system_id)) || "?";
-  if (!sid) {
-    toast(`${host}: machine has no system_id`, "bad");
-    return;
-  }
-  setMaasJobLine(sid, `<span class="muted">creating ${esc(label)} job…</span>`);
-  try {
-    const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
-      method: "POST",
-      body: JSON.stringify({ operation, params }),
-    });
-    const id = job && job.id != null ? String(job.id) : "";
-    if (!id) {
-      await loadServersCard(envId);
-      return;
-    }
-    maasRowJobs.set(sid, id);
-    toast(`${host}: ${label} job ${id.slice(0, 8)}… created`, "ok");
-    setMaasJobLine(sid, maasRunningHtml(label, id, "queued"));
-    setMaasRowBusy(sid, true);
-    pollMaasJob(envId, sid, id, label);
-  } catch (e) {
-    setMaasJobLine(sid, `<span class="error">${esc(label)} failed to start: ${esc(e.message)}</span>`);
-    toast(`${label} failed to start: ${e.message}`, "bad");
-    if (e.status === 403) toast("Insufficient role: operator required", "bad");
-  }
-}
-
-function maasCommission(envId, server) {
-  const host = (server && (server.hostname || server.system_id)) || "?";
-  if (!confirm(`Commission ${host}?`)) return;
-  startMaasJob(envId, server, "maas.machine.commission", "commission", {
-    system_id: String((server && server.system_id) || ""),
-  });
-}
-
-function maasRelease(envId, server) {
-  const host = (server && (server.hostname || server.system_id)) || "?";
-  if (!confirm(`Release ${host}?`)) return;
-  startMaasJob(envId, server, "maas.machine.release", "release", {
-    system_id: String((server && server.system_id) || ""),
-  });
-}
-
-function maasDeploy(envId, server, rowIdx, isTalos) {
-  const hostInput = document.querySelector(`#srv-card [data-deploy-hostname="${rowIdx}"]`);
-  const hostname = hostInput ? hostInput.value.trim() : "";
-  const roles = checkedRoles("deploy", rowIdx);
-  const params = { system_id: String((server && server.system_id) || "") };
-  // hostname + roles are optional; when given, userdata markers are rendered and the
-  // machine also lands in the env's inventory doc.
-  if (hostname) params.hostname = hostname;
-  if (roles.length) params.roles = roles;
-  // A custom image skips cloud-init. Talos itself is installed by the console.
-  if (isTalos) {
-    const imgInput = document.querySelector(`#srv-card [data-deploy-image="${rowIdx}"]`);
-    const image = imgInput ? imgInput.value.trim() : "";
-    if (image) params.image = image;
-  }
-  startMaasJob(envId, server, "maas.machine.deploy", "deploy", params);
-}
-
-// ---------- talos zero-touch: maas.talos.image_upload job ----------
-
-// Best-effort read of the env's config doc: `provider: talos` unlocks the zero-touch
-// extras (image deploy param + factory-image upload). A missing doc, a non-talos
-// provider, or any fetch failure all degrade to null (render exactly as kubespray).
-async function fetchTalosInfo(envId) {
-  try {
-    const data = await api(`/api/v1/environments/${encodeURIComponent(envId)}/config`);
-    const yaml = data && typeof data.yaml === "string" ? data.yaml : "";
-    if (!yaml || !/^\s*provider:\s*["']?talos["']?\s*(#.*)?$/m.test(yaml)) return null;
-    const block = yaml.match(/^talos:\n((?:[ \t]+[^\n]*\n?)+)/m);
-    const urlMatch = block && block[1].match(/^\s+image_url:\s*["']?([^\s"']+)/m);
-    return { imageUrl: urlMatch ? urlMatch[1] : "" };
-  } catch {
-    return null;
-  }
-}
-
-const TALOS_ACTIVE = new Set(["queued", "running"]);
-const TALOS_POLL_MS = 5000;
-
-let talosTimer = null;
-const talosDoneIds = new Set(); // terminal jobs already toasted for
-
-function clearTalosTimer() {
-  if (talosTimer) {
-    clearTimeout(talosTimer);
-    talosTimer = null;
-  }
-}
-
-function talosRunningHtml(jobId, status) {
-  const id = String(jobId || "");
-  return (
-    `<span class="pill warn">talos image upload ${esc(status)}…</span> ` +
-    `<a href="#/activity?tab=jobs&job=${esc(id)}">job ${esc(id.slice(0, 8))}…</a>`
-  );
-}
-
-function setTalosLine(html) {
-  const el = document.getElementById("srv-talos-line");
-  if (el) el.innerHTML = html;
-}
-
-// Poll the image-upload job every 5s (mirrors pollMaasJob): update the upload line
-// while queued/running; on a terminal state show the outcome pill and toast once.
-async function pollTalosUploadJob(envId, jobId) {
-  clearTalosTimer();
-  if (!document.getElementById("srv-card")) return; // navigated away
-  let job;
-  try {
-    job = await api(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
-  } catch {
-    // Transient fetch failure: keep the line as-is and retry on the next tick.
-    talosTimer = setTimeout(() => pollTalosUploadJob(envId, jobId), TALOS_POLL_MS);
-    return;
-  }
-  if (!document.getElementById("srv-card") || serversLoadedEnvId !== envId) return;
-  const status = String(job && job.status ? job.status : "").toLowerCase();
-  if (TALOS_ACTIVE.has(status)) {
-    setTalosLine(talosRunningHtml(jobId, status));
-    talosTimer = setTimeout(() => pollTalosUploadJob(envId, jobId), TALOS_POLL_MS);
-    return;
-  }
-  // Terminal state: stop polling, show the outcome pill, toast once.
-  const cls = status === "success" ? "ok" : "warn";
-  const outcome = status === "success" ? "succeeded" : status || "finished";
-  setTalosLine(`<a class="pill ${cls}" href="#/activity?tab=jobs&job=${esc(jobId)}">talos image upload ${esc(outcome)}</a>`);
-  if (talosDoneIds.has(jobId)) return;
-  talosDoneIds.add(jobId);
-  toast(`talos image upload ${outcome}`, status === "success" ? "ok" : "bad");
-}
-
-// Confirm with the doc's talos.image_url (or prompt for one when the doc lacks it),
-// then start the maas.talos.image_upload job.
-function talosImageUpload(envId, talosInfo) {
-  const docUrl = (talosInfo && talosInfo.imageUrl) || "";
-  let imageUrl = docUrl;
-  if (docUrl) {
-    if (!confirm(`Upload the Talos factory image?\n\n${docUrl}`)) return;
-  } else {
-    imageUrl = (prompt("Factory image URL:") || "").trim();
-    if (!imageUrl) return;
-  }
-  setTalosLine('<span class="muted">creating talos image upload job…</span>');
-  startTalosUploadJob(envId, imageUrl);
-}
-
-async function startTalosUploadJob(envId, imageUrl) {
-  try {
-    const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
-      method: "POST",
-      body: JSON.stringify({ operation: "maas.talos.image_upload", params: { image_url: imageUrl } }),
-    });
-    const id = job && job.id != null ? String(job.id) : "";
-    if (!id) {
-      setTalosLine("");
-      return;
-    }
-    toast(`talos image upload job ${id.slice(0, 8)}… created`, "ok");
-    setTalosLine(talosRunningHtml(id, "queued"));
-    pollTalosUploadJob(envId, id);
-  } catch (e) {
-    setTalosLine(`<span class="error">talos image upload failed to start: ${esc(e.message)}</span>`);
-    toast(`talos image upload failed to start: ${e.message}`, "bad");
-    if (e.status === 403) toast("Insufficient role: operator required", "bad");
-  }
-}
-
-// Actions cell: status-driven buttons plus an inline
-// deploy form (hostname prefilled + role checkboxes) and a per-row job line. Talos
-// environments also get an image input (prefilled talos-genestack) for zero-touch
-// deploys with a custom image.
-function maasActionsCellHtml(s, i, isTalos) {
-  const sid = String(s.system_id || "");
-  const host = s.hostname || sid || "?";
-  const roles = Array.isArray(s.roles) ? s.roles : [];
-  const gateAttr = maasRowJobs.has(sid)
-    ? 'disabled title="job running for this machine"'
-    : gate(canRun(), "operator");
-  const bits = [];
-  const titleAttr = (t) => (gateAttr ? "" : ` title="${esc(t)}"`);
-  if (maasCanCommission(s.status)) {
-    bits.push(
-      `<button class="secondary btn-sm" type="button" data-maas-op="commission" data-row="${i}"` +
-        `${titleAttr("Commission this machine")} ${gateAttr}>Commission</button>`
-    );
-  }
-  if (maasCanDeploy(s.status)) {
-    bits.push(
-      `<details class="srv-deploy"><summary>Deploy…</summary>` +
-        `<div class="srv-deploy-form">` +
-        `<input type="text" data-deploy-hostname="${i}" value="${esc(host)}" placeholder="hostname" />` +
-        (isTalos
-          ? `<input type="text" data-deploy-image="${i}" value="talos-genestack" placeholder="image" />` +
-            `<span class="muted" style="font-size:.72rem">custom image name</span>`
-          : "") +
-        `<div class="row" style="gap:0">${roleBoxes("deploy", i, roles)}</div>` +
-        `<div class="row" style="gap:.4rem;align-items:center">` +
-        `<button class="secondary btn-sm" type="button" data-maas-deploy="${i}" ${gateAttr}>Deploy</button>` +
-        `<span class="muted" style="font-size:.72rem">also lands in the inventory doc</span>` +
-        `</div></div></details>`
-    );
-  }
-  bits.push(
-    `<button class="secondary btn-sm" type="button" data-maas-op="release" data-row="${i}"` +
-      `${titleAttr("Release this machine")} ${gateAttr}>Release</button>`
-  );
-  return (
-    `<td style="white-space:nowrap">${bits.join(" ")}` +
-    `<div data-maas-job="${esc(sid)}" style="margin-top:.25rem"></div></td>`
-  );
-}
 
 export function serversCardHtml() {
   return `
@@ -1048,10 +754,6 @@ export async function loadServersCard(envId) {
   const tbody = document.getElementById("srv-tbody");
   if (!tbody) return;
   if (envId !== serversLoadedEnvId) {
-    // Env switched: abandon polling for the previous env's machine jobs.
-    clearMaasTimers();
-    maasRowJobs.clear();
-    clearTalosTimer();
     if (vrackPollTimer) {
       clearTimeout(vrackPollTimer);
       vrackPollTimer = null;
@@ -1080,10 +782,8 @@ export async function loadServersCard(envId) {
     return;
   }
 
-  // Contract is an object envelope ({maas_configured, mock, servers}); tolerate a bare array.
+  // Contract is an object envelope ({servers, ovh_bound, ...}); tolerate a bare array.
   const servers = Array.isArray(data) ? data : data && Array.isArray(data.servers) ? data.servers : [];
-  const maasConfigured = !!(data && !Array.isArray(data) && data.maas_configured);
-  const isMock = !!(data && !Array.isArray(data) && data.mock);
   const ovhBound = !!(data && !Array.isArray(data) && data.ovh_bound);
   msg.textContent = servers.length ? `${servers.length} server(s)` : "No servers in inventory yet.";
   const ovhBanner = document.getElementById("srv-ovh-banner");
@@ -1147,25 +847,17 @@ export async function loadServersCard(envId) {
     }
     loadVrackPanel(envId, { seed: fabric });
   }
-  const discRows = maasConfigured
-    ? servers.filter((s) => s && typeof s === "object" && !s.assigned && s.source !== "static")
-    : [];
-
   tbody.innerHTML = invRows.length
     ? invRows
         .map((s, i) => {
           const roles = Array.isArray(s.roles) ? s.roles : [];
           const source = s.source || "static";
-          const sub =
-            source === "maas" && s.system_id
-              ? `<div class="muted" style="font-size:.75rem">${esc(s.system_id)}</div>`
-              : source === "ovh" && s.service_name
-                ? `<div class="muted" style="font-size:.75rem">${esc(s.service_name)}</div>`
-                : "";
-          const removeBtn =
-            source === "maas"
-              ? ""
-              : `<button class="secondary btn-sm" type="button" data-remove="${i}" ${gate(canRun(), "operator")}>Remove</button>`;
+          const sub = s.system_id
+            ? `<div class="muted" style="font-size:.75rem">${esc(s.system_id)}</div>`
+            : source === "ovh" && s.service_name
+              ? `<div class="muted" style="font-size:.75rem">${esc(s.service_name)}</div>`
+              : "";
+          const removeBtn = `<button class="secondary btn-sm" type="button" data-remove="${i}" ${gate(canRun(), "operator")}>Remove</button>`;
           const sourceCls = source === "ovh" || source === "static" || source === "terraform" ? "ok" : "";
           const ipCell = s.private_ip
             ? `${esc(s.private_ip)} <span style="font-size:.7rem">priv</span>` +
@@ -1344,18 +1036,15 @@ async function saveInventoryRow(envId, server, rowIdx) {
   err.innerHTML = "";
   const roles = checkedRoles("inv", rowIdx);
   if (msgSpan) msgSpan.textContent = "saving…";
-  const isMaas = info.source === "maas" && info.system_id;
-  const url = `/api/v1/environments/${encodeURIComponent(envId)}/servers/${isMaas ? "assign" : "static"}`;
-  const body = isMaas
-    ? { system_id: info.system_id || "", hostname: info.hostname || "", roles, ip: info.ip || "" }
-    : {
-        hostname: info.hostname || "",
-        ip: info.ip || null,
-        ssh_user: info.ssh_user || null,
-        roles,
-        source: info.source || "static",
-        service_name: info.service_name || null,
-      };
+  const url = `/api/v1/environments/${encodeURIComponent(envId)}/servers/static`;
+  const body = {
+    hostname: info.hostname || "",
+    ip: info.ip || null,
+    ssh_user: info.ssh_user || null,
+    roles,
+    source: info.source || "static",
+    service_name: info.service_name || null,
+  };
   try {
     await api(url, { method: "POST", body: JSON.stringify(body) });
     toast(`${info.hostname || "server"}: assignment saved`, "ok");
@@ -1456,9 +1145,6 @@ function renderTopologySelector() {
 }
 
 export function destroyServersCard() {
-  clearMaasTimers();
-  maasRowJobs.clear();
-  clearTalosTimer();
   clearOvhPoll();
   adoptingOvh = false;
 }

@@ -642,7 +642,13 @@ Two tables drive alerting:
   Rules are evaluated against each new snapshot: while an event is firing,
   repeat matches are deduplicated onto the open event; when the condition
   clears, the event resolves. Events can be acknowledged via the API.
-  Webhooks are POSTed **on fire only**, not on resolve.
+  Webhooks are POSTed **on fire only**, not on resolve. A rule may also
+  set `channel_id` to a row in **`notify_channels`**. An admin stores a
+  Slack, Discord, or Teams webhook, or Resend or Twilio credentials, on
+  this console. The secret is encrypted here and is not returned after
+  save. A viewer can list the channel name. When the rule fires, the
+  saved channel is sent as well as `webhook_url`. A missing channel is
+  skipped.
 
 Endpoints: `GET/POST /api/v1/alerts/rules`, `PATCH/DELETE
 /api/v1/alerts/rules/{id}`, `GET /api/v1/alerts/events`, `POST

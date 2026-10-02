@@ -78,7 +78,7 @@ def test_viewer_cannot_create_job_requiring_operator(
         "/api/v1/jobs",
         headers=viewer_headers,
         params={"environment_id": env_id},
-        json={"operation": "maas.machines.list", "params": {}},
+        json={"operation": "host.preflight", "params": {}},
     )
     assert resp2.status_code == 403, resp2.text
 

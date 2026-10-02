@@ -134,12 +134,11 @@ def test_put_get_history_versions(client, admin_headers):
     )
     assert current.status_code == 200
     assert current.json()["version"] == 2
-    # maas.api_key is encrypted at rest and masked on read (like secrets:);
-    # masking re-dumps the doc, so compare against the normalized parse.
+    # A leftover maas block is dropped on save and omitted on read.
     got_doc = yaml.safe_load(current.json()["yaml"])
     expected_doc, _warnings = envconfig_service.parse_document(FULL_DOC)
-    assert got_doc["maas"]["api_key"] == envconfig_service.SECRET_MASK
-    got_doc["maas"]["api_key"] = expected_doc["maas"]["api_key"]
+    expected_doc.pop("maas", None)
+    assert "maas" not in got_doc
     assert got_doc == expected_doc
     assert current.json()["created_by"]
 
@@ -247,7 +246,7 @@ def test_render_full_doc_file_mapping(client, admin_headers):
     assert k8s_children["kube_node"]["hosts"] == {"ctrl-1": {}, "cmp-1": {}}
     assert children["k8s_cluster"]["vars"] == {"cluster_name": "cluster.local"}
     assert inventory["all"]["hosts"]["ctrl-1"]["ansible_host"] == "10.20.0.11"
-    assert inventory["all"]["hosts"]["cmp-1"]["maas_system_id"] == "def456"
+    assert inventory["all"]["hosts"]["cmp-1"]["ansible_host"] == "10.20.0.21"
 
     components = yaml.safe_load(files["openstack-components.yaml"])
     assert components == {"components": {"keystone": True, "glance": False}}
@@ -718,7 +717,7 @@ def test_legacy_servers_doc_normalized_via_api(client, admin_headers):
     children = inventory["all"]["children"]
     k8s_children = children["k8s_cluster"]["children"]
     assert k8s_children["openstack_control_plane"]["hosts"] == {"ctrl-1": {}}
-    assert inventory["all"]["hosts"]["ctrl-1"]["maas_system_id"] == "abc123"
+    assert inventory["all"]["hosts"]["ctrl-1"]["ansible_host"] == "10.20.0.11"
 
     servers = client.get(
         f"/api/v1/environments/{env['id']}/servers", headers=admin_headers
@@ -1250,8 +1249,13 @@ def test_config_put_requires_operator_role(client, two_tenants):
     assert resp.json()["version"] == 1
 
 
+def _stored_doc(env_id) -> dict:
+    doc, _warnings = envconfig_service.parse_document(_stored_yaml(env_id))
+    return doc
+
+
 # ---------------------------------------------------------------------------
-# maas.api_key — encrypted at rest, masked on read (same machinery as secrets:)
+# A leftover maas block is accepted and not stored
 # ---------------------------------------------------------------------------
 
 MAAS_DOC = """\
@@ -1262,85 +1266,21 @@ maas:
 """
 
 
-def _stored_doc(env_id) -> dict:
-    doc, _warnings = envconfig_service.parse_document(_stored_yaml(env_id))
-    return doc
-
-
-def test_put_maas_api_key_encrypted_at_rest(client, admin_headers):
+def test_leftover_maas_block_is_dropped(client, admin_headers):
     env = _create_env(client, admin_headers)
     _put_doc(client, admin_headers, env["id"], MAAS_DOC)
 
     stored = _stored_yaml(env["id"])
-    assert FERNET_PREFIX in stored
-    # Plaintext never touches the DB
     assert "consumer:token:secret" not in stored
-
-    maas = _stored_doc(env["id"])["maas"]
-    assert maas["url"] == "http://maas.example.com:5240"
-    assert maas["api_key"].startswith(FERNET_PREFIX)
-    assert decrypt_secret(maas["api_key"]) == "consumer:token:secret"
-
-
-def test_get_config_masks_maas_api_key(client, admin_headers):
-    env = _create_env(client, admin_headers)
-    _put_doc(client, admin_headers, env["id"], MAAS_DOC)
+    assert "maas:" not in stored
 
     current = client.get(
         f"/api/v1/environments/{env['id']}/config", headers=admin_headers
     )
     assert current.status_code == 200
-    masked = current.json()["yaml"]
-    assert "consumer:token:secret" not in masked
-    assert FERNET_PREFIX not in masked
-    doc = yaml.safe_load(masked)
-    assert doc["maas"]["api_key"] == envconfig_service.SECRET_MASK
-    assert doc["maas"]["url"] == "http://maas.example.com:5240"
-
-    # Historical versions are masked too
-    v1 = client.get(
-        f"/api/v1/environments/{env['id']}/config/versions/1", headers=admin_headers
-    )
-    assert "consumer:token:secret" not in v1.json()["yaml"]
-    assert FERNET_PREFIX not in v1.json()["yaml"]
-
-    # The render preview never carries the key either (maas renders no files)
-    render = client.get(
-        f"/api/v1/environments/{env['id']}/config/render", headers=admin_headers
-    )
-    assert render.status_code == 200, render.text
-    assert "consumer:token:secret" not in str(render.json()["files"])
-
-
-def test_reput_masked_maas_api_key_keeps_stored_value(client, admin_headers):
-    env = _create_env(client, admin_headers)
-    _put_doc(client, admin_headers, env["id"], MAAS_DOC)
-
-    masked = client.get(
-        f"/api/v1/environments/{env['id']}/config", headers=admin_headers
-    ).json()["yaml"]
-    resp = client.put(
-        f"/api/v1/environments/{env['id']}/config",
-        headers=admin_headers,
-        json={"yaml_text": masked},
-    )
-    assert resp.status_code == 201, resp.text
-
-    # Sentinel round-trip leaves the original key in place
-    maas = _stored_doc(env["id"])["maas"]
-    assert decrypt_secret(maas["api_key"]) == "consumer:token:secret"
-
-    # A new key alongside the sentinel rotation still works
-    doc = yaml.safe_load(masked)
-    doc["maas"]["api_key"] = "rotated:key:secret"
-    resp = client.put(
-        f"/api/v1/environments/{env['id']}/config",
-        headers=admin_headers,
-        json={"yaml_text": yaml.safe_dump(doc)},
-    )
-    assert resp.status_code == 201, resp.text
-    maas = _stored_doc(env["id"])["maas"]
-    assert decrypt_secret(maas["api_key"]) == "rotated:key:secret"
+    doc = yaml.safe_load(current.json()["yaml"])
+    assert "maas" not in doc
+    assert doc["provider"] == "kubespray"
 
 
 # ---------------------------------------------------------------------------

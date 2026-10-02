@@ -650,9 +650,8 @@ List the servers saved for this environment.
 **Response:**
 ```json
 {
-  "maas_configured": false,
-  "mock": false,
   "count": 3,
+  "ovh_bound": false,
   "servers": [
     {
       "system_id": null,
@@ -730,6 +729,18 @@ Remove a server from the config. Creates a new config version. Requires operator
   "removed": "worker1"
 }
 ```
+
+---
+
+## Notifications
+
+Credentials for alerts from this console. An admin saves them. They stay on this machine. A viewer can list the channel name and kind. Webhook URLs, Resend API keys, and Twilio auth tokens are not returned after save.
+
+Kinds are `slack`, `discord`, and `teams` (a webhook URL), `resend` (`api_key`, `from_email`, `to`), and `twilio` (`account_sid`, `auth_token`, `from_number`, `to_number`).
+
+`GET /api/v1/notify/channels` lists them. `POST /api/v1/notify/channels` creates one (admin). `PATCH /api/v1/notify/channels/{id}` changes the name, the enabled flag, or replaces `config` (admin). `DELETE /api/v1/notify/channels/{id}` removes it and clears `channel_id` on rules that used it (admin).
+
+An alert rule accepts `channel_id`. An unknown id is rejected. An empty string clears it. The rule's own webhook URL still fires.
 
 ---
 

@@ -17,9 +17,7 @@ from app.deps import get_db, get_env_scoped, require_operator
 from app.models import Environment
 from app.schemas import Principal
 from app.services import envconfig as envconfig_service
-from app.services.crypto import decrypt_secret
 from app.services.job_runner import JobRunner
-from app.services.maas import MaasClient, MaasError
 
 router = APIRouter(prefix="/api/v1/environments/{environment_id}", tags=["envconfig"])
 
@@ -66,7 +64,7 @@ def _version_payload(row) -> dict[str, Any]:
     return {
         "version": row.version,
         "supports_compare_and_swap": True,
-        # secrets.*.data and maas.api_key are stored encrypted; mask for the API
+        # secrets.*.data is stored encrypted; mask for the API
         "yaml": envconfig_service.mask_yaml_text(row.yaml_text),
         "created_by": row.created_by,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -219,29 +217,8 @@ def put_config_provider(
 
 
 # ---------------------------------------------------------------------------
-# Servers (inventory doc entries merged with live MAAS machines)
+# Servers saved for this environment
 # ---------------------------------------------------------------------------
-
-
-def _maas_client_for(env: Environment) -> MaasClient:
-    settings = get_settings()
-    url = env.maas_url or settings.maas_url or ""
-    key = decrypt_secret(env.maas_api_key_encrypted) or settings.maas_api_key or ""
-    # Env-specific URL always wins; the dev-only mock flag applies only when
-    # no MAAS is configured anywhere.
-    mock = bool(getattr(settings, "maas_mock", False)) and not url
-    return MaasClient.from_settings(
-        {"maas_url": url, "maas_api_key": key, "maas_mock": mock}
-    )
-
-
-def _machine_ip(machine: dict[str, Any]) -> str | None:
-    ips = machine.get("ip_addresses") or []
-    if isinstance(ips, list) and ips:
-        return ips[0] if isinstance(ips[0], str) else (ips[0] or {}).get("ip")
-    if isinstance(ips, str):
-        return ips
-    return None
 
 
 def _validate_roles(roles: list[str]) -> None:
@@ -264,58 +241,12 @@ def list_servers(
     env: Environment = Depends(get_env_scoped("viewer")),
 ) -> dict[str, Any]:
     """List the servers saved for this environment."""
-    client = _maas_client_for(env)
-    # Only a live MAAS counts: mock machines are not real candidates.
-    maas_configured = client.live
-    machines: list[dict[str, Any]] = []
-    if maas_configured:
-        try:
-            machines = client.list_machines()
-        except MaasError as exc:
-            raise HTTPException(
-                status_code=exc.status_code or 502, detail=str(exc)
-            ) from exc
-        finally:
-            client.close()
-
     current = envconfig_service.get_current(db, env)
     assignments = (current[0].get("servers") or {}) if current else {}
-    by_system_id = {
-        entry.get("system_id"): (hostname, entry)
-        for hostname, entry in assignments.items()
-        if isinstance(entry, dict) and entry.get("system_id")
-    }
 
     servers: list[dict[str, Any]] = []
-    consumed: set[str] = set()
-    for machine in machines:
-        system_id = machine.get("system_id")
-        if not system_id:
-            continue
-        match = by_system_id.get(system_id)
-        assignment: dict[str, Any] = {}
-        if match:
-            consumed.add(match[0])
-            assignment = match[1]
-        servers.append(
-            {
-                "system_id": system_id,
-                "hostname": machine.get("hostname") or (match[0] if match else None),
-                "ip": assignment.get("ip") or _machine_ip(machine),
-                "ssh_user": assignment.get("ssh_user"),
-                "ssh_auth_method": assignment.get("ssh_auth_method"),
-                "power_state": machine.get("power_state"),
-                "status": machine.get("status_name") or machine.get("status"),
-                "roles": assignment.get("roles") or [],
-                "assigned": match is not None,
-                "source": "maas",
-                "service_name": assignment.get("service_name"),
-            }
-        )
-    # Doc entries not matched to a live machine (static hosts, or machines
-    # MAAS no longer reports) still surface as assigned inventory.
     for hostname, assignment in assignments.items():
-        if hostname in consumed or not isinstance(assignment, dict):
+        if not isinstance(assignment, dict):
             continue
         servers.append(
             {
@@ -364,8 +295,6 @@ def list_servers(
             if extra.get("public_mac") and not row.get("public_mac"):
                 row["public_mac"] = extra.get("public_mac")
     return {
-        "maas_configured": maas_configured,
-        "mock": client.mock,
         "ovh_bound": bool(env.ovh_account_id),
         "ovh": ovh_doc,
         "fabric": fabric,
@@ -417,7 +346,7 @@ def assign_server(
             "hostname": body.hostname or body.system_id,
             "roles": [r.lower() for r in body.roles],
             "ip": body.ip,
-            "source": "maas",
+            "source": "static",
             "assigned": True,
         },
     }

@@ -70,14 +70,14 @@ def _poll_job(
     return last
 
 
-def test_submit_maas_machines_list_job(client, admin_headers):
-    """Create env, submit maas.machines.list, poll until success."""
-    env_id = _create_env(client, admin_headers, "maas-list")
+def test_submit_internal_health_job(client, admin_headers):
+    """Create env, submit internal.health, poll until success."""
+    env_id = _create_env(client, admin_headers, "health")
     resp = _submit_job(
         client,
         admin_headers,
         environment_id=env_id,
-        operation="maas.machines.list",
+        operation="internal.health",
     )
     assert resp.status_code in (200, 201, 202), resp.text
     job = resp.json()

@@ -16,7 +16,6 @@ from app.db import SessionLocal
 from app.models import AgentCommand, Environment, JobStatus
 from app.services import envconfig as envconfig_service
 from app.services import genestack_bridge as bridge
-from app.services.crypto import decrypt_secret
 from app.services.job_runner import JobRunner
 from tests.test_agent_relay import (
     _create_token,
@@ -161,12 +160,13 @@ def test_push_without_config_dir_succeeds_local_hub(client, admin_headers):
     assert job["status"] == "success"  # local hub: no remote push needed
 
 
-def test_push_syncs_deploy_and_maas_onto_environment(client, admin_headers, tmp_path):
+def test_push_syncs_deploy_onto_environment(client, admin_headers, tmp_path):
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
     env = _create_env(
         client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
     )
+    # A leftover maas block in the document must not fail the push.
     _put_doc(client, admin_headers, env["id"], SYNC_DOC)
 
     resp = _push_job(client, admin_headers, env["id"])
@@ -177,10 +177,7 @@ def test_push_syncs_deploy_and_maas_onto_environment(client, admin_headers, tmp_
         row = db.get(Environment, env["id"])
         assert row.deployer_ssh_host == "deployer.example.com"
         assert row.deployer_ssh_user == "deploy"
-        assert row.maas_url == "http://maas.example.com:5240"
-        # api_key is encrypted at rest, decrypts back to the doc value
-        assert row.maas_api_key_encrypted != "consumer:token:secret"
-        assert decrypt_secret(row.maas_api_key_encrypted) == "consumer:token:secret"
+        assert not hasattr(row, "maas_url")
     finally:
         db.close()
 

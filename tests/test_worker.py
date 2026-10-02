@@ -113,7 +113,6 @@ def test_catalog_long_ops_have_timeouts():
     # Read ops stay on the global default
     assert get_operation("internal.health").timeout_seconds is None
     assert get_operation("genestack.scripts.list").timeout_seconds is None
-    assert get_operation("maas.machines.list").timeout_seconds is None
 
 
 def _capture_run_command(monkeypatch):

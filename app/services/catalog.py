@@ -70,9 +70,8 @@ def secret_param_names(operation_id: str) -> frozenset[str]:
     """Param names of ``operation_id`` that hold secrets (scrubbed at rest).
 
     Only baremetal.node.register takes a secret param today (bmc_password).
-    MAAS ops read credentials from the env/settings, agent.install generates
-    its enrollment token internally (masked in the job log), and the
-    discovery bmc-creds path never goes through jobs.
+    agent.install generates its enrollment token internally (masked in the
+    job log), and the discovery bmc-creds path never goes through jobs.
     """
     op = get_operation(operation_id)
     return frozenset(op.secret_params) if op else frozenset()

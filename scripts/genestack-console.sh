@@ -1009,9 +1009,6 @@ genestack:
   root: ${gs_root}
 ansible:
   root: null
-maas:
-  url: ""
-  api_key: ""
 
 # URL agents/targets use to reach this hub. Empty until you pass --advertise-url
 # (or GSC_ADVERTISE_URL). Agent install needs a URL the target host can reach.

@@ -27,7 +27,6 @@ from app.modules.base import Module
 # and lives in app/modules/order.py.
 _BUILTINS = (
     "app.modules.console",
-    "app.modules.maas",
     "app.modules.openstack",
     "app.modules.ansible",
     "app.modules.genestack",

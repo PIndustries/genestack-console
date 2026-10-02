@@ -118,7 +118,7 @@ def build_topology(db: Session, env: Environment) -> NativeTopology:
             servers = doc.get("servers", {}) if isinstance(doc, dict) else {}
             if not isinstance(servers, dict):
                 raise TypeError("Invalid server assignments")
-            # Legacy MAAS documents use system IDs as keys and carry the
+            # Older documents use system ids as keys and carry the
             # hostname in the assignment. Match the config reader's identity.
             names = {
                 assignment.get("hostname") or key

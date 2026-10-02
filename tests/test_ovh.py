@@ -79,6 +79,7 @@ def test_load_settings_parses_ovh_section(tmp_path):
     settings = load_settings(cfg)
     assert settings.ovh_endpoint == ""
     assert settings.ovh_app_key == ""
+    assert not hasattr(settings, "maas_url")
 
 
 # ---------------------------------------------------------------------------

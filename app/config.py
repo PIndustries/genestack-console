@@ -4,8 +4,7 @@ Only optional env var:
   CONSOLE_CONFIG  path to YAML config (default: <console>/config.yaml)
 
 Everything else lives in that file, with auto-detection for paths.
-MAAS mock inventory is explicit opt-in (maas.mock: true, development only);
-an empty maas.url otherwise means "MAAS not configured", never fake data.
+A leftover ``maas:`` block in an older file is ignored.
 """
 
 from __future__ import annotations
@@ -144,12 +143,6 @@ class Settings(BaseModel):
     dry_run: bool = True
     # First-boot walkthrough tenant/env. Installer sets true; tests stay false.
     seed_demo: bool = False
-    maas_url: str = ""
-    maas_api_key: str = ""
-    # DEV ONLY: serve the built-in mock MAAS inventory when no maas_url is
-    # configured. Default false — an unconfigured MAAS must report
-    # maas_configured: false and empty lists, never fake machines.
-    maas_mock: bool = False
     # OVH dedicated-server import. The app key/secret identify the console as
     # an OVH "application" (set once by the operator); the consumer key is
     # per-environment (created via the in-console flow) and stored encrypted on
@@ -366,12 +359,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
             module_path = module_path.resolve()
         module_paths.append(str(module_path))
 
-    maas = raw.get("maas") if isinstance(raw.get("maas"), dict) else {}
-    maas_url = str(maas.get("url") or raw.get("maas_url") or "").strip()
-    maas_api_key = str(maas.get("api_key") or raw.get("maas_api_key") or "").strip()
-    maas_mock = maas.get("mock", raw.get("maas_mock", False))
-    if isinstance(maas_mock, str):
-        maas_mock = maas_mock.strip().lower() in {"1", "true", "yes", "on"}
+    # Older config.yaml files may still contain a maas: block. It is unused.
+    raw.pop("maas", None)
+    raw.pop("maas_url", None)
+    raw.pop("maas_api_key", None)
+    raw.pop("maas_mock", None)
 
     ovh = raw.get("ovh") if isinstance(raw.get("ovh"), dict) else {}
     ovh_endpoint = str(ovh.get("endpoint") or raw.get("ovh_endpoint") or "").strip()
@@ -545,9 +537,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
         module_paths=module_paths,
         dry_run=bool(dry_run),
         seed_demo=bool(seed_demo),
-        maas_url=maas_url,
-        maas_api_key=maas_api_key,
-        maas_mock=bool(maas_mock),
         ovh_endpoint=ovh_endpoint,
         ovh_app_key=ovh_app_key,
         ovh_app_secret=ovh_app_secret,

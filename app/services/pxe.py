@@ -51,7 +51,7 @@ from typing import Any, Callable
 import httpx
 
 from app.config import Settings
-from app.services.job_runner import MaasDownloadError, download_factory_image
+from app.services.job_runner import ImageDownloadError, download_factory_image
 
 LogFn = Callable[[str], None]
 
@@ -265,7 +265,7 @@ def fetch_talos_assets(
     Skips the download when both already exist (restart-safe). Extraction:
     tar-style factory assets first, then ISO9660 via pycdlib when installed —
     a Talos metal ISO keeps them at /boot/vmlinuz and /boot/initramfs.xz.
-    Raises :class:`MaasDownloadError` on download failure, :class:`PxeError`
+    Raises :class:`ImageDownloadError` on download failure, :class:`PxeError`
     when the image format cannot be mined.
     """
     if not image_url.lower().startswith("https://"):
@@ -467,7 +467,7 @@ def fetch_commission_assets(root: Path, log: LogFn | None = None) -> dict[str, A
             )
             changed = True
             _log(log, f"[pxe] commission asset {name}")
-    except MaasDownloadError as exc:
+    except ImageDownloadError as exc:
         return {"ok": False, "error": str(exc), "changed": changed}
     return {"ok": True, "changed": changed}
 
@@ -690,7 +690,7 @@ def ensure_assets_and_config(
                 "autoinstall": str(root / "autoinstall.yaml"),
             },
         }
-    except (PxeError, MaasDownloadError) as exc:
+    except (PxeError, ImageDownloadError) as exc:
         _log(log, f"[pxe] {exc}")
         return {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 — never-raise contract

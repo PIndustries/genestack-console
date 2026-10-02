@@ -35,7 +35,7 @@ export async function render(root, { param }) {
   </div>`;
 
   const listed = await api("/api/v1/operations");
-  ops = (Array.isArray(listed) ? listed : []).filter((op) => !String(op.id || "").startsWith("maas."));
+  ops = Array.isArray(listed) ? listed : [];
   if (!store.envs.length) await loadEnvs().catch(() => {});
   // Cache per page-load; failures degrade the dropdowns to free-text inputs.
   const [svcRes, pipeRes] = await Promise.allSettled([
@@ -151,8 +151,6 @@ function typedFormHtml(op) {
   const textField = (id, label, placeholder = "") =>
     `<label class="field" style="margin-bottom:.75rem"><span>${label}</span><input id="${id}" type="text" placeholder="${esc(placeholder)}" /></label>`;
   switch (op.id) {
-    case "maas.machine.power_status":
-      return textField("p-system_id", "system_id (required)", "e.g. abc123");
     case "host.preflight":
       return textField("p-limit", "limit (ansible --limit pattern)") + kvEditorHtml("p-extra-vars");
     case "host.basic_ops":
@@ -204,7 +202,6 @@ function typedFormHtml(op) {
       );
     // Ops with no params:
     case "internal.health":
-    case "maas.machines.list":
     case "genestack.components.desired":
     case "genestack.components.list":
     case "genestack.scripts.list":
@@ -260,9 +257,6 @@ function collectParams(op) {
     if (Object.keys(ev).length) params.extra_vars = ev;
   };
   switch (op.id) {
-    case "maas.machine.power_status":
-      if (val("p-system_id")) params.system_id = val("p-system_id");
-      break;
     case "host.preflight":
       if (val("p-limit")) params.limit = val("p-limit");
       addExtraVars();
@@ -311,7 +305,6 @@ function collectParams(op) {
       if (document.getElementById("p-dry-run").checked) params.dry_run = true;
       break;
     case "internal.health":
-    case "maas.machines.list":
     case "genestack.components.desired":
     case "genestack.components.list":
     case "genestack.scripts.list":

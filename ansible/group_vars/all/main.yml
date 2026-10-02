@@ -17,7 +17,3 @@ provision_ssh_port: 22
 
 # Python interpreter preference on target nodes
 genestack_python_interpreter: /usr/bin/python3
-
-# Filled by the console job runner when a server record carries them.
-maas_system_id: ""
-maas_hostname: ""

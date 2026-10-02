@@ -339,8 +339,7 @@ function schedulePolling() {
   pollTimer = setTimeout(() => pollReconcileJobs(), JOB_POLL_MS);
 }
 
-// Fallback for when the jobs stream is down (mirrors pollMaasJob in
-// environment_servers.js).
+// Fallback for when the jobs stream is down.
 async function pollReconcileJobs() {
   pollTimer = null;
   if (!el("comp-card")) return;

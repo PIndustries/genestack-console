@@ -44,9 +44,8 @@ _test_config = {
     },
     "genestack": {"root": str(_GENESTACK_ROOT)},
     "ansible": {"root": str(_CONSOLE_ROOT / "ansible")},
-    # Explicit dev-only mock opt-in: tests exercise the mock MAAS inventory.
-    # (Default is OFF — an empty url alone never yields fake machines.)
-    "maas": {"url": "", "api_key": "", "mock": True},
+    # Older files may still contain this block. The loader ignores it.
+    "maas": {"url": "http://unused.example", "api_key": "unused", "mock": True},
     "server": {"host": "127.0.0.1", "port": 8080},
     "jobs": {"timeout_seconds": 600},
     # The session-scoped TestClient runs the app lifespan for the whole suite.

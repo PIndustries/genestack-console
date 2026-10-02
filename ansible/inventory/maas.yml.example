@@ -1,4 +1,0 @@
-# The console writes inventory from the environment.
-# A server gets Talos from the console: DHCP and a boot file on the
-# deploy host, or from the agent when that host is not on the same network.
-# This file is not that path.

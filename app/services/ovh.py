@@ -711,7 +711,7 @@ def classify_install_status(payload: Any) -> str:
 # imported from that account are source: ovh. Static rows in an OVH-bound
 # env that match the live inventory (IP, then hostname) inherit the same
 # identity so Talos BYOI does not depend on the operator re-tagging YAML.
-# MAAS / baremetal rows never inherit — those are other provision backends.
+# Bare-metal, terraform, and older saved sources do not inherit OVH identity.
 
 NON_OVH_SOURCES = frozenset({"maas", "baremetal", "terraform"})
 
@@ -730,7 +730,7 @@ def server_is_explicit_ovh(entry: Mapping[str, Any] | None) -> bool:
 
 
 def server_may_inherit_ovh(entry: Mapping[str, Any] | None) -> bool:
-    """True unless the row is already claimed by MAAS or bare-metal PXE."""
+    """True unless the row is already claimed by another install path."""
     return server_source(entry) not in NON_OVH_SOURCES
 
 
@@ -785,7 +785,7 @@ def planned_ovh_tags(
 ) -> dict[str, str]:
     """hostname → OVH service name for doc servers that match live inventory.
 
-    Skips MAAS/baremetal rows. Used to persist ``source: ovh`` on import/adopt
+    Skips rows that already name another source. Used to persist ``source: ovh`` on import/adopt
     so the config document agrees with the bound account.
     """
     by_ip, by_host = inventory_indexes(inventory)

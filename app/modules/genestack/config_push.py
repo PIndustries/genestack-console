@@ -7,8 +7,6 @@ Why: One file so this step does not grow the job runner.
 
 from __future__ import annotations
 
-from app.services.crypto import encrypt_secret
-
 HANDLERS = ("genestack_config_push",)
 
 OPERATION = {
@@ -55,7 +53,6 @@ def run(
             "returncode": 2,
         }
     from app.services import envconfig as envconfig_service
-    from app.services.crypto import encrypt_secret
 
     current = envconfig_service.get_current(self.db, env)
     if current is None:
@@ -86,22 +83,14 @@ def run(
         }
 
     if not dry:
-        # Sync deploy/maas doc sections onto the Environment row so the
-        # execution context and MAAS client keep working.
+        # Sync the deploy section onto the Environment row so later jobs
+        # use the same ssh host and user.
         deploy = doc.get("deploy")
         if isinstance(deploy, dict):
             if deploy.get("ssh_host") is not None:
                 env.deployer_ssh_host = deploy["ssh_host"]
             if deploy.get("ssh_user") is not None:
                 env.deployer_ssh_user = deploy["ssh_user"]
-        maas_doc = doc.get("maas")
-        if isinstance(maas_doc, dict):
-            if maas_doc.get("url") is not None:
-                env.maas_url = maas_doc["url"]
-            if maas_doc.get("api_key"):
-                env.maas_api_key_encrypted = encrypt_secret(
-                    maas_doc["api_key"], self.settings
-                )
         self.db.add(env)
         self.db.flush()
 

@@ -12,10 +12,6 @@ from app.services.env_field_guards import apply_environment_field_guards
 RoleName = Literal["viewer", "operator", "admin"]
 JobStatusName = Literal["queued", "running", "success", "failed"]
 
-# Sentinel returned in place of a stored MAAS API key; sending it back on
-# update means "leave the stored key unchanged".
-MASKED_MAAS_API_KEY = "********"
-
 # Sentinel returned in place of stored kubeconfig data; sending it back on
 # update means "leave the stored kubeconfig unchanged".
 MASKED_KUBECONFIG_DATA = "***"
@@ -142,11 +138,6 @@ class EnvironmentBase(BaseModel):
     region: Optional[str] = None
     tier: Optional[str] = None
     description: Optional[str] = None
-    maas_url: Optional[str] = None
-    maas_api_key_encrypted: Optional[str] = Field(
-        default=None,
-        description="Stored credential, encrypted at rest (fernet: prefix)",
-    )
     kubeconfig_path: Optional[str] = None
     deployer_ssh_host: Optional[str] = None
     deployer_ssh_user: Optional[str] = None
@@ -173,11 +164,6 @@ class EnvironmentCreate(BaseModel):
     region: Optional[str] = None
     tier: Optional[str] = None
     description: Optional[str] = None
-    maas_url: Optional[str] = None
-    maas_api_key_encrypted: Optional[str] = Field(
-        default=None,
-        description="Stored credential, encrypted at rest (fernet: prefix)",
-    )
     kubeconfig_path: Optional[str] = None
     deployer_ssh_host: Optional[str] = None
     deployer_ssh_user: Optional[str] = None
@@ -224,8 +210,6 @@ class EnvironmentUpdate(BaseModel):
     region: Optional[str] = None
     tier: Optional[str] = None
     description: Optional[str] = None
-    maas_url: Optional[str] = None
-    maas_api_key_encrypted: Optional[str] = None
     kubeconfig_path: Optional[str] = None
     deployer_ssh_host: Optional[str] = None
     deployer_ssh_user: Optional[str] = None
@@ -269,8 +253,6 @@ class EnvironmentRead(BaseModel):
     region: Optional[str] = None
     tier: Optional[str] = None
     description: Optional[str] = None
-    maas_url: Optional[str] = None
-    maas_api_key_encrypted: Optional[str] = None
     kubeconfig_path: Optional[str] = None
     deployer_ssh_host: Optional[str] = None
     deployer_ssh_user: Optional[str] = None
@@ -298,9 +280,6 @@ class EnvironmentRead(BaseModel):
             region=env.region,
             tier=env.tier,
             description=env.description,
-            maas_url=env.maas_url,
-            # Never leak the stored key; masked when set, null when not
-            maas_api_key_encrypted=(MASKED_MAAS_API_KEY if env.maas_api_key_encrypted else None),
             kubeconfig_path=env.kubeconfig_path,
             deployer_ssh_host=env.deployer_ssh_host,
             deployer_ssh_user=env.deployer_ssh_user,
@@ -389,7 +368,7 @@ class OperationSpec(BaseModel):
     name: str
     description: str
     required_role: RoleName
-    backend: Literal["maas", "ansible", "genestack", "internal", "baremetal", "agent"]
+    backend: Literal["ansible", "genestack", "internal", "baremetal", "agent"]
     params: list[OperationParam] = Field(default_factory=list)
     secret_params: tuple[str, ...] = Field(
         default_factory=tuple,
@@ -563,6 +542,9 @@ class AlertRuleIn(BaseModel):
     severity: AlertSeverityName = "warning"
     enabled: bool = True
     webhook_url: Optional[str] = Field(default=None, max_length=512)
+    channel_id: Optional[str] = Field(
+        default=None, description="Saved notification channel on this console"
+    )
 
 
 class AlertRuleOut(BaseModel):
@@ -574,6 +556,7 @@ class AlertRuleOut(BaseModel):
     severity: AlertSeverityName
     enabled: bool
     webhook_url: Optional[str] = None
+    channel_id: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

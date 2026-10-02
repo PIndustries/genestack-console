@@ -770,7 +770,7 @@ def env_ovh_adopt(
 ) -> dict[str, Any]:
     """Tag config servers that match the bound OVH inventory as ``source: ovh``.
 
-    Matches by IP, then hostname. MAAS/baremetal rows are left alone. No-op
+    Matches by IP, then hostname. Rows that already name another source are left alone. No-op
     when every matching host is already tagged. Used by the Inventory tab so
     a fleet imported as ``source: static`` becomes an OVH Talos fleet.
     """

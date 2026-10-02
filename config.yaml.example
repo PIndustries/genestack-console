@@ -62,13 +62,6 @@ ansible:
 modules:
   paths: []
 
-# Leave this empty. The console answers DHCP and serves the boot file
-# itself. That is how a server gets Talos. mock stays off.
-maas:
-  url: ""
-  api_key: ""
-  mock: false
-
 # OVH dedicated-server import (optional). The app key/secret identify this
 # console as an OVH "application" — create one at https://eu.api.ovh.com/createApp/
 # requesting read access to /dedicated/server. The per-environment consumer key

@@ -18,7 +18,6 @@ import {
   loadBaremetalCard,
   destroyBaremetalCard,
 } from "./environment_baremetal.js";
-import * as machines from "./machines.js";
 
 export const title = "Hardware";
 
@@ -70,8 +69,7 @@ export async function render(root, { query } = {}) {
   </div>
   <div id="hw-pane-discovery" class="hw-pane hidden">${discoveryCardHtml()}</div>
   <div id="hw-pane-baremetal" class="hw-pane hidden">${baremetalCardHtml()}</div>
-  <div id="hw-pane-providers" class="hw-pane hidden"></div>
-  <div id="hw-pane-maas" class="hw-pane hidden"></div>`;
+  <div id="hw-pane-providers" class="hw-pane hidden"></div>`;
 
   document.getElementById("hw-env").addEventListener("change", (e) => {
     envId = e.target.value;
@@ -105,28 +103,13 @@ async function activateTab(id, { keepHash = false } = {}) {
     await loadBaremetalCard(envId);
   } else if (id === "providers") {
     await loadProvidersTab();
-  } else if (id === "maas") {
-    const pane = document.getElementById("hw-pane-maas");
-    if (!pane) return;
-    await machines.render(pane);
-    syncMachinesEnv();
   }
-}
-
-// Push the page-level env selection into the machines module's own env select
-// (machines.js owns its filter; dispatching change makes it reload).
-function syncMachinesEnv() {
-  const sel = document.getElementById("mach-env");
-  if (!sel) return;
-  sel.value = envId;
-  sel.dispatchEvent(new Event("change"));
 }
 
 function reloadMounted() {
   if (mounted.has("discovery")) loadDiscoveryCard(envId);
   if (mounted.has("baremetal")) loadBaremetalCard(envId);
   if (mounted.has("providers")) loadProvidersTab();
-  if (mounted.has("maas")) syncMachinesEnv();
 }
 
 const TF_KINDS = [
