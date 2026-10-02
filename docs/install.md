@@ -4,13 +4,13 @@ Genestack Console is the program that drives a Genestack install. Read [the READ
 
 Install it on a dedicated Linux server. That server holds two other trees: the Genestack checkout at `/opt/genestack`, and the Genestack settings at `/etc/genestack`. This guide calls that computer the deploy host.
 
-The recommendation is that the deploy host is L2 with the bare-metal servers. L2 means they share a local network, so this machine answers DHCP and serves PXE for that environment. Leave the deploy host outside the cluster. The cluster is the Kubernetes and OpenStack cloud those servers become. The deploy host never joins that cluster. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on their L2 network and through each server's management port. A management port is the controller inside a server that stays on when the main computer is off. If the cluster stops answering, this machine can still power the servers and run the install.
+The deploy host stays outside the cluster. The cluster is the Kubernetes and OpenStack cloud those servers become. The deploy host never joins that cluster. It is not a Kubernetes node and not an OpenStack compute node. If the cluster stops answering, this machine can still power the servers and run the install.
 
-When the deploy host cannot be L2 with a site, install the console agent on a computer that is. The agent answers DHCP and serves PXE there, and it opens a connection out to the console. You still manage that environment from the console. One console often covers several datacenters this way.
+We recommend the deploy host be L2 with the servers you are installing. L2 means they are on one local network. On that network this machine gives a server an IP address and a boot file. When the deploy host cannot be L2 with a site, install the console agent on a computer that is. The agent does that job at the site and connects out to the console. You still run the job from the console. One console often looks after several sites this way.
 
 The console listens on `127.0.0.1:8080` on that machine. You open the UI on the deploy host, or from a laptop with `ssh -L 8080:127.0.0.1:8080 <deploy-host>`.
 
-A laptop is a lab copy of the same program. It is the right place to click through the UI. It is the wrong place to boot a rack of servers, because those servers have to be on a network with the machine that answers DHCP.
+A laptop is a lab copy of the same program. It is the right place to click through the UI. It is the wrong place to boot a rack of servers. The machine that answers DHCP is the one on their network.
 
 One command. A compiled binary.
 
@@ -78,13 +78,15 @@ server:
 Then `sudo systemctl restart genestack-console`. Same file for dry_run, keys,
 PXE pool, WireGuard overlay, and everything else operators change on the box.
 
-## Hub L2 vs agent L2 (both)
+## When the deploy host is L2, and when you add an agent
 
-The Console on the box does PXE/DHCP when it sits on the same Layer-2 as
-the machines. That is not replaced by agents.
+On a network where the deploy host is L2 with the servers, the console
+answers DHCP and serves the boot file itself.
 
-A remote site behind a physical firewall cannot see that L2. Install an
-agent there (`curl …/agent | bash`). On first adopt the hub:
+When the deploy host cannot be L2 with a site, install an agent on a
+computer that is (`curl …/agent | bash`). The agent gives out addresses
+and boot files there, and it connects out to the console. On first adopt
+the console:
 
 1. Mints a WireGuard peer on `wg-gsc` (`10.67.67.0/24`, separate from
    any overlay you already run) and pushes it over the WebSocket the agent already

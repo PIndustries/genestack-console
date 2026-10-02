@@ -1,6 +1,6 @@
 # Connect a console to my.genestack.dev
 
-The console runs on a dedicated Linux server you operate. The recommendation is that this server is L2 with the servers in the environment, so it answers DHCP and serves PXE itself. L2 means they share a local network. Leave the console outside the cluster. It never joins the cluster. When it cannot be L2 with a site, an agent there answers DHCP and serves PXE, and you still manage that environment from the console. That is the usual layout for several datacenters. `https://my.genestack.dev` is the account portal in front of that console. It is how the Apple apps reach the console, and it is where the account holder manages the account and asks us for support.
+The console runs on a dedicated Linux server you operate. Leave that server outside the cluster. It never joins the cluster. `https://my.genestack.dev` is the account page in front of that console. It is how the Apple apps reach the console, and it is where the account holder manages the account and asks us for support.
 
 The portal does not run a copy of this deployer. An environment, a job, a BMC secret, and the cluster stay on your console. On my.genestack.dev you manage the account and the link to a console you already installed.
 

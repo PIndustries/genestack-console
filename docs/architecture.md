@@ -2,7 +2,9 @@
 
 The [README](../README.md) is the introduction. This page is the map of what runs after you have installed the console.
 
-Genestack is the checkout that installs OpenStack on Kubernetes. The cluster is that cloud. The console is the program that drives the checkout. Both live on one dedicated Linux server, the deploy host. The recommendation is that this server is L2 with the servers in the environment. L2 means they share a local network, so the console answers DHCP and serves PXE itself. The deploy host sits just outside the cluster and never joins it. It is not a Kubernetes node and not an OpenStack compute node. Out of band means it reaches the servers on their L2 network and through each server's management port (the BMC, iLO, or iDRAC), so it can still power them and run the install when the cluster is down. When the deploy host cannot be L2 with a site, an agent there answers DHCP and serves PXE. You still manage that environment from the console. Several datacenters in one private cloud are the usual case.
+Genestack is the checkout that installs OpenStack on Kubernetes. The cluster is that cloud. The console is the program that drives the checkout. Both live on one dedicated Linux server, the deploy host. The deploy host sits just outside the cluster and never joins it. It is not a Kubernetes node and not an OpenStack compute node. If the cluster stops answering, you can still power the servers and run the install from this machine.
+
+We recommend the deploy host be L2 with the servers you are installing. L2 means they are on one local network, so the console can give a server an IP address and a boot file itself. When the deploy host cannot be L2 with a site, an agent on a computer that is does that job and connects out. You still run the job from the console. One console often looks after several sites this way.
 
 | Path | What it is |
 | --- | --- |
@@ -26,8 +28,8 @@ deploy host                    dedicated server, outside the cluster
     /opt/genestack             Genestack scripts
     /etc/genestack             inventory and overrides
     |
-    |  L2 recommended: this host serves DHCP and PXE
-    |  remote site: an agent there serves DHCP and PXE, managed here
+    |  L2 recommended: this host hands out addresses and boot files
+    |  remote site: an agent there does that, managed from here
     v
 physical servers               these machines become the cluster
     management port            console powers the machine (BMC / iLO / iDRAC)
@@ -36,7 +38,7 @@ physical servers               these machines become the cluster
 
 DHCP is how a server asks for an IP address. The boot file is what the server downloads when its network card is told to start from the network. Both are served by the console process (`app/services/pxe_runtime.py`). The files it serves are rendered by `app/services/pxe.py` under the console data directory.
 
-When the deploy host cannot be L2 with the servers, install the agent on a computer that is. The agent opens the connection out to the console. DHCP and the boot files for that environment run on the agent. You still run the job from the console.
+When the deploy host cannot be L2 with the servers, install the agent on a computer that is. DHCP and the boot files for that site run on the agent. The agent connects out to the console, and you still run the job from the console.
 
 ## Boot order
 
