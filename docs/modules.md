@@ -26,8 +26,7 @@ Built-in modules and a module you write use the same shape.
 | Folder | What it does |
 | --- | --- |
 | `app/modules/console/` | Health check, backup, vacuum, and the local compile. These run on the console computer. |
-| `app/modules/baremetal/` | Register a server, power it, and hand it a boot file. This is the console's own DHCP and boot files. |
-| `app/modules/maas/` | Not used to boot a server. Installing Talos is the baremetal folder above. |
+| `app/modules/baremetal/` | Register a server, power it, and hand it a boot file. This is the console's own DHCP and boot files. This is how a server gets Talos. |
 | `app/modules/genestack/` | Push config, run the install scripts, and check the cloud. |
 | `app/modules/ansible/` | A host check, or an allow-listed playbook. |
 | `app/modules/openstack/` | List servers, and start, stop, reboot, or delete one. |
@@ -48,7 +47,7 @@ Open `examples/modules/hello/say.py`. Three names matter:
 - `OPERATION` is the catalog entry: the id the API shows (`hello.say`), the name, who can run it, and the parameters. A file that serves two catalog entries uses `OPERATIONS` instead.
 - `run` is the function. Its first argument is the job runner, so a step can call `self.write_audit`. The rest are the job, the environment, a log function, and the parameters. Copy the argument list from the example. Return a dict with `ok`.
 
-`backend` has to be one of `internal`, `genestack`, `ansible`, `baremetal`, `maas`, or `agent`. A module that does not fit the others uses `internal`.
+`backend` has to be one of `internal`, `genestack`, `ansible`, `baremetal`, or `agent`. A module that does not fit the others uses `internal`.
 
 The operation id (`baremetal.node.power`) is what you see in the API. The handler (`baremetal_node_power`) is the name in `HANDLERS`. They match, except where two catalog entries share a file. `genestack.components.desired` and `genestack.components.list` both run `app/modules/genestack/components_desired.py`.
 

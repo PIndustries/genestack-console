@@ -140,12 +140,12 @@ mode the job sees:
   `scope: environment|global`.
 - **Mutating-job lock** — mutating operations (everything with
   `mutating: true` in the catalog: deploy, config push, host prepare, verify,
-  the day-2 ops, MAAS writes, service enable, pipeline/ansible runs, …) are
+  the day-2 ops, service enable, pipeline/ansible runs, …) are
   serialized per environment: a second submission while one is queued/running
   fails with HTTP 409 and the conflicting job id; the worker additionally
   skips a queued mutating job whose env already has a *running* one and
   retries it on a later pass.
-- **Secret encryption** — `kubeconfig_data` and the MAAS api key are stored
+- **Secret encryption** — `kubeconfig_data` and the other stored secrets are
   Fernet-encrypted (`fernet:` prefix, key derived from `secret_key`);
   legacy plaintext values still decrypt. Rotating `secret_key` requires
   re-encrypting stored secrets; startup warns while it is the default.
@@ -168,7 +168,7 @@ mode the job sees:
 ## Environment config document
 
 Each environment keeps **one flat, versioned YAML document** in the console
-(`EnvConfigVersion` rows; the doc is the source of truth). Top-level sections: `provider`, `deploy`, `maas`, `servers`,
+(`EnvConfigVersion` rows; the doc is the source of truth). Top-level sections: `provider`, `deploy`, `servers`,
 `network`, `components`, `chart_versions`, `helm_overrides`,
 `kustomize_patches`, `group_vars`, `secrets`, `storage`, `talos`, `pxe`
 (unknown keys warn, not reject).
@@ -178,7 +178,7 @@ Each environment keeps **one flat, versioned YAML document** in the console
 | `GET/PUT /api/v1/environments/{id}/config` | viewer / operator | Read current doc; store a new version |
 | `GET …/config/versions[/{n}]` | viewer | Version history / fetch one version |
 | `GET …/config/render` | viewer | Preview rendered config-dir-relative files |
-| `GET …/servers` | viewer | MAAS machines merged with doc role assignments |
+| `GET …/servers` | viewer | Servers saved on the environment, with their role assignments |
 | `POST …/servers/assign` | operator | Upsert a role assignment (stored as a new version) |
 
 Rendering maps only the sections present in the doc onto the env's
@@ -198,7 +198,7 @@ hand-maintained files:
 | `group_vars` | `inventory/group_vars/<group>/console-rendered.yml` (`.yml`, matching genestack's own `ansible/inventory/genestack/group_vars` tree) |
 | `secrets` | `kubesecrets.yaml` (multi-doc `v1/Secret` manifests in `bin/create-secrets.sh` shape) |
 | `storage` | `cinder_backend_name` / `cinder_worker_name` merge into the `cinder_storage_nodes` group vars; `ceph:` keys are recorded for future rook handling (no files today) |
-| `talos` | No rendered files — `cluster_name` / `install_disk` / `image_url` are consumed by the provider=talos bootstrap flow (and as the default image URL for MAAS/PXE asset fetches) |
+| `talos` | No rendered files — `cluster_name` / `install_disk` / `image_url` are consumed by the provider=talos bootstrap flow (and as the default image URL when the console fetches the boot files) |
 | `pxe` | Not pushed to the config dir — rendered by `app/services/pxe.py` into `<data_dir>/pxe/` (`dnsmasq.conf`, `boot.ipxe`, talos assets) and served in-process |
 
 Two further sections carry extra semantics:
@@ -222,8 +222,8 @@ The `genestack.config.push` operation (operator, mutating, per-env locked)
 renders the current doc and writes the files to the env's config dir — one
 base64 write command per file over the ssh executor when a deploy host is
 set, local writes otherwise — backing up pre-existing files to
-`.console-backup/<utc-ts>/` first. Push also syncs the doc's `deploy`/`maas`
-fields onto the Environment row (maas api key stored encrypted). Dry-run logs
+`.console-backup/<utc-ts>/` first. Push also syncs the doc's `deploy`
+fields onto the Environment row. Dry-run logs
 the file plan without writing.
 
 ## Deploy orchestration (`genestack.deploy`)
@@ -692,8 +692,8 @@ of plain ES modules under `app/static/js/` (no build step).
 | `pages/tenant.js` | Tenant switcher in the nav; tenant filter for the fleet board |
 | `pages/fleet.js` | **Environments nav, landing after login** (`#/fleet`): fleet board from `GET /api/v1/fleet` — step states, current step, next action per env; live health pills over SSE; agent connectivity dot |
 | `pages/observe.js`, `environment_observe.js` | Fleet Observe (`#/observe`) and environment Observe tab: live tiles + series from `GET /fleet/observe` and `GET …/observe` |
-| `pages/environments.js`, `env_wizard.js` | Env registry; `#/setup` guided-setup wizard (4 steps, machine-source radio MAAS/static/bare-metal, sessionStorage persistence) |
-| `pages/hardware.js` | `#/hardware`: one env selector + lazy tabs — **Discovery** (`environment_discovery.js`), **Bare metal** (`environment_baremetal.js`), **MAAS machines** (`machines.js`) |
+| `pages/environments.js`, `env_wizard.js` | Env registry; `#/setup` guided-setup wizard (4 steps, machine source is a host you already addressed or a bare-metal server, sessionStorage persistence) |
+| `pages/hardware.js` | `#/hardware`: one env selector + lazy tabs — **Discovery** (`environment_discovery.js`), **Bare metal** (`environment_baremetal.js`) |
 | `pages/activity.js` | `#/activity`: Jobs / Alerts / Audit tabs (one mounted at a time — `jobs.js`, `alerts.js`, `audit.js`); firing-alert badge in the nav |
 | `pages/hosts.js` | `#/hosts` (under More): QEMU host VMs with operator-gated power actions |
 | `pages/environment_detail.js` | Environment page: the workflow spine **is** the page — one step expanded at a time, cards rendered once into the hidden `#wf-mod-park` and moved into the expanded step's mount slot. At the bottom, ONE "Expert" `<details>` block: raw descriptor, `environment_components.js`, helm/kustomize/gateway file views |
@@ -701,10 +701,10 @@ of plain ES modules under `app/static/js/` (no build step).
 | `pages/environment_terminal.js` | Deploy-host terminal card (connect step): lazy-loads vendored xterm.js from `/static/vendor/xterm/`, bridges `WS /api/v1/terminal` frames; clipboard/fullscreen/key handling; operator-gated |
 | `pages/environment_discovery.js` | Hardware discovery card (inventory step): PXE/DHCP sightings with per-row Claim…, BMC finds with per-row Credentials…; reads `GET …/discovery` |
 | `pages/environment_config.js` | Config editor (config step): versioned YAML doc, history, render preview, push + Deploy buttons; secret values stay masked |
-| `pages/environment_servers.js`, `environment_baremetal.js` | Inventory-step cards: MAAS/static servers with role assignment; console-managed bare-metal registry (register, power/PXE-boot/Provision) |
+| `pages/environment_servers.js`, `environment_baremetal.js` | Inventory-step cards: servers saved by address, with role assignment; console-managed bare-metal registry (register, power, boot, provision) |
 | `pages/environment_progress.js` | Deploy-step progress strip: 8 pipeline stages parsed from the deploy job's log, polled every 5 s while queued/running |
 | `pages/environment_cluster.js`, `environment_openstack.js` | Operate-step cards: live cluster detail, OpenStack control-plane state |
-| `pages/services.js`, `pipeline.js`, `operations.js` (More), `machines.js`, `jobs.js`, `alerts.js`, `audit.js`, `dashboard.js` | Component catalog / pipeline view / operation catalog; tab-mounted modules (MAAS machines, jobs, alerts, audit); dashboard partials reused by the fleet page |
+| `pages/services.js`, `pipeline.js`, `operations.js` (More), `jobs.js`, `alerts.js`, `audit.js`, `dashboard.js` | Component catalog / pipeline view / operation catalog; tab-mounted modules (jobs, alerts, audit); dashboard partials reused by the fleet page |
 | `pages/environment_cloudmap.js`, `environment_live.js`, `environment_instances.js` | **Unmounted since the task-flow restructure** (superseded by the cluster/openstack cards) — dead code pending cleanup |
 
 ## Job lifecycle
@@ -768,7 +768,6 @@ Async execution:
 
 | Prefix | Examples | Typical min role |
 |--------|----------|------------------|
-| `maas.*` | `maas.machines.list` | viewer (read) / operator (write) |
 | `baremetal.*` | `baremetal.nodes.list`, `baremetal.node.provision` | viewer (read) / operator / admin (provision) |
 | `agent.*` | `agent.status`, `agent.command` | viewer (status) / admin (command) |
 | `host.*` / `ansible.*` | `host.preflight` | operator |
@@ -781,14 +780,13 @@ Service enablement is **allow-listed** (e.g. `placement` ok; `rm` rejected).
 | Control | Default | Notes |
 |---------|---------|-------|
 | `dry_run` in config.yaml | `true` | Destructive steps are logged, not executed; per-env `dry_run` field overrides |
-| empty `maas.url` | not configured | No fake machines. Set `maas.mock: true` only for a dev stand-in. Booting a server does not use MAAS. |
 | API keys + roles | config.yaml | `X-API-Key` header; viewer < operator < admin; static keys = platform-admin break-glass |
 | Tenant isolation | enforced | Env lists filtered by membership; cross-tenant access → 403 |
 | User sessions | 12 h TTL | PBKDF2-SHA256 (600k) passwords; `auth.session_ttl_hours`; logout invalidates |
 | Service allowlist | enforced | Blocks shell injection / unknown services |
 | Per-env mutating-job lock | enforced | Second mutating job for same env → HTTP 409 |
 | Per-op job timeouts | 600 s default, 6 h ceiling | Long ops override in the catalog (deploy 6 h, pipeline 4 h); running jobs past deadline recovered to `failed` on startup; worker also abandons all running once at start |
-| Secret encryption at rest | on | Fernet (`fernet:` prefix) keyed off `secret_key` — `kubeconfig_data`, MAAS api key, config-doc `secrets`, bare-metal BMC passwords; masked as `***` on reads; rotation requires re-encrypting |
+| Secret encryption at rest | on | Fernet (`fernet:` prefix) keyed off `secret_key` — `kubeconfig_data`, config-doc `secrets`, bare-metal BMC passwords; masked as `***` on reads; rotation requires re-encrypting |
 | Redfish BMC access | per-node creds | Basic auth, `verify=False` (self-signed BMC certs), 10 s timeouts; creds stored encrypted, never returned by the API |
 | PXE/DHCP | in-process | Console-owned DHCP and boot HTTP on the provisioning L2; files under `data_dir/pxe/`; a remote site uses the dial-out agent |
 | Agent channel | hash-only tokens | Raw `gsca_` token shown once, sha256 stored; HMAC-SHA256 challenge/proof (raw token on the wire once — use `wss://`); one credential per env, replace-on-create; commands fixed-allowlist only; file_write confined agent-side to `GSC_ALLOWED_ROOT` |
