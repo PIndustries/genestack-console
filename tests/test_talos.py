@@ -698,6 +698,59 @@ def test_talos_bootstrap_kubeconfig_written_to_env_path(
     assert "talos-kubeconfig" not in log_text
 
 
+def test_talos_remote_kubeconfig_is_stored_and_removed(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """talosctl on the deploy host does not leave the kubeconfig there."""
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    kubeconfig = config_dir / "inventory" / "artifacts" / "admin.conf"
+    secret = "talos-remote-kubeconfig\n"
+    env = _create_env(
+        client,
+        admin_headers,
+        genestack_config_dir=str(config_dir),
+        deployer_ssh_host="deployer.example",
+        deployer_ssh_user="ubuntu",
+        dry_run=False,
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_TALOS_DEFAULTS)
+    captured: list[tuple[list[str], str | None, object]] = []
+
+    def fake_run_command(cmd, **kwargs):
+        argv = [str(c) for c in cmd]
+        captured.append((argv, kwargs.get("ssh_target"), kwargs.get("log")))
+        if argv[:2] == ["test", "-f"]:
+            return {"returncode": 1, "stdout": "", "stderr": ""}
+        if argv[:1] == ["cat"]:
+            return {"returncode": 0, "stdout": secret, "stderr": ""}
+        if argv[:2] == ["rm", "-f"]:
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+        return {"returncode": 0, "stdout": "", "stderr": "", "dry_run": False}
+
+    monkeypatch.setattr(bridge, "run_command", fake_run_command)
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "success", job["error"]
+    assert not kubeconfig.exists()
+    db = SessionLocal()
+    try:
+        row = db.get(Environment, env["id"])
+        assert decrypt_secret(row.kubeconfig_data) == secret
+    finally:
+        db.close()
+    log_text = _job_log(client, admin_headers, job["id"])
+    assert secret.strip() not in log_text
+    reads = [item for item in captured if item[0][:1] == ["cat"]]
+    assert reads and reads[0][2] is None
+    assert reads[0][1] == "ubuntu@deployer.example"
+    removals = [item for item in captured if item[0][:2] == ["rm", "-f"]]
+    assert any(str(kubeconfig) in item[0] for item in removals)
+    assert all(item[2] is None for item in removals)
+
+
 def test_talos_bootstrap_without_config_document_fails(client, admin_headers, tmp_path):
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()

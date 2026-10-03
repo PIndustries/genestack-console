@@ -411,10 +411,9 @@ def test_push_merges_kubesecrets_local(client, admin_headers, tmp_path, monkeypa
     assert merged["keystone-rabbitmq-password"]["data"] == {
         "password": _b64("console-rabbitmq-pw")
     }
-    # The pre-merge file was backed up
-    backups = list((config_dir / ".console-backup").glob("*/kubesecrets.yaml"))
-    assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == GENERATED_KUBESECRETS
+    # The pre-merge file was backed up during the push, then the job removed
+    # that backup with the live file. The merged bytes were captured above.
+    assert list((config_dir / ".console-backup").glob("*/kubesecrets.yaml")) == []
 
 
 def test_push_kubesecrets_written_when_absent_local(

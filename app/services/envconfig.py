@@ -1964,8 +1964,15 @@ def _remember_pushed_secret(
     config_dir: Path,
     agent_env_id: str | None,
     ctx: EnvContext,
+    backup: Path | None = None,
 ) -> None:
-    """Record a secret file this push wrote. Do not delete it here."""
+    """Record a secret file this push wrote, and the backup copy of that file.
+
+    The backup is the previous contents under ``.console-backup``. It holds
+    the same secret material, so the lease removes it with the live file.
+    Other backups, such as chart versions, are not recorded. Do not delete
+    anything here.
+    """
     if relpath != KUBESECRETS_FILENAME and not relpath.startswith(".ssh/"):
         return
     secret_lease.remember(
@@ -1974,6 +1981,13 @@ def _remember_pushed_secret(
         ssh_target=ctx.ssh_target,
         config_dir=config_dir,
     )
+    if backup is not None:
+        secret_lease.remember(
+            backup,
+            agent_env_id=agent_env_id,
+            ssh_target=ctx.ssh_target,
+            config_dir=config_dir,
+        )
 
 
 def push_rendered(
@@ -2182,7 +2196,14 @@ def _push_rendered_now(
             # happened hub-side). The b64 payload lives only in the relay row
             # and the wire frame — never in the job log.
             _push_file_agent(agent_env_id, target, backup_root / relpath, data, log)
-            _remember_pushed_secret(relpath, target, config_dir, agent_env_id, ctx)
+            _remember_pushed_secret(
+                relpath,
+                target,
+                config_dir,
+                agent_env_id,
+                ctx,
+                backup_root / relpath,
+            )
             if relpath in ssh_files:
                 from app.services import agent_relay
 
@@ -2193,15 +2214,25 @@ def _push_rendered_now(
                     log_cb=log,
                 )
         elif ctx.ssh_target:
+            secret_payload = relpath == KUBESECRETS_FILENAME or relpath.startswith(
+                ".ssh/"
+            )
             write_log = (
                 _redacting_log(log, base64.b64encode(data).decode("ascii"))
-                if relpath == KUBESECRETS_FILENAME
+                if secret_payload
                 else log
             )
             _push_file_ssh(
                 ctx.ssh_target, target, backup_root / relpath, data, write_log
             )
-            _remember_pushed_secret(relpath, target, config_dir, agent_env_id, ctx)
+            _remember_pushed_secret(
+                relpath,
+                target,
+                config_dir,
+                agent_env_id,
+                ctx,
+                backup_root / relpath,
+            )
             if relpath in ssh_files:
                 bridge.run_command(
                     ["chmod", "0600", str(target)],
@@ -2211,7 +2242,14 @@ def _push_rendered_now(
                 )
         else:
             _push_file_local(target, backup_root / relpath, data, log)
-            _remember_pushed_secret(relpath, target, config_dir, agent_env_id, ctx)
+            _remember_pushed_secret(
+                relpath,
+                target,
+                config_dir,
+                agent_env_id,
+                ctx,
+                backup_root / relpath,
+            )
             if relpath in ssh_files:
                 os.chmod(target, 0o600)
         written.append(relpath)

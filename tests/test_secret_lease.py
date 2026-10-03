@@ -191,9 +191,10 @@ def test_job_push_keeps_secrets_until_success(tmp_path, monkeypatch, caplog):
     assert charts["charts"]["keystone"] == "1.2.3"
     assert (root / "inventory" / "inventory.yaml").read_text() == "operator: keep\n"
     assert (root / ".genestack-manifest.yaml").is_file()
-    backups = list((root / ".console-backup").glob("*/kubesecrets.yaml"))
-    assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == GENERATED
+    assert list((root / ".console-backup").glob("*/kubesecrets.yaml")) == []
+    assert list((root / ".console-backup").glob("*/.ssh/id_ed25519")) == []
+    chart_backups = list((root / ".console-backup").glob("*/helm-chart-versions.yaml"))
+    assert len(chart_backups) == 1
 
     blob = "\n".join(raw) + "\n" + caplog.text
     _assert_absent(blob, PASSWORD, *_key_lines(private))
@@ -237,6 +238,7 @@ def test_job_push_releases_after_error(tmp_path, monkeypatch, caplog, boom):
     assert (root / "helm-chart-versions.yaml").is_file()
     assert (root / "inventory" / "inventory.yaml").is_file()
     assert (root / ".genestack-manifest.yaml").is_file()
+    assert list((root / ".console-backup").glob("*/kubesecrets.yaml")) == []
     blob = "\n".join(raw) + "\n" + caplog.text
     _assert_absent(blob, PASSWORD, *_key_lines(private))
 

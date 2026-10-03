@@ -296,13 +296,18 @@ def install_image_from_doc(doc: dict[str, Any]) -> str:
     return image or DEFAULT_TALOS_INSTALL_IMAGE
 
 
+def _rewrite_kubeconfig_text(text: str, server_url: str) -> str:
+    """Return ``text`` with its kubeconfig ``server:`` line pointed at ``server_url``."""
+    return _KUBE_SERVER_RE.sub(lambda m: f"{m.group(1)}{server_url}", text)
+
+
 def rewrite_kubeconfig_server(path: Path, server_url: str) -> bool:
     """Point kubeconfig `server:` at an address the console can actually reach."""
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return False
-    new = _KUBE_SERVER_RE.sub(lambda m: f"{m.group(1)}{server_url}", text)
+    new = _rewrite_kubeconfig_text(text, server_url)
     if new == text:
         return False
     path.write_text(new, encoding="utf-8")
@@ -758,6 +763,113 @@ def build_talos_plan(
     }
 
 
+def _executor_file_exists(
+    path: Path,
+    *,
+    ssh_target: str | None,
+    agent_env_id: str | None,
+) -> bool:
+    """True when ``path`` already exists on the executor. Does not log contents."""
+    if agent_env_id:
+        from app.services import agent_relay
+
+        reply = agent_relay.agent_exec(
+            agent_env_id,
+            "run_command",
+            {"cmd": ["test", "-f", str(path)], "cwd": None, "env": {}, "timeout": 30},
+            timeout=30,
+            log_cb=None,
+        )
+        return reply.get("rc") == 0 and not reply.get("error")
+    if ssh_target:
+        result = bridge.run_command(
+            ["test", "-f", str(path)],
+            timeout=30,
+            dry_run=False,
+            ssh_target=ssh_target,
+            log=None,
+        )
+        return result.get("returncode") == 0
+    return path.is_file()
+
+
+def _executor_read_text(
+    path: Path,
+    *,
+    ssh_target: str | None,
+    agent_env_id: str | None,
+) -> str:
+    """Read ``path`` from the executor. The text is not logged."""
+    if agent_env_id:
+        from app.services import agent_relay
+
+        reply = agent_relay.agent_exec(
+            agent_env_id,
+            "run_command",
+            {"cmd": ["cat", str(path)], "cwd": None, "env": {}, "timeout": 30},
+            timeout=30,
+            log_cb=None,
+        )
+        if reply.get("error") or reply.get("rc") not in (0, None):
+            return ""
+        return str(reply.get("stdout") or "")
+    if ssh_target:
+        result = bridge.run_command(
+            ["cat", str(path)],
+            timeout=30,
+            dry_run=False,
+            ssh_target=ssh_target,
+            log=None,
+        )
+        if result.get("returncode") not in (0, None):
+            return ""
+        return str(result.get("stdout") or "")
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _retain_created_kubeconfig(
+    plan: dict[str, Any],
+    env: Environment,
+    log: LogFn,
+    *,
+    ssh_target: str | None,
+    agent_env_id: str | None,
+    db: Any | None,
+) -> None:
+    """Store a kubeconfig this run created, then hand the path to the lease.
+
+    A file that already existed is not read and not recorded. The read uses
+    no log callback, so the kubeconfig text never enters the job log.
+    """
+    text = _executor_read_text(
+        plan["kubeconfig"],
+        ssh_target=ssh_target,
+        agent_env_id=agent_env_id,
+    )
+    apply_ip = str(plan.get("apply_ip") or "")
+    cluster_ip = plan["control_planes"][0]["ip"] if plan["control_planes"] else ""
+    if text and apply_ip and apply_ip != cluster_ip and (ssh_target or agent_env_id):
+        text = _rewrite_kubeconfig_text(text, f"https://{apply_ip}:6443")
+    if text.strip():
+        try:
+            secret_lease.store_kubeconfig(env, text, db)
+        except Exception as exc:  # noqa: BLE001 — do not log kubeconfig text
+            log(
+                "[talos] WARNING could not store kubeconfig on the environment: "
+                f"{type(exc).__name__}"
+            )
+    secret_lease.remember(
+        plan["kubeconfig"],
+        agent_env_id=agent_env_id,
+        ssh_target=ssh_target,
+        config_dir=plan["workdir"].parent,
+        log_fn=log,
+    )
+
+
 def log_talos_notes(log: LogFn | None) -> None:
     """Surface the docs/k8s-talos.md caveats (advisory, never enforced)."""
     if log is None:
@@ -840,12 +952,16 @@ def run_talos_bootstrap(
         plan["workdir"].mkdir(parents=True, exist_ok=True)
         plan["kubeconfig"].parent.mkdir(parents=True, exist_ok=True)
         log(f"[talos] workdir {plan['workdir']}")
-    # Local executor only: talosctl writes the kubeconfig on this machine.
-    # A remote executor creates the file on the deploy host; this process
-    # cannot see that create, so it does not guess and delete it.
+    # A file that already exists belongs to the operator. A file this run
+    # creates, including on the deploy host over SSH or the agent, is stored
+    # and removed when the job ends.
     kube_existed = True
-    if not dry_run and not agent_env_id and not ssh_target:
-        kube_existed = plan["kubeconfig"].exists()
+    if not dry_run:
+        kube_existed = _executor_file_exists(
+            plan["kubeconfig"],
+            ssh_target=ssh_target,
+            agent_env_id=agent_env_id,
+        )
 
     base: dict[str, Any] = {
         "cluster_name": plan["cluster_name"],
@@ -856,67 +972,60 @@ def run_talos_bootstrap(
     }
     phases_completed = 0
     total = len(plan["commands"])
-    for command in plan["commands"]:
-        result = bridge.run_command(
-            [str(a) for a in command["argv"]],
-            cwd=plan["workdir"],
-            timeout=timeout,
-            dry_run=dry_run,
-            extra_env=extra_env,
-            ssh_target=ssh_target,
-            remote_env=remote_env,
-            agent_env_id=agent_env_id,
-            log=log,
-        )
-        rc = result.get("returncode")
-        if rc not in (0, None) and not result.get("dry_run"):
-            phase = command["phase"]
-            log(f"[talos] FAILED at phase '{phase}' rc={rc} — stopping")
-            return {
-                **base,
-                "ok": False,
-                "error": f"talos bootstrap failed at phase '{phase}' (rc={rc})",
-                "returncode": rc,
-                "failed_phase": phase,
-                "phases_completed": phases_completed,
-                "phases_total": total,
-            }
-        phases_completed += 1
+    failed: dict[str, Any] | None = None
+    try:
+        for command in plan["commands"]:
+            result = bridge.run_command(
+                [str(a) for a in command["argv"]],
+                cwd=plan["workdir"],
+                timeout=timeout,
+                dry_run=dry_run,
+                extra_env=extra_env,
+                ssh_target=ssh_target,
+                remote_env=remote_env,
+                agent_env_id=agent_env_id,
+                log=log,
+            )
+            rc = result.get("returncode")
+            if rc not in (0, None) and not result.get("dry_run"):
+                phase = command["phase"]
+                log(f"[talos] FAILED at phase '{phase}' rc={rc} — stopping")
+                failed = {
+                    **base,
+                    "ok": False,
+                    "error": f"talos bootstrap failed at phase '{phase}' (rc={rc})",
+                    "returncode": rc,
+                    "failed_phase": phase,
+                    "phases_completed": phases_completed,
+                    "phases_total": total,
+                }
+                break
+            phases_completed += 1
 
-    if not dry_run:
-        apply_ip = str(plan.get("apply_ip") or "")
-        cluster_ip = plan["control_planes"][0]["ip"] if plan["control_planes"] else ""
-        if apply_ip and apply_ip != cluster_ip:
-            server = f"https://{apply_ip}:6443"
-            if rewrite_kubeconfig_server(plan["kubeconfig"], server):
-                log(
-                    f"[talos] kubeconfig server rewritten to {server} "
-                    "(console is not on the private fabric)"
-                )
-
-    if (
-        not dry_run
-        and not agent_env_id
-        and not ssh_target
-        and not kube_existed
-        and plan["kubeconfig"].is_file()
-    ):
-        try:
-            secret_lease.store_kubeconfig(
+        if failed is None and not dry_run and not agent_env_id and not ssh_target:
+            apply_ip = str(plan.get("apply_ip") or "")
+            cluster_ip = (
+                plan["control_planes"][0]["ip"] if plan["control_planes"] else ""
+            )
+            if apply_ip and apply_ip != cluster_ip:
+                server = f"https://{apply_ip}:6443"
+                if rewrite_kubeconfig_server(plan["kubeconfig"], server):
+                    log(
+                        f"[talos] kubeconfig server rewritten to {server} "
+                        "(console is not on the private fabric)"
+                    )
+    finally:
+        if not dry_run and not kube_existed:
+            _retain_created_kubeconfig(
+                plan,
                 env,
-                plan["kubeconfig"].read_text(encoding="utf-8"),
-                db,
+                log,
+                ssh_target=ssh_target,
+                agent_env_id=agent_env_id,
+                db=db,
             )
-        except Exception as exc:  # noqa: BLE001 — do not log kubeconfig text
-            log(
-                "[talos] WARNING could not store kubeconfig on the environment: "
-                f"{type(exc).__name__}"
-            )
-        secret_lease.remember(
-            plan["kubeconfig"],
-            config_dir=plan["workdir"].parent,
-            log_fn=log,
-        )
+    if failed is not None:
+        return failed
     log(
         f"[talos] bootstrap complete: {phases_completed}/{total} phases, "
         f"kubeconfig at {plan['kubeconfig']}"

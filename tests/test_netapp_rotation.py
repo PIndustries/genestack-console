@@ -211,9 +211,16 @@ def test_rotation_update_via_config_api_re_renders_secret(
     assert OLD_PASS not in text
     assert OLD_USER not in text
     assert not (config_dir / "kubesecrets.yaml").exists()
-    # The pre-rotation file was backed up (old creds retrievable from backup)
-    backups = list((config_dir / ".console-backup").glob("*/kubesecrets.yaml"))
-    assert any(_b64(OLD_PASS) in b.read_text(encoding="utf-8") for b in backups)
+    # The job removes the live file and its backup, so the old password is
+    # not left under the config directory.
+    assert list((config_dir / ".console-backup").glob("*/kubesecrets.yaml")) == []
+    leftover = [
+        path
+        for path in config_dir.rglob("*")
+        if path.is_file()
+        and OLD_PASS in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert leftover == []
     for job in (first, second):
         log_text = client.get(
             f"/api/v1/jobs/{job['id']}", headers=admin_headers
