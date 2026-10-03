@@ -88,9 +88,13 @@ def test_prepare_dry_writes_user_data_and_ubuntu_ipxe(tmp_path, monkeypatch):
         _BASE, "tok"
     )
     assert render_profile_ipxe("talos", _BASE, "tok") == render_talos_ipxe(_BASE)
-    ubuntu = render_profile_ipxe("ubuntu", _BASE, "tok")
+    ubuntu = render_profile_ipxe("ubuntu", _BASE, "tok", hostname="lab1")
     assert "ubuntu" in ubuntu.lower()
     assert "autoinstall" in ubuntu
+    assert f"{_BASE}/ubuntu/lab1/" in ubuntu
+    other = render_profile_ipxe("ubuntu", _BASE, "tok", hostname="lab2")
+    assert f"{_BASE}/ubuntu/lab2/" in other
+    assert f"{_BASE}/ubuntu/lab1/" not in other
 
 
 def test_microk8s_dry_does_not_ssh(monkeypatch):
@@ -175,6 +179,80 @@ def test_adopt_live_encrypts_kubeconfig(monkeypatch):
     assert captured["plain"] == secret.strip()
     assert all(secret not in line for line in logs)
     assert "kubectl" in result["message"]
+
+
+def test_ubuntu_next_boot_writes_that_machines_seed(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.services import baremetal
+
+    node = SimpleNamespace(
+        id="node-1",
+        name="lab1",
+        pxe_mac="aa:bb:cc:dd:ee:01",
+        next_boot="disk",
+        boot_stage="new",
+        wiped_at=None,
+    )
+    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey operator@lab"
+    env = SimpleNamespace(id="env-1", ssh_public_key=key)
+    settings = SimpleNamespace(data_dir=str(tmp_path))
+    monkeypatch.setattr(baremetal, "_prepare_pxe", lambda *a, **k: {"ok": True})
+
+    def powered(*_a, **_k):
+        raise AssertionError("powered")
+
+    monkeypatch.setattr(baremetal, "pxe_boot", powered)
+    result = baremetal.set_next_boot(
+        MagicMock(),
+        env,
+        node,
+        "ubuntu",
+        boot_now=False,
+        dry_run=False,
+        log=lambda *_a, **_k: None,
+        settings=settings,
+    )
+    assert result["ok"] is True
+    assert node.next_boot == "ubuntu"
+    assert node.boot_stage == "ubuntu"
+    text = (tmp_path / "pxe" / "ubuntu" / "lab1" / "user-data").read_text(encoding="utf-8")
+    assert key in text
+    assert "lab2" not in text
+
+    missing_key = baremetal.set_next_boot(
+        MagicMock(),
+        SimpleNamespace(id="env-1", ssh_public_key=""),
+        node,
+        "ubuntu",
+        boot_now=False,
+        dry_run=False,
+        log=lambda *_a, **_k: None,
+        settings=settings,
+    )
+    assert missing_key["ok"] is False
+    assert "SSH public key" in missing_key["error"]
+
+    no_mac = SimpleNamespace(
+        id="node-2",
+        name="lab2",
+        pxe_mac="",
+        next_boot="disk",
+        boot_stage="new",
+    )
+    missing_mac = baremetal.set_next_boot(
+        MagicMock(),
+        env,
+        no_mac,
+        "ubuntu",
+        boot_now=False,
+        dry_run=False,
+        log=lambda *_a, **_k: None,
+        settings=settings,
+    )
+    assert missing_mac["ok"] is False
+    assert "PXE MAC" in missing_mac["error"]
+    assert no_mac.next_boot == "disk"
 
 
 def test_set_next_boot_accepts_ubuntu(monkeypatch):

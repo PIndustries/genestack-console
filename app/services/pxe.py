@@ -490,7 +490,10 @@ def _write_mac_profiles(
         if choice == "commission":
             needs = True
         script = render_profile_ipxe(
-            choice, base_url, str(profile.get("token") or "")
+            choice,
+            base_url,
+            str(profile.get("token") or ""),
+            hostname=str(profile.get("name") or ""),
         )
         changed |= _write_if_changed(mac_dir / filename, script, log)
     return changed, needs

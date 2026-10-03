@@ -1,5 +1,9 @@
 """Per-MAC PXE boot choice: commission RAM disk, Talos, Ubuntu, or the local disk.
 
+Talos and Ubuntu are the operating systems this console installs. Commission
+is the wipe that Talos requires. Disk leaves the machine on what is already
+installed.
+
 The commission image is a RAM disk. It never mounts a hard drive. When
 ``gsc_wipe=1`` it clears the front of each fixed disk so the old bootloader
 cannot win the next POST, then posts the disk and NIC report to the PXE HTTP
@@ -169,10 +173,14 @@ boot
 """
 
 
-def render_ubuntu_ipxe(assets_base_url: str) -> str:
-    """Ubuntu autoinstall. user-data is served from this console's PXE tree."""
+def render_ubuntu_ipxe(assets_base_url: str, hostname: str | None = None) -> str:
+    """Ubuntu autoinstall. A hostname uses that machine's own seed directory."""
     base = assets_base_url.rstrip("/")
-    seed = f"{base}/ubuntu/"
+    host = str(hostname or "").strip().lower()
+    if host and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", host):
+        seed = f"{base}/ubuntu/{host}/"
+    else:
+        seed = f"{base}/ubuntu/"
     return (
         "#!ipxe\n"
         "# profile: ubuntu\n"
@@ -187,7 +195,10 @@ def render_ubuntu_ipxe(assets_base_url: str) -> str:
 
 
 def render_profile_ipxe(
-    next_boot: str, assets_base_url: str, token: str | None
+    next_boot: str,
+    assets_base_url: str,
+    token: str | None,
+    hostname: str | None = None,
 ) -> str:
     choice = str(next_boot or "disk").strip().lower()
     if choice == "commission":
@@ -195,7 +206,7 @@ def render_profile_ipxe(
     if choice == "talos":
         return render_talos_ipxe(assets_base_url)
     if choice == "ubuntu":
-        return render_ubuntu_ipxe(assets_base_url)
+        return render_ubuntu_ipxe(assets_base_url, hostname)
     return render_disk_ipxe()
 
 

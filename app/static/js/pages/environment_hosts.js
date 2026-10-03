@@ -8,8 +8,9 @@ export function hostsCardHtml() {
       <span class="muted" id="hosts-msg"></span>
     </div>
     <p class="muted" style="font-size:.78rem">
-      This environment can be plain Ubuntu, MicroK8s, Kubespray, or Talos.
-      Preparing Ubuntu writes an autoinstall seed. It does not install OpenStack.
+      Talos and Ubuntu are the operating systems this console installs.
+      Install Ubuntu is on the bare-metal row for one machine. This form writes that machine's seed.
+      It does not install OpenStack.
     </p>
     <form id="hosts-ubuntu" class="install-form">
       <input name="hostname" type="text" placeholder="hostname" maxlength="63" autocomplete="off" />

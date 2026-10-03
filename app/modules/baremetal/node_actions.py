@@ -66,6 +66,7 @@ OPERATIONS = (
         "description": (
             "Choose the next PXE image for one machine: commission (RAM-disk "
             "probe and fixed-disk wipe), talos (only after a wipe report), "
+            "ubuntu (autoinstall of that machine, whole disk, no Talos), "
             "or disk (iPXE exits to the local disk). boot_now power-cycles "
             "into that image. The default for a machine that was not asked "
             "to provision stays disk, so a stray PXE does not wipe."
@@ -78,7 +79,7 @@ OPERATIONS = (
                 "next_boot",
                 True,
                 "commission, talos, ubuntu, or disk",
-                enum=["commission", "talos", "disk"],
+                enum=["commission", "talos", "ubuntu", "disk"],
             ),
             _p(
                 "boot_now",
