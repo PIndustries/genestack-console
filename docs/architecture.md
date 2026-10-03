@@ -16,7 +16,7 @@ An environment is one cloud. Its settings are one versioned document in the cons
 
 Skyline is the OpenStack dashboard people use once the cloud answers. The console is how the operator builds the cloud.
 
-`https://my.genestack.dev` is an optional account page. The Apple apps sign in there and are forwarded to your console. The environment and the management-port passwords stay on the deploy host. See [hosted-mode.md](hosted-mode.md).
+`https://my.genestack.dev` is an optional account page. The Apple apps sign in there and are forwarded to your console. The environment and the management-port passwords stay in the console database on the deploy host. See [hosted-mode.md](hosted-mode.md).
 
 ```
 your browser
@@ -47,6 +47,7 @@ Each server has its own next boot. The MAC address is the id of the network port
 - **disk** is the default, including a MAC the console has never been asked to install. The server boots its local disk.
 - **commission** is a small system that runs from memory. It wipes the starts of the fixed disks and posts one report to the console.
 - **talos** is served for that MAC only after the report is accepted. Talos is the operating system Kubernetes runs on for this install. The machine config is pushed after the wipe. It is not placed on the kernel command line.
+- **ubuntu** installs Ubuntu on that one machine. It uses the whole disk and the environment SSH public key. It does not require the commission wipe, and it does not install OpenStack or Kubernetes. The kernel and initrd are files you place at `data/pxe/ubuntu/vmlinuz` and `data/pxe/ubuntu/initrd`.
 
 An ISO boot is rejected for this path because it does not wipe the disks.
 
@@ -66,7 +67,7 @@ OVH and the Apple native API are extra ways to reach the same job system. They a
 | **Aggregation services** | Read-only rollups over env state: descriptor (`app/services/descriptor.py`), guided workflow (`app/services/workflow.py` — six lifecycle steps), fleet board (`app/services/fleet.py` — compact per-env step states, no synchronous probes) |
 | **Telemetry** | Worker-side collector writing per-env cluster snapshots, in-process event bus + SSE stream, alert rules/events, optional metric samples — see [Telemetry & real-time subsystem](#telemetry--real-time-subsystem) |
 | **Agent channel** | A machine on a remote site opens a WebSocket out to the console (`app/services/agents.py`, `agent/`): HMAC enrollment handshake, heartbeats, allowlisted commands — see [Agent channel](#agent-channel-hub-and-spoke) |
-| **Bare metal** | Per-MAC boot order (disk, commission, talos), Redfish client for the management port (`app/services/redfish.py`), node registry (`app/services/baremetal.py`), DHCP and boot files in-process (`app/services/pxe_runtime.py`, files rendered by `app/services/pxe.py`) |
+| **Bare metal** | Per-MAC boot order (disk, commission, talos, ubuntu), Redfish client for the management port (`app/services/redfish.py`), node registry (`app/services/baremetal.py`), DHCP and boot files in-process (`app/services/pxe_runtime.py`, files rendered by `app/services/pxe.py`) |
 | **Ansible** | Run allow-listed playbooks (`host_preflight.yml`, `basic_ops.yml`, …) |
 | **Genestack bridge** | Read `openstack-components.yaml`, list `bin/` scripts, enable services via allowlist, run pipeline stages; inventory + curated run of repo utility scripts (`app/services/repo_scripts.py`) |
 

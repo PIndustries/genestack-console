@@ -102,6 +102,6 @@ The enrollment is `app/services/agents.py`. The install script the agent curls i
 
 ## What is not in this program
 
-The Apple apps and `https://my.genestack.dev` are not in this repository. The apps sign in on the account page. That page then opens the console you installed. The environment, the job log, and the management-port passwords stay on the deploy host.
+The Apple apps and `https://my.genestack.dev` are not in this repository. The apps sign in on the account page. That page then opens the console you installed. The environment, the job log, and the management-port passwords stay in the console database on the deploy host. A job removes `kubesecrets.yaml`, and a kubeconfig it created, when the job finishes.
 
 The next pages are [how a job runs](runtime.md), the [jobs](jobs.md), the [HTTP API](http.md), and the [web page](ui.md).

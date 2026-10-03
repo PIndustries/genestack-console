@@ -26,7 +26,7 @@ Built-in modules and a module you write use the same shape.
 | Folder | What it does |
 | --- | --- |
 | `app/modules/console/` | Health check, backup, vacuum, and the local compile. These run on the console computer. |
-| `app/modules/baremetal/` | Register a server, power it, and hand it a boot file. This is the console's own DHCP and boot files. This is how a server gets Talos. |
+| `app/modules/baremetal/` | Register a server, power it, and hand it a boot file. This is the console's own DHCP and boot files. This is how a server gets Talos or Ubuntu. |
 | `app/modules/genestack/` | Push config, run the install scripts, and check the cloud. |
 | `app/modules/ansible/` | A host check, or an allow-listed playbook. |
 | `app/modules/openstack/` | List servers, and start, stop, reboot, or delete one. |

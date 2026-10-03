@@ -109,7 +109,7 @@ A site that has its own agent gets a directory, `data/pxe/<agent_id>/`, rendered
 
 The `pxe` section names the interface, the DHCP range, and `http_port`. DHCP listens on UDP port 67. Set `http_port` yourself. When the key is omitted, the in-process server uses 8088, and the URL written into the boot file uses 8080. Those are not the same number, and neither one is a reason to move the console page off 8080. Servers you have recorded get a DHCP reservation from their MAC address and the address you typed.
 
-`app/services/bootselect.py` is the per-MAC choice. The commission image is a small system that runs from memory. It does not mount a disk. It clears the front of each fixed disk, so the old bootloader cannot win the next start, and it posts one report. Talos is served for that MAC only after the console accepts the report. A MAC you have not selected is sent back to its own disk.
+`app/services/bootselect.py` is the per-MAC choice. The commission image is a small system that runs from memory. It does not mount a disk. It clears the front of each fixed disk, so the old bootloader cannot win the next start, and it posts one report. Talos is served for that MAC only after the console accepts the report. Ubuntu is the other operating system. It installs that one machine from `data/pxe/ubuntu/<hostname>/` and does not require the commission wipe. You place the kernel and initrd at `data/pxe/ubuntu/vmlinuz` and `data/pxe/ubuntu/initrd`. A MAC you have not selected is sent back to its own disk.
 
 The boot order, and why an ISO is rejected on the greenfield path, is on the [install chapter](genestack-guide.md). `baremetal.node.iso_boot` is a different operation. It inserts an ISO into the management-port virtual CD when the network port cannot PXE. It is not the first boot of a reinstall.
 
@@ -231,4 +231,4 @@ The worker is `python -m app.worker.runner`, or the `worker` subcommand of the b
 | `scripts/systemd/` | The two unit files. |
 | `pxe/` | A small container, dnsmasq plus a static HTTP server. A container install can add it with `GSC_WITH_PXE=1`. The Linux binary serves DHCP and the boot files in-process and does not start that container. The files are the ones `app/services/pxe.py` writes. |
 
-The account page and the Apple apps are not in this tree. They open the console you installed. The environment and the job log stay on the deploy host.
+The account page and the Apple apps are not in this tree. They open the console you installed. The environment and the job log stay in the console database on the deploy host.
