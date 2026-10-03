@@ -1,6 +1,6 @@
 # Releasing
 
-Branch pushes do not build a binary. A public release is a git tag.
+Branch pushes do not build a binary. A public release is a git tag. Pull requests land on `main`. `main` is the development line. The installer follows the latest tag, not `main`. A release branch is cut from a tag only when a fix must ship without the rest of `main`.
 
 1. Set `VERSION` in `app/version.py` to `YYYY.MM.DD`.
 2. Commit that change on `main`.
