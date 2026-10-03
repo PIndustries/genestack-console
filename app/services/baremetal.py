@@ -1,4 +1,4 @@
-"""Bare-metal orchestration. The console installs Talos from the network.
+"""Bare-metal orchestration. The console installs Talos or Ubuntu from the network.
 
 Coordinates the registered :class:`BaremetalNode` rows, the Redfish client
 (BMC power/boot), the console-owned in-process PXE runtime, and the talos
@@ -463,6 +463,10 @@ def set_next_boot(
             "next_boot": choice,
             "message": f"[dry-run] would set {node.name} next boot to {choice}",
         }
+    if choice == "ubuntu":
+        seeded = _ensure_ubuntu_seed(env, node, settings, log)
+        if not seeded.get("ok"):
+            return seeded
     if choice == "commission":
         return begin_commission(
             db, env, node, log=log, settings=settings, boot_now=boot_now
@@ -480,6 +484,8 @@ def set_next_boot(
     node.next_boot = choice
     if choice == "talos":
         node.boot_stage = "talos"
+    elif choice == "ubuntu":
+        node.boot_stage = "ubuntu"
     db.add(node)
     db.flush()
     prepared = _prepare_pxe(db, env, settings, log)
@@ -508,6 +514,52 @@ def set_next_boot(
         "next_boot": choice,
         "message": f"{node.name} next boot is {choice}",
     }
+
+
+def _ensure_ubuntu_seed(
+    env: Environment,
+    node: BaremetalNode,
+    settings: Settings | None,
+    log: LogFn,
+) -> dict[str, Any]:
+    """Write this machine's Ubuntu autoinstall seed. The SSH key is not logged."""
+    from app.config import get_settings
+    from app.modules.hosts.ubuntu import clean_ssh_key, safe_hostname, write_ubuntu_seed
+
+    if not normalize_mac(node.pxe_mac):
+        return {
+            "ok": False,
+            "error": (
+                f"{node.name} has no PXE MAC — Ubuntu cannot select a boot file"
+            ),
+            "node_id": node.id,
+            "returncode": 2,
+        }
+    settings = settings or get_settings()
+    raw_key = (env.ssh_public_key or "").strip()
+    if not raw_key:
+        return {
+            "ok": False,
+            "error": (
+                f"{node.name} environment has no SSH public key — "
+                "Ubuntu would install with no login key"
+            ),
+            "node_id": node.id,
+            "returncode": 2,
+        }
+    try:
+        hostname = safe_hostname(node.name)
+        ssh_key = clean_ssh_key(raw_key)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "node_id": node.id,
+            "returncode": 2,
+        }
+    written = write_ubuntu_seed(Path(settings.data_dir), hostname, ssh_key)
+    log(f"[baremetal] {node.name} Ubuntu seed at {written['seed_dir']}")
+    return {"ok": True, "hostname": hostname, "seed_dir": str(written["seed_dir"])}
 
 
 def _find_node_by_mac(db: Session, mac: str) -> BaremetalNode | None:

@@ -45,7 +45,9 @@ function stagePillHtml(stage) {
   if (s === "fresh-maintenance" || s === "installed" || s === "commissioned") {
     return `<span class="pill ok">${esc(s)}</span>`;
   }
-  if (s === "commissioning" || s === "talos") return `<span class="pill warn">${esc(s)}</span>`;
+  if (s === "commissioning" || s === "talos" || s === "ubuntu") {
+    return `<span class="pill warn">${esc(s)}</span>`;
+  }
   if (s === "failed") return `<span class="pill bad">${esc(s)}</span>`;
   return `<span class="pill">${esc(s)}</span>`;
 }
@@ -244,10 +246,18 @@ function bmNextBoot(envId, node, target) {
     talos:
       `Serve Talos to ${name}? This power-cycles into Talos. It is refused until ` +
       "a commission wipe has been accepted.",
+    ubuntu:
+      `Install Ubuntu on ${name}? The next PXE installs Ubuntu on the whole disk. ` +
+      "The console SSH key is the login key. This does not install Talos, OpenStack, or Kubernetes.",
     disk: `Boot ${name} from the local disk? The next PXE exits without wiping.`,
   };
   if (!prompts[target] || !confirm(prompts[target])) return;
-  const labels = { commission: "commission", talos: "serve talos", disk: "boot disk" };
+  const labels = {
+    commission: "commission",
+    talos: "serve talos",
+    ubuntu: "install ubuntu",
+    disk: "boot disk",
+  };
   startBmJob(
     envId,
     nodeId,
@@ -296,6 +306,7 @@ function bmActionsCellHtml(node, i) {
     `<div class="bm-power-menu">` +
     `<button class="secondary btn-sm" type="button" data-bm-next="commission" data-row="${i}" title="RAM disk: probe hardware and wipe fixed disks" ${opGate}>Commission</button>` +
     `<button class="secondary btn-sm" type="button" data-bm-next="talos" data-row="${i}" title="One-shot PXE of Talos after an accepted wipe" ${opGate}>Serve Talos</button>` +
+    `<button class="secondary btn-sm" type="button" data-bm-next="ubuntu" data-row="${i}" title="Install Ubuntu on the whole disk. The console SSH key is the login key." ${opGate}>Install Ubuntu</button>` +
     `<button class="secondary btn-sm" type="button" data-bm-next="disk" data-row="${i}" title="Next PXE exits to the local disk" ${opGate}>Boot disk</button>` +
     `</div></details> ` +
     `<button class="secondary btn-sm" type="button" data-bm-pxe="${i}" title="PXE the machine's current next-boot image" ${opGate}>PXE boot</button> ` +

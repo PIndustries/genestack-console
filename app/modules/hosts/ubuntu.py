@@ -104,7 +104,7 @@ def write_ubuntu_seed(data_dir: Path, hostname: str, ssh_key: str) -> dict[str, 
     meta_path = named / "meta-data"
     user_path.write_text(user, encoding="utf-8")
     meta_path.write_text(meta, encoding="utf-8")
-    # render_profile_ipxe("ubuntu") points cloud-init at /ubuntu/user-data.
+    # A named boot reads /ubuntu/<hostname>/. The shared files are the fallback.
     (root / "user-data").write_text(user, encoding="utf-8")
     (root / "meta-data").write_text(meta, encoding="utf-8")
     return {
