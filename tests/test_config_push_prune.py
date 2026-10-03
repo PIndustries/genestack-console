@@ -82,11 +82,21 @@ def test_dropped_helm_override_file_deleted(client, admin_headers, tmp_path):
 
 
 def test_dropped_secret_pruned_generated_survives(client, admin_headers, tmp_path):
-    """A secret the doc stops declaring is pruned; generated ones survive."""
+    """A secret the doc stops declaring is pruned; generated ones survive.
+
+    Both pushes share one job lease. The file has to stay between them so the
+    second push can merge. The lease removes it when that scope ends.
+    """
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.models import Environment
+    from app.services import secret_lease
+    from app.services.envcontext import build_context
+
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
     # Externally generated entry (create-secrets.sh shape) — never pruned
-    (config_dir / "kubesecrets.yaml").write_text(
+    generated = (
         "---\n"
         "apiVersion: v1\n"
         "kind: Secret\n"
@@ -97,25 +107,54 @@ def test_dropped_secret_pruned_generated_survives(client, admin_headers, tmp_pat
         "data:\n"
         f"  password: {envconfig_service.base64.b64encode(b'gen').decode()}\n"
     )
+    (config_dir / "kubesecrets.yaml").write_text(generated)
     env = _create_env(
         client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
     )
-    _push_doc(client, admin_headers, env["id"], SECRETS_DOC)
-    merged = _manifests_by_name((config_dir / "kubesecrets.yaml").read_text())
-    assert set(merged) == {
-        "mariadb",
-        "netapp-cinder-backend",
-        "keystone-rabbitmq-password",
-    }
 
-    # New doc keeps one secret, drops the other
-    second = SECRETS_DOC.replace(
-        "  netapp-cinder-backend:\n    data:\n      username: admin\n      password: s3cret\n",
-        "",
-    )
-    _push_doc(client, admin_headers, env["id"], second)
-    merged = _manifests_by_name((config_dir / "kubesecrets.yaml").read_text())
-    assert set(merged) == {"mariadb", "keystone-rabbitmq-password"}
+    db = SessionLocal()
+    lease = None
+    try:
+        env_row = db.get(Environment, env["id"])
+        ctx = build_context(env_row, get_settings())
+        lease = secret_lease.begin(ctx)
+        live = ctx.config_dir / "kubesecrets.yaml"
+
+        def _push(doc: str) -> None:
+            envconfig_service.put_version(db, env_row, doc, "prune-test")
+            db.commit()
+            current = envconfig_service.get_current(db, env_row)
+            assert current is not None
+            files = envconfig_service.render_to_files(current[0], env_row)
+            envconfig_service.push_rendered(files, ctx, None, False)
+
+        _push(SECRETS_DOC)
+        merged = _manifests_by_name(live.read_text())
+        assert set(merged) == {
+            "mariadb",
+            "netapp-cinder-backend",
+            "keystone-rabbitmq-password",
+        }
+
+        # New doc keeps one secret, drops the other
+        second = SECRETS_DOC.replace(
+            "  netapp-cinder-backend:\n"
+            "    data:\n"
+            "      username: admin\n"
+            "      password: s3cret\n",
+            "",
+        )
+        _push(second)
+        merged = _manifests_by_name(live.read_text())
+        assert set(merged) == {"mariadb", "keystone-rabbitmq-password"}
+        assert live.is_file()
+    finally:
+        if lease is not None:
+            lease.release()
+            secret_lease.end(lease)
+        db.close()
+
+    assert not (config_dir.resolve() / "kubesecrets.yaml").exists()
 
 
 def test_dropped_chart_pruned_bootstrap_survives(client, admin_headers, tmp_path):

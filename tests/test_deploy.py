@@ -11,6 +11,7 @@ from app.db import SessionLocal
 from app.models import Environment
 from app.services import deploy as deploy_service
 from app.services import genestack_bridge as bridge
+from app.services.crypto import decrypt_secret
 from app.services.catalog import get_operation
 from app.services.service_registry import PIPELINE_STAGES
 from tests.test_agent_relay import (
@@ -616,6 +617,7 @@ def _fake_kubeconfig_run_command(monkeypatch, admin_conf=ADMIN_CONF):
         calls.append(argv)
         if argv[:2] == ["cat", "/etc/kubernetes/admin.conf"]:
             assert kwargs.get("ssh_target") == "10.0.0.11"
+            assert kwargs.get("log") is None
             return {
                 "returncode": 0 if admin_conf else 1,
                 "stdout": admin_conf or "",
@@ -638,6 +640,20 @@ def test_deploy_fetches_kubeconfig_after_hosts_stage(
         client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
     )
     _put_doc(client, admin_headers, env["id"], doc=DOC_WITH_CONTROL_PLANE)
+    seen: dict[str, str] = {}
+    real_fetch = deploy_service._fetch_kubeconfig
+
+    def wrapped(*args, **kwargs):
+        real_fetch(*args, **kwargs)
+        kubeconfig = config_dir / "inventory" / "artifacts" / "admin.conf"
+        assert kubeconfig.is_file()
+        text = kubeconfig.read_text(encoding="utf-8")
+        assert "server: https://10.0.0.11:6443" in text
+        assert "127.0.0.1" not in text
+        assert (kubeconfig.stat().st_mode & 0o777) == 0o600
+        seen["text"] = text
+
+    monkeypatch.setattr(deploy_service, "_fetch_kubeconfig", wrapped)
     calls = _fake_kubeconfig_run_command(monkeypatch)
 
     resp = _deploy_job(client, admin_headers, env["id"])
@@ -647,16 +663,23 @@ def test_deploy_fetches_kubeconfig_after_hosts_stage(
 
     kubeconfig = config_dir / "inventory" / "artifacts" / "admin.conf"
     assert ["cat", "/etc/kubernetes/admin.conf"] in calls
-    assert kubeconfig.exists()
-    text = kubeconfig.read_text(encoding="utf-8")
-    assert "server: https://10.0.0.11:6443" in text
-    assert "127.0.0.1" not in text
-    assert (kubeconfig.stat().st_mode & 0o777) == 0o600
+    # The job created the file, then removed it when it finished.
+    assert not kubeconfig.exists()
+    assert seen["text"]
 
     log_text = _job_log(client, admin_headers, job["id"])
     assert "[kubeconfig] wrote" in log_text
     # The fetched content (cluster credentials) is never echoed to the job log
     assert "certificate-authority-data" not in log_text
+    assert "ZmFrZQ==" not in log_text
+    db = SessionLocal()
+    try:
+        row = db.get(Environment, env["id"])
+        plain = decrypt_secret(row.kubeconfig_data)
+    finally:
+        db.close()
+    assert plain == seen["text"]
+    assert "server: https://10.0.0.11:6443" in plain
 
 
 def test_deploy_kubeconfig_fetch_skipped_when_present(
@@ -869,12 +892,21 @@ def test_deploy_talos_skips_kubeconfig_autofetch(
     assert any(
         argv[:2] == ["talosctl", "gen"] and argv[2] == "config" for argv in captured
     )
-    # Guard: the kubeconfig file already exists (talosctl kubeconfig wrote it)
+    # talosctl wrote the kubeconfig during the job, so the ssh cat never ran.
+    # The job then removed that file and kept the text on the environment.
     assert ["cat", "/etc/kubernetes/admin.conf"] not in captured
     kubeconfig = config_dir / "inventory" / "artifacts" / "admin.conf"
-    assert kubeconfig.read_text(encoding="utf-8") == "talos-kubeconfig\n"
+    assert not kubeconfig.exists()
     log_text = _job_log(client, admin_headers, job["id"])
-    assert "already exists — skipping fetch" in log_text
+    assert "skipping fetch" in log_text
+    assert "talos-kubeconfig" not in log_text
+    db = SessionLocal()
+    try:
+        row = db.get(Environment, env["id"])
+        plain = decrypt_secret(row.kubeconfig_data)
+    finally:
+        db.close()
+    assert plain == "talos-kubeconfig\n"
 
 
 def test_deploy_talos_phase_failure_stops_pipeline(

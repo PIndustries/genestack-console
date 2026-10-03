@@ -67,7 +67,7 @@ Each environment has one YAML document. Every save is a new row in `env_config_v
 | `helm_overrides` | Writes `helm-configs/<service>/console-rendered.yaml`. The filename is the console's, so it does not replace a file you maintain by hand. Helm reads every file in the directory. |
 | `kustomize_patches` | Writes an overlay under `kustomize/<service>/overlay/`. |
 | `group_vars` | Writes `inventory/group_vars/<group>/console-rendered.yml`. |
-| `secrets` | Merges into `kubesecrets.yaml`. An existing secret is kept. A name that exists in both files takes the console's value. |
+| `secrets` | Merges into `kubesecrets.yaml`. An existing secret is kept. A name that exists in both files takes the console's value. The file is on the deploy host only while the job is running. |
 | `storage` | Cinder keys go to the Cinder group vars. A Ceph block renders the Rook overlay. |
 | `network` | Not a file. The keys are environment variables on the install commands. |
 | `talos` | Talos image and machine settings for the bootstrap. Not a file in `/etc/genestack` by itself. |
@@ -126,6 +126,12 @@ A scan for management ports, and a scan that finds servers before you accept the
 `app/services/crypto.py` encrypts with Fernet. The key is the SHA-256 of `secret_key`, not the string itself. Stored values start with `fernet:`. An older plaintext value still reads. Rotating `secret_key` means re-encrypting every stored secret. Back up `config.yaml` and the database together before you rotate it.
 
 The same key covers kubeconfigs, management-port passwords, provider secrets, and notification credentials. User passwords are the exception. They are hashed, not encrypted.
+
+The console database holds the secrets. HashiCorp Vault and OpenBao are not part of this console. 1Password is not the store.
+
+The deploy host has `kubesecrets.yaml` only while a job is running. The push writes that file so the install scripts can read it. The job removes it when the job finishes. Success, failure, and cancel all remove it. The same step removes `.ssh` files that the push wrote under the Genestack config directory, and a kubeconfig file this job created. A kubeconfig the job fetched is encrypted onto the environment with the same Fernet helper, then the file is removed. The cleanup does not use `rm -rf`. It does not remove `helm-chart-versions.yaml`, the inventory, the push manifest, or the deploy host account's `~/.ssh`. A kubeconfig path that was already on the host is left in place. A dry run writes nothing and deletes nothing.
+
+The console also stages a decrypted kubeconfig under its data directory for the length of the job, mode `0600`, and removes that copy when the job ends. A copy left behind by a crash is removed the next time the console starts.
 
 Job logs pass through `app/services/logredact.py` so a secret that showed up in command output is masked before the log is stored.
 

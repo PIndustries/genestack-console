@@ -83,6 +83,7 @@ def run(
             ssh_target=ssh_target,
             remote_env=remote_env,
             agent_env_id=agent_env_id,
+            db=self.db,
         )
     except envconfig_service.ConfigValidationError as exc:
         log(f"[talos] {exc}")

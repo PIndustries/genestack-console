@@ -127,6 +127,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import EnvConfigVersion, Environment
 from app.services import genestack_bridge as bridge
+from app.services import secret_lease
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.envcontext import EnvContext
 from app.services.executors import pick_executor
@@ -1957,7 +1958,47 @@ def sync_chart_versions_from_repo(ctx, log, dry_run=False):
     log("[sync_chart_versions] no-op when skip_push without config doc")
 
 
+def _remember_pushed_secret(
+    relpath: str,
+    target: Path,
+    config_dir: Path,
+    agent_env_id: str | None,
+    ctx: EnvContext,
+) -> None:
+    """Record a secret file this push wrote. Do not delete it here."""
+    if relpath != KUBESECRETS_FILENAME and not relpath.startswith(".ssh/"):
+        return
+    secret_lease.remember(
+        target,
+        agent_env_id=agent_env_id,
+        ssh_target=ctx.ssh_target,
+        config_dir=config_dir,
+    )
+
+
 def push_rendered(
+    files: dict[str, str],
+    ctx: EnvContext,
+    log: LogFn | None = None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Write rendered files, then drop secret files when this push is not a job.
+
+    See :func:`_push_rendered_now`. Inside a job the job lease keeps
+    ``kubesecrets.yaml`` and the ``.ssh`` files until the job finishes.
+    """
+    if ctx.config_dir is None:
+        raise ConfigValidationError(
+            "Environment has no genestack_config_dir — nowhere to push rendered files"
+        )
+    close = secret_lease.open_push_scope(ctx.config_dir, dry_run=dry_run, log_fn=log)
+    try:
+        return _push_rendered_now(files, ctx, log, dry_run)
+    finally:
+        close()
+
+
+def _push_rendered_now(
     files: dict[str, str],
     ctx: EnvContext,
     log: LogFn | None = None,
@@ -1988,11 +2029,17 @@ def push_rendered(
     files the previous manifest listed that this render no longer produces —
     backed up into the same ``.console-backup/<ts>`` tree — and drops Secret
     / chart entries the document stopped declaring. The two merge files
-    (kubesecrets.yaml, helm-chart-versions.yaml) are never file-deleted:
+    (kubesecrets.yaml, helm-chart-versions.yaml) are never file-deleted
+    by the prune pass:
     they hold externally generated content too, so they are pruned in place
     (only entries the previous document itself wrote are removed). The
     manifest is also excluded from deletion, and dry-run pushes write
     nothing (including no manifest and no deletions).
+
+    ``kubesecrets.yaml`` and ``.ssh`` files this push writes stay for the
+    rest of the job so install scripts can read them. The job removes those
+    paths when it finishes. A push that is not inside a job removes them
+    before this function returns. A dry run writes nothing and deletes nothing.
     """
     if ctx.config_dir is None:
         raise ConfigValidationError(
@@ -2135,6 +2182,7 @@ def push_rendered(
             # happened hub-side). The b64 payload lives only in the relay row
             # and the wire frame — never in the job log.
             _push_file_agent(agent_env_id, target, backup_root / relpath, data, log)
+            _remember_pushed_secret(relpath, target, config_dir, agent_env_id, ctx)
             if relpath in ssh_files:
                 from app.services import agent_relay
 
@@ -2153,6 +2201,7 @@ def push_rendered(
             _push_file_ssh(
                 ctx.ssh_target, target, backup_root / relpath, data, write_log
             )
+            _remember_pushed_secret(relpath, target, config_dir, agent_env_id, ctx)
             if relpath in ssh_files:
                 bridge.run_command(
                     ["chmod", "0600", str(target)],
@@ -2162,6 +2211,7 @@ def push_rendered(
                 )
         else:
             _push_file_local(target, backup_root / relpath, data, log)
+            _remember_pushed_secret(relpath, target, config_dir, agent_env_id, ctx)
             if relpath in ssh_files:
                 os.chmod(target, 0o600)
         written.append(relpath)

@@ -53,6 +53,7 @@ from app.services.catalog import (
     validate_params,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services import secret_lease
 from app.services.envcontext import EnvContext, build_context
 
 log = logging.getLogger(__name__)
@@ -565,6 +566,7 @@ class JobRunner:
         # Per-job deadline: the op timeout is per-command; this caps the whole
         # job so multi-command loops cannot run N x the timeout.
         deadline = time.monotonic() + effective_timeout_seconds(op, self.settings)
+        lease = secret_lease.begin(ctx)
 
         def check_cancel() -> None:
             if cancel_requested(self.db, job.id):
@@ -676,6 +678,11 @@ class JobRunner:
                 success=False,
             )
         finally:
+            # Success, failure, and cancel all come through here.
+            try:
+                lease.release(log)
+            finally:
+                secret_lease.end(lease)
             ctx.cleanup()
             job.finished_at = _utcnow()
             release_env_mutex(self.db, job.environment_id, job.id)

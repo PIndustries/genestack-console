@@ -37,6 +37,7 @@ import yaml
 
 from app.models import Environment
 from app.services import genestack_bridge as bridge
+from app.services import secret_lease
 from app.services.envconfig import ConfigValidationError
 
 LogFn = Callable[[str], None]
@@ -782,6 +783,7 @@ def run_talos_bootstrap(
     ssh_target: str | None = None,
     remote_env: dict[str, str] | None = None,
     agent_env_id: str | None = None,
+    db: Any | None = None,
 ) -> dict[str, Any]:
     """Run the talos bootstrap plan over the agent/ssh executor via the bridge.
 
@@ -838,6 +840,12 @@ def run_talos_bootstrap(
         plan["workdir"].mkdir(parents=True, exist_ok=True)
         plan["kubeconfig"].parent.mkdir(parents=True, exist_ok=True)
         log(f"[talos] workdir {plan['workdir']}")
+    # Local executor only: talosctl writes the kubeconfig on this machine.
+    # A remote executor creates the file on the deploy host; this process
+    # cannot see that create, so it does not guess and delete it.
+    kube_existed = True
+    if not dry_run and not agent_env_id and not ssh_target:
+        kube_existed = plan["kubeconfig"].exists()
 
     base: dict[str, Any] = {
         "cluster_name": plan["cluster_name"],
@@ -886,6 +894,29 @@ def run_talos_bootstrap(
                     "(console is not on the private fabric)"
                 )
 
+    if (
+        not dry_run
+        and not agent_env_id
+        and not ssh_target
+        and not kube_existed
+        and plan["kubeconfig"].is_file()
+    ):
+        try:
+            secret_lease.store_kubeconfig(
+                env,
+                plan["kubeconfig"].read_text(encoding="utf-8"),
+                db,
+            )
+        except Exception as exc:  # noqa: BLE001 — do not log kubeconfig text
+            log(
+                "[talos] WARNING could not store kubeconfig on the environment: "
+                f"{type(exc).__name__}"
+            )
+        secret_lease.remember(
+            plan["kubeconfig"],
+            config_dir=plan["workdir"].parent,
+            log_fn=log,
+        )
     log(
         f"[talos] bootstrap complete: {phases_completed}/{total} phases, "
         f"kubeconfig at {plan['kubeconfig']}"

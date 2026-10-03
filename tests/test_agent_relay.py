@@ -82,6 +82,14 @@ def _fake_exec_agent_loop(ws, frames: list, rc: int = 0, reply: bool = True) -> 
             if ftype == "command":
                 if not reply:
                     continue
+                cmd = [str(part) for part in (frame.get("cmd") or [])]
+                # A secret-lease rm is one path. Do not remove a tree.
+                if cmd[:1] == ["rm"]:
+                    args = [part for part in cmd[1:] if part not in {"-f", "--"}]
+                    if len(args) == 1 and not str(args[0]).startswith("-"):
+                        target = Path(args[0])
+                        if target.is_file() or target.is_symlink():
+                            target.unlink(missing_ok=True)
                 ws.send_json(
                     {"type": "log", "id": frame["id"], "line": "fake-output-line"}
                 )

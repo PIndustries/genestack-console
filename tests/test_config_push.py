@@ -8,6 +8,7 @@ import re
 import stat
 import threading
 import uuid
+from pathlib import Path
 
 import yaml
 from sqlalchemy import select
@@ -75,6 +76,24 @@ def _push_job(client, headers, env_id, run_sync=True):
         json={"operation": "genestack.config.push", "params": {}, "run_sync": run_sync},
     )
     return resp
+
+
+def _capture_local_writes(monkeypatch) -> list[tuple[str, bytes]]:
+    """Record bytes passed to the local writer. The job then removes secret files."""
+    captured: list[tuple[str, bytes]] = []
+    real = envconfig_service._push_file_local
+
+    def wrapped(target, backup, data, log):
+        real(target, backup, data, log)
+        captured.append((str(target), bytes(data)))
+
+    monkeypatch.setattr(envconfig_service, "_push_file_local", wrapped)
+    return captured
+
+
+def _kubesecret_writes(captured: list[tuple[str, bytes]], config_dir) -> list[bytes]:
+    needle = (Path(config_dir) / "kubesecrets.yaml").resolve()
+    return [data for path, data in captured if Path(path).resolve() == needle]
 
 
 def test_push_dry_run_logs_files_writes_nothing(client, admin_headers, tmp_path):
@@ -350,13 +369,14 @@ def _manifests_by_name(text: str) -> dict:
     return {d["metadata"]["name"]: d for d in yaml.safe_load_all(text)}
 
 
-def test_push_merges_kubesecrets_local(client, admin_headers, tmp_path):
-    """Generated entries survive; console entries are added and win conflicts."""
+def test_push_merges_kubesecrets_local(client, admin_headers, tmp_path, monkeypatch):
+    """Generated entries survive the merge; the job then removes the file."""
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
     (config_dir / "kubesecrets.yaml").write_text(
         GENERATED_KUBESECRETS, encoding="utf-8"
     )
+    captured = _capture_local_writes(monkeypatch)
 
     env = _create_env(
         client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
@@ -368,9 +388,11 @@ def test_push_merges_kubesecrets_local(client, admin_headers, tmp_path):
     job = resp.json()
     assert job["status"] == "success", job["error"]
 
-    merged = _manifests_by_name(
-        (config_dir / "kubesecrets.yaml").read_text(encoding="utf-8")
-    )
+    writes = _kubesecret_writes(captured, config_dir)
+    assert len(writes) == 1
+    merged = _manifests_by_name(writes[0].decode())
+    # The deploy host does not keep the merged file after the job.
+    assert not (config_dir / "kubesecrets.yaml").exists()
 
     # Generated entry untouched (the no-mass-rotation rule)
     assert merged["mariadb"]["data"] == {
@@ -395,10 +417,13 @@ def test_push_merges_kubesecrets_local(client, admin_headers, tmp_path):
     assert backups[0].read_text(encoding="utf-8") == GENERATED_KUBESECRETS
 
 
-def test_push_kubesecrets_written_when_absent_local(client, admin_headers, tmp_path):
-    """No existing file -> the rendered file is written as-is."""
+def test_push_kubesecrets_written_when_absent_local(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """No existing file -> the rendered bytes are the doc, then the job removes them."""
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
+    captured = _capture_local_writes(monkeypatch)
     env = _create_env(
         client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
     )
@@ -407,10 +432,11 @@ def test_push_kubesecrets_written_when_absent_local(client, admin_headers, tmp_p
     resp = _push_job(client, admin_headers, env["id"])
     assert resp.json()["status"] == "success", resp.json()["error"]
 
-    merged = _manifests_by_name(
-        (config_dir / "kubesecrets.yaml").read_text(encoding="utf-8")
-    )
+    writes = _kubesecret_writes(captured, config_dir)
+    assert len(writes) == 1
+    merged = _manifests_by_name(writes[0].decode())
     assert set(merged) == {"netapp-cinder-backend", "keystone-rabbitmq-password"}
+    assert not (config_dir / "kubesecrets.yaml").exists()
 
 
 def test_push_merges_kubesecrets_ssh(monkeypatch, tmp_path):
@@ -797,15 +823,22 @@ def test_push_via_agent_kubesecrets_redacted(client, admin_headers, tmp_path):
     finally:
         stop.set()
 
-    # The rendered secrets file landed on disk (merge read got no usable
-    # existing file, so the rendered entries are the whole file).
+    # Merge read got no usable existing file, so the file_write payload is the
+    # rendered entries. The agent rm at job end removes that file.
+    secret_rows = [
+        row
+        for row in _agent_rows(env["id"])
+        if row.kind == "file_write" and row.payload["path"].endswith("kubesecrets.yaml")
+    ]
+    assert len(secret_rows) == 1
     merged = _manifests_by_name(
-        (config_dir / "kubesecrets.yaml").read_text(encoding="utf-8")
+        base64.b64decode(secret_rows[0].payload["b64"]).decode()
     )
     assert merged["netapp-cinder-backend"]["data"] == {
         "username": _b64("admin"),
         "password": _b64("s3cret"),
     }
+    assert not (config_dir / "kubesecrets.yaml").exists()
 
     # Redaction: the kubesecrets b64 payload appears in NO log line.
     secret_rows = [

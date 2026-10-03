@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from app.db import SessionLocal
 from app.models import Environment
 from app.services import genestack_bridge as bridge
+from app.services.crypto import decrypt_secret
 from app.services.catalog import get_operation
 from app.services.envconfig import ConfigValidationError, parse_document
 from app.services.talos import (
@@ -683,8 +685,17 @@ def test_talos_bootstrap_kubeconfig_written_to_env_path(
     kubeconfig_cmds = [argv for argv in captured if argv[1] == "kubeconfig"]
     assert len(kubeconfig_cmds) == 1
     assert kubeconfig_cmds[0][2] == str(kubeconfig)
-    assert kubeconfig.read_text(encoding="utf-8") == "talos-kubeconfig\n"
+    # The job created the file, stored it, and removed it when it finished.
+    assert not kubeconfig.exists()
     assert (config_dir / "talos").is_dir()
+    db = SessionLocal()
+    try:
+        row = db.get(Environment, env["id"])
+        assert decrypt_secret(row.kubeconfig_data) == "talos-kubeconfig\n"
+    finally:
+        db.close()
+    log_text = _job_log(client, admin_headers, job["id"])
+    assert "talos-kubeconfig" not in log_text
 
 
 def test_talos_bootstrap_without_config_document_fails(client, admin_headers, tmp_path):

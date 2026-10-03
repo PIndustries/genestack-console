@@ -224,6 +224,8 @@ Two further sections carry extra semantics:
   regenerate that file to avoid mass rotation), and ssh push logs redact the
   base64 payloads (`_redacting_log`).
 
+The console database holds the secrets. HashiCorp Vault and OpenBao are not part of this console. 1Password is not the store. The deploy host has `kubesecrets.yaml` only while a job is running. The job removes that file when it finishes, including when the job fails or is cancelled. It also removes `.ssh` files that the push wrote under the config directory, and a kubeconfig file the job created. It does not remove `helm-chart-versions.yaml`, the inventory, the push manifest, or the deploy host's `~/.ssh`. A kubeconfig that was already on the host stays. A dry run writes nothing and deletes nothing.
+
 The `genestack.config.push` operation (operator, mutating, per-env locked)
 renders the current doc and writes the files to the env's config dir — one
 base64 write command per file over the ssh executor when a deploy host is

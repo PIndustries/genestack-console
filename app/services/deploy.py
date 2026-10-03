@@ -48,6 +48,7 @@ from app.config import Settings
 from app.models import Environment, OvhAccount
 from app.services import envconfig as envconfig_service
 from app.services import genestack_bridge as bridge
+from app.services import secret_lease
 from app.services import service_registry
 from app.services import talos as talos_service
 from app.services.crypto import decrypt_secret
@@ -271,12 +272,18 @@ def _fetch_kubeconfig(
     *,
     dry_run: bool,
     timeout: int,
+    db: Session | None = None,
 ) -> None:
     """Fetch admin.conf from the first control-plane node after the hosts stage.
 
     The ``server:`` line is rewritten to the node's own address (admin.conf
     ships pointing at localhost) and the file is written 0600. Non-fatal by
     design: any failure logs a warning and the deploy continues.
+
+    The write is local (this process). When it creates the file, the text is
+    encrypted onto the environment when ``db`` is set, and the path is
+    recorded so the job lease removes that file. ``log=None`` on the cat so
+    admin.conf is not echoed. A file that already existed is not recorded.
     """
     if env.kubeconfig_data:
         log("[kubeconfig] env has a stored kubeconfig — skipping fetch")
@@ -323,6 +330,21 @@ def _fetch_kubeconfig(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         os.chmod(target, 0o600)
+        try:
+            secret_lease.store_kubeconfig(env, content, db)
+        except Exception as exc:  # noqa: BLE001 — fetch stays non-fatal
+            log(
+                "[kubeconfig] WARNING could not store kubeconfig on the environment: "
+                f"{type(exc).__name__}"
+            )
+        # Local write: the lease unlinks this path (not an ssh rm). Inside a
+        # job that waits until the job ends; with no job lease it is removed
+        # before this function returns.
+        secret_lease.remember(
+            target,
+            config_dir=ctx.config_dir,
+            log_fn=log,
+        )
         log(
             f"[kubeconfig] wrote {target} from {cp_target} (server=https://{host}:6443)"
         )
@@ -580,6 +602,7 @@ def run_deploy(
                     ssh_target=ssh_target,
                     remote_env=remote_env,
                     agent_env_id=agent_env_id,
+                    db=db,
                 )
             except envconfig_service.ConfigValidationError as exc:
                 log(f"[deploy] FAILED at hosts/talos — {exc}")
@@ -643,7 +666,9 @@ def run_deploy(
             log(f"[deploy] stage hosts complete ({stages_completed}/{stages_total})")
             # The talos flow fetched the kubeconfig itself, so this is a no-op
             # via the existing file-exists guard.
-            _fetch_kubeconfig(doc, env, ctx, log, dry_run=dry_run, timeout=timeout)
+            _fetch_kubeconfig(
+                doc, env, ctx, log, dry_run=dry_run, timeout=timeout, db=db
+            )
             if until_id and stage["id"] == until_id:
                 log(f"[deploy] until_stage={until_id} — stopped at this control point")
                 break
@@ -733,7 +758,9 @@ def run_deploy(
             f"[deploy] stage {stage['id']} complete ({stages_completed}/{stages_total})"
         )
         if stage["id"] == "hosts":
-            _fetch_kubeconfig(doc, env, ctx, log, dry_run=dry_run, timeout=timeout)
+            _fetch_kubeconfig(
+                doc, env, ctx, log, dry_run=dry_run, timeout=timeout, db=db
+            )
         if until_id and stage["id"] == until_id:
             log(f"[deploy] until_stage={until_id} — stopped at this control point")
             break

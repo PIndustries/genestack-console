@@ -30,6 +30,7 @@ from app.db import SessionLocal
 from app.models import EnvConfigVersion, Environment
 from app.services import envconfig as envconfig_service
 from app.services.crypto import decrypt_secret
+from tests.test_config_push import _capture_local_writes, _kubesecret_writes
 
 OLD_USER = "netapp-admin"
 OLD_PASS = "old-netapp-pw"
@@ -128,37 +129,54 @@ def _rotate_via_api(client, headers, env_id) -> int:
     return _put_doc(client, headers, env_id, yaml.safe_dump(doc))
 
 
-def test_rotation_initial_push_renders_stored_creds(client, admin_headers, tmp_path):
-    """(a) create env with netapp user/pass, push -> Secret carries b64(old)."""
+def test_rotation_initial_push_renders_stored_creds(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """(a) create env with netapp user/pass, push -> Secret carries b64(old).
+
+    The job removes kubesecrets.yaml when it finishes. The bytes the push
+    wrote are what this checks.
+    """
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
+    captured = _capture_local_writes(monkeypatch)
     env = _create_env(client, admin_headers, config_dir, dry_run=False)
     _put_doc(client, admin_headers, env["id"], OLD_DOC)
 
     job = _push_job(client, admin_headers, env["id"])
     assert job["status"] == "success", job["error"]
 
-    merged = _manifests_by_name(
-        (config_dir / "kubesecrets.yaml").read_text(encoding="utf-8")
-    )
+    writes = _kubesecret_writes(captured, config_dir)
+    assert len(writes) == 1
+    merged = _manifests_by_name(writes[0].decode())
     assert merged["netapp-cinder-backend"]["data"] == {
         "username": _b64(OLD_USER),
         "password": _b64(OLD_PASS),
     }
     assert merged["netapp-cinder-backend"]["metadata"]["namespace"] == "openstack"
+    assert not (config_dir / "kubesecrets.yaml").exists()
+    log_text = client.get(f"/api/v1/jobs/{job['id']}", headers=admin_headers).json()[
+        "log_text"
+    ]
+    assert OLD_PASS not in log_text
 
 
 def test_rotation_update_via_config_api_re_renders_secret(
-    client, admin_headers, tmp_path
+    client, admin_headers, tmp_path, monkeypatch
 ):
-    """(b) update creds via the config API, push again -> Secret has b64(new)
-    and the old value is GONE from the rendered output, while unrelated
-    generated entries survive (no mass rotation)."""
+    """(b) update creds via the config API and push again.
+
+    The first push merges the generated mariadb entry with the stored creds.
+    That job then removes kubesecrets.yaml, so the second push writes only
+    the rotated Secret. The backup of the original generated file still has
+    the old password.
+    """
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
     (config_dir / "kubesecrets.yaml").write_text(
         GENERATED_WITH_NETAPP, encoding="utf-8"
     )
+    captured = _capture_local_writes(monkeypatch)
 
     env = _create_env(client, admin_headers, config_dir, dry_run=False)
     _put_doc(client, admin_headers, env["id"], OLD_DOC)
@@ -172,27 +190,36 @@ def test_rotation_update_via_config_api_re_renders_secret(
     second = _push_job(client, admin_headers, env["id"])
     assert second["status"] == "success", second["error"]
 
-    text = (config_dir / "kubesecrets.yaml").read_text(encoding="utf-8")
+    writes = _kubesecret_writes(captured, config_dir)
+    assert len(writes) == 2
+    first_merged = _manifests_by_name(writes[0].decode())
+    assert first_merged["mariadb"]["data"] == {
+        "root-password": _b64("generated-root-pw"),
+        "password": _b64("generated-mariadb-pw"),
+    }
+    assert first_merged["netapp-cinder-backend"]["data"]["password"] == _b64(OLD_PASS)
+
+    text = writes[1].decode()
     merged = _manifests_by_name(text)
-    # The rotated values are what the file now carries (console entry wins
-    # the merge against the stale generated one)
+    assert set(merged) == {"netapp-cinder-backend"}
     assert merged["netapp-cinder-backend"]["data"] == {
         "username": _b64(NEW_USER),
         "password": _b64(NEW_PASS),
     }
-    # Old credentials are gone in every form (b64 and plaintext)
     assert _b64(OLD_PASS) not in text
     assert _b64(OLD_USER) not in text
     assert OLD_PASS not in text
     assert OLD_USER not in text
-    # Unrelated generated secret untouched
-    assert merged["mariadb"]["data"] == {
-        "root-password": _b64("generated-root-pw"),
-        "password": _b64("generated-mariadb-pw"),
-    }
+    assert not (config_dir / "kubesecrets.yaml").exists()
     # The pre-rotation file was backed up (old creds retrievable from backup)
     backups = list((config_dir / ".console-backup").glob("*/kubesecrets.yaml"))
     assert any(_b64(OLD_PASS) in b.read_text(encoding="utf-8") for b in backups)
+    for job in (first, second):
+        log_text = client.get(
+            f"/api/v1/jobs/{job['id']}", headers=admin_headers
+        ).json()["log_text"]
+        assert OLD_PASS not in log_text
+        assert NEW_PASS not in log_text
 
 
 def test_rotation_dry_run_renders_new_values(client, admin_headers, tmp_path):
@@ -235,13 +262,14 @@ def test_rotation_dry_run_renders_new_values(client, admin_headers, tmp_path):
 
 
 def test_rotation_viewer_cannot_update(
-    client, admin_headers, operator_headers, viewer_headers, tmp_path
+    client, admin_headers, operator_headers, viewer_headers, tmp_path, monkeypatch
 ):
     """(c) Role gating per the existing config rules: PUT /config requires
     operator+ (viewer -> 403), and operator may rotate (the rule is not
     admin-only — same as every other config field)."""
     config_dir = tmp_path / "etc-genestack"
     config_dir.mkdir()
+    captured = _capture_local_writes(monkeypatch)
     env = _create_env(client, admin_headers, config_dir, dry_run=False)
     _put_doc(client, admin_headers, env["id"], OLD_DOC)
 
@@ -264,13 +292,14 @@ def test_rotation_viewer_cannot_update(
     assert version == 2
     job = _push_job(client, operator_headers, env["id"])
     assert job["status"] == "success", job["error"]
-    merged = _manifests_by_name(
-        (config_dir / "kubesecrets.yaml").read_text(encoding="utf-8")
-    )
+    writes = _kubesecret_writes(captured, config_dir)
+    assert len(writes) == 1
+    merged = _manifests_by_name(writes[0].decode())
     assert merged["netapp-cinder-backend"]["data"] == {
         "username": _b64(NEW_USER),
         "password": _b64(NEW_PASS),
     }
+    assert not (config_dir / "kubesecrets.yaml").exists()
 
 
 def test_rotation_stored_at_rest_is_not_plaintext(client, admin_headers):
