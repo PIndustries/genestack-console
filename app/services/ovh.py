@@ -852,6 +852,19 @@ def _first_number(raw: dict[str, Any], *keys: str) -> int | None:
     return None
 
 
+# Cluster fabric is RFC1918, IPv6 ULA, or link-local. ipaddress.is_private is
+# not that set: Python 3.11 also marks documentation ranges such as
+# 203.0.113.0/24 private, and later Pythons do not.
+_CLUSTER_PRIVATE = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+)
+
+
 def classify_ip(addr: str) -> str:
     """``private`` for RFC1918/ULA/link-local, else ``public``.
 
@@ -866,7 +879,7 @@ def classify_ip(addr: str) -> str:
         parsed = ipaddress.ip_address(text)
     except ValueError:
         return "public"
-    if parsed.is_private or parsed.is_link_local or parsed.is_reserved:
+    if any(parsed in net for net in _CLUSTER_PRIVATE):
         return "private"
     return "public"
 

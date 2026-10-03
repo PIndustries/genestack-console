@@ -234,6 +234,9 @@ class EnvironmentUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _refuse_dangerous_fields(self) -> "EnvironmentUpdate":
+        # Only fields the client sent. Assigning the others marks them set,
+        # and a partial PATCH would then store None over the saved paths.
+        provided = self.model_fields_set
         cleaned = apply_environment_field_guards(
             deployer_ssh_user=self.deployer_ssh_user,
             deployer_ssh_host=self.deployer_ssh_host,
@@ -244,7 +247,8 @@ class EnvironmentUpdate(BaseModel):
             state_repo_path=self.state_repo_path,
         )
         for key, value in cleaned.items():
-            setattr(self, key, value)
+            if key in provided:
+                setattr(self, key, value)
         return self
 
     model_config = ConfigDict(populate_by_name=True)

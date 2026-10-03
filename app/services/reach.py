@@ -384,6 +384,10 @@ def attach_credential_peer(db: Session, cred: AgentCredential) -> str | None:
     """
     settings = get_settings()
     hub = db.get(ReachHub, "wireguard")
+    # A real hub row decides. Anything else (no row, or a stand-in session
+    # that does not return ReachHub) leaves enrollment on the dial-out path.
+    if not isinstance(hub, ReachHub):
+        hub = None
     if hub is None:
         if not settings.wg_enabled:
             return None

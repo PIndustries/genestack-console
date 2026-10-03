@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.db import Base
-from app.models import AgentCredential, Environment
+from app.models import AgentCredential, Environment, ReachHub
 from app.services import agents
 
 
@@ -38,6 +38,7 @@ def seed_db():
         tables=[
             Environment.__table__,
             AgentCredential.__table__,
+            ReachHub.__table__,
         ],
     )
     TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)

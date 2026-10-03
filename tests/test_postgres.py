@@ -104,8 +104,9 @@ def test_sqlite_engine_keeps_connect_args_and_pragmas(monkeypatch, tmp_path):
     url = f"sqlite:///{tmp_path}/console.db"
     app_db.create_db_engine(url)
     assert captured["kwargs"]["connect_args"] == {"check_same_thread": False}
-    assert len(listeners) == 1
-    assert listeners[0][1] == "connect"
+    # One listener sets SQLite pragmas. The second locks the database file
+    # down to mode 600 after connect creates it.
+    assert [name for _target, name in listeners] == ["connect", "connect"]
 
 
 def test_ensure_columns_postgres_uses_information_schema_and_if_not_exists(monkeypatch):
@@ -155,12 +156,7 @@ def test_ensure_columns_postgres_idempotent_when_all_columns_exist(monkeypatch):
     fake = _FakeEngine(
         PG_URL,
         existing={
-            "environments": set(app_db._ENVIRONMENT_COLUMN_MIGRATIONS),
-            "users": set(app_db._USER_COLUMN_MIGRATIONS),
-            "jobs": set(app_db._JOB_COLUMN_MIGRATIONS),
-            "ovh_accounts": set(app_db._OVH_ACCOUNT_COLUMN_MIGRATIONS),
-            "agent_credentials": set(app_db._AGENT_CREDENTIAL_COLUMN_MIGRATIONS),
-            "hardware_accounts": set(app_db._HARDWARE_ACCOUNT_COLUMN_MIGRATIONS),
+            table: set(columns) for table, columns in app_db._column_migrations()
         },
     )
     monkeypatch.setattr(app_db, "engine", fake)
@@ -183,8 +179,7 @@ def test_ensure_columns_postgres_best_effort_on_failure(monkeypatch, caplog):
     warnings = [
         r for r in caplog.records if "column auto-migration failed" in r.message
     ]
-    # Product now auto-migrates 6 tables (was 4)
-    assert len(warnings) == 6
+    assert len(warnings) == len(app_db._column_migrations())
 
 
 def test_ensure_columns_sqlite_still_uses_pragma(monkeypatch, tmp_path):

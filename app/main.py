@@ -263,8 +263,9 @@ def create_app() -> FastAPI:
     #   providers: ovh, hardware
     #   genestack reads: services, state, and the aliases registered below
     #   native Apple API: native, native_kubernetes, native_consoles
-    #   observe: observe, dashboards, livestate, stream, alerts, metrics
-    #   cloud and nodes: vms, cloud, novnc, k8s, platform, apps, host vms, agents, terminal
+    #   observe: observe, cloud (before the dashboard proxy), dashboards,
+    #            livestate, stream, alerts, metrics
+    #   cloud and nodes: vms, novnc, k8s, platform, apps, host vms, agents, terminal
 
     # Probes. Health is unauthenticated.
     app.include_router(health.router)
@@ -298,7 +299,10 @@ def create_app() -> FastAPI:
     app.include_router(fleet.router)
 
     # Logs and dashboards, then jobs.
+    # OpenStack routes share the /cloud/ prefix with the dashboard proxy.
+    # Register them first so /cloud/images/{id} is not taken as a dashboard session.
     app.include_router(observe.router)
+    app.include_router(cloud.router)
     app.include_router(obs_proxy.router)
     app.include_router(jobs.router)
 
@@ -324,8 +328,8 @@ def create_app() -> FastAPI:
     app.include_router(metrics.router)
 
     # OpenStack, Kubernetes, apps, host VMs, agents, and the terminal.
+    # cloud.router is registered above, before the dashboard proxy.
     app.include_router(vms.router)
-    app.include_router(cloud.router)
     app.include_router(novnc.router)
     app.include_router(k8s.router)
     app.include_router(platform.router)
