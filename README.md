@@ -61,7 +61,7 @@ Skyline is the OpenStack dashboard people use after the cloud is up. The console
 
 ## Run from source
 
-Use this when you are changing the console. Installing Genestack uses the binary above, not this checkout.
+Use this when you are changing the console and testing that change. A production deploy host runs the published binary from the install command above. A checkout can run on that host. The install we support in production is the published binary.
 
 ```bash
 git clone https://github.com/PIndustries/genestack-console.git

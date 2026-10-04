@@ -29,6 +29,8 @@ That address redirects to the current installer attached to a GitHub Release. Th
 
 Run the same install command again and it moves the binary to the latest release. `genestack-console update` does only that replace. Neither one changes `config.yaml`, the database, or `/opt/genestack`. A published tag stays available: `curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3`.
 
+A production deploy host runs that published binary. A git checkout is for changing the console and testing that change. Running the checkout in production is possible. The install we support is the binary.
+
 From a laptop, forward that port:
 
 ``` shell

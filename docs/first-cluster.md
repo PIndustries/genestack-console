@@ -123,7 +123,7 @@ Back up `/opt/genestack-console/config.yaml` and the console database together. 
 
 Open Activity, then Jobs, and read the log of the job that failed. A second job that changes the same environment is refused while one is still queued or running.
 
-Run from source only when you are changing the console. Installing a cloud uses the binary from the install command. That checkout is [Run from source](../README.md#run-from-source).
+Run from source when you are changing the console and testing that change. A production deploy host uses the binary from the install command. A checkout can run there. The install we support in production is that binary. The checkout steps are [Run from source](../README.md#run-from-source).
 
 | You need | Read |
 | --- | --- |
