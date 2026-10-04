@@ -79,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"current={info.get('current')} latest={info.get('latest') or '-'} "
                 f"available={info.get('update_available')}"
             )
+            print(f"channel={info.get('channel')}")
             return 0
         result = updatecheck.apply_binary(get_settings())
         print(result.get("message") or result)

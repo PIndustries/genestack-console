@@ -22,18 +22,30 @@ log = logging.getLogger(__name__)
 DEFAULT_CHANNEL = "https://github.com/PIndustries/genestack-console/releases/latest/download/version.json"
 
 
-def parse_calver(raw: str) -> tuple[int, int, int, int, str]:
+def parse_calver(raw: str) -> tuple[int, int, int, int, int, str]:
+    """Return ``(year, month, day, build, release, suffix)``.
+
+    A three-part version has build 0, so ``2026.10.03`` is older than
+    ``2026.10.04.1``. A hyphen suffix is a prerelease (release 0) and sorts
+    below the same numbers. A leading ``v`` is ignored.
+    """
     text = str(raw or "").strip()
+    if text[:1] in ("v", "V"):
+        text = text[1:]
     main, _, suf = text.partition("-")
     parts: list[int] = []
     for bit in main.split("."):
+        if not bit:
+            parts.append(0)
+            continue
         try:
             parts.append(int(bit))
         except ValueError:
             parts.append(0)
-    while len(parts) < 3:
+    while len(parts) < 4:
         parts.append(0)
-    return (parts[0], parts[1], parts[2], 0 if suf else 1, suf)
+    release = 0 if suf else 1
+    return (parts[0], parts[1], parts[2], parts[3], release, suf)
 
 
 def is_newer(latest: str, current: str) -> bool:
@@ -101,31 +113,61 @@ def apply_binary(settings: Settings) -> dict[str, Any]:
                 with tmp.open("wb") as fh:
                     for chunk in res.iter_bytes():
                         fh.write(chunk)
+        with tmp.open("rb") as fh:
+            magic = fh.read(4)
+        if magic != b"\x7fELF":
+            tmp.unlink(missing_ok=True)
+            return {
+                **info,
+                "ok": False,
+                "applied": False,
+                "message": "download is not a Linux ELF",
+            }
         tmp.chmod(tmp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         os.replace(tmp, dest)
     except Exception as exc:  # noqa: BLE001
         tmp.unlink(missing_ok=True)
         return {**info, "ok": False, "applied": False, "message": str(exc)[:400]}
-    restarted = False
-    systemctl = shutil.which("systemctl")
-    if systemctl:
-        proc = subprocess.run(  # noqa: S603
-            [
-                systemctl,
-                "restart",
-                "genestack-console.service",
-                "genestack-console-worker.service",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        restarted = proc.returncode == 0
+    restarted, message, ok = _restart_services()
     return {
         **info,
-        "ok": True,
+        "ok": ok,
         "applied": True,
         "restarted": restarted,
         "path": str(dest),
-        "message": "binary replaced" + (" and services restarted" if restarted else ""),
+        "message": message,
     }
+
+
+def _restart_services() -> tuple[bool, str, bool]:
+    """Restart both units. Returns ``(restarted, message, ok)``."""
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        return False, "binary replaced; systemctl not found", True
+    unit = Path("/etc/systemd/system/genestack-console.service")
+    if not unit.is_file():
+        return False, "binary replaced; genestack-console.service is not installed", True
+    cmd = [
+        systemctl,
+        "restart",
+        "genestack-console.service",
+        "genestack-console-worker.service",
+    ]
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        sudo = shutil.which("sudo")
+        if not sudo:
+            return False, "binary replaced; restart needs root", False
+        # A timer has no tty, so it must not sit on a password prompt.
+        cmd = [sudo, *cmd] if os.isatty(0) else [sudo, "-n", *cmd]
+    proc = subprocess.run(  # noqa: S603
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode == 0:
+        return True, "binary replaced and services restarted", True
+    detail = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")
+    if detail:
+        return False, f"binary replaced; restart failed: {detail[:200]}", False
+    return False, "binary replaced; restart failed", False

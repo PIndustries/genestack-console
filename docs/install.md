@@ -23,6 +23,27 @@ curl -fsSL https://get.genestack.dev/console.sh | bash
 The same redirect is on `genestack.dev`. The first login is a local password.
 To connect that console to the account portal at `https://my.genestack.dev`, see [hosted-mode.md](hosted-mode.md). The portal is the account and the Apple apps. It is not this program.
 
+## Update an install
+
+The latest version is the `version` field in
+`https://github.com/PIndustries/genestack-console/releases/latest/download/version.json`.
+
+```bash
+genestack-console update
+```
+
+The same step, if that command is not on `PATH` yet:
+
+```bash
+curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update
+```
+
+Update downloads the Linux binary named in that file, replaces
+`/opt/genestack-console/bin/genestack-console`, and restarts
+`genestack-console` and `genestack-console-worker`. It does not change
+`config.yaml`, the database, or `/opt/genestack`. `genestack-console update --check`
+prints the installed version and the latest version and does not replace the file.
+
 | Host | Console | Local AIO VM (`--dev`) | Production metal |
 |---|---|---|---|
 | Linux x86_64 | Native ELF + systemd | QEMU/KVM | Yes — this is the fleet hub |

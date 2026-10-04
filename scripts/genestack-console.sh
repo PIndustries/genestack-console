@@ -5,7 +5,8 @@
 # You do not get a source tree. Optional: --docker loads a binary-wrapped
 # image (still no source) for operators who want a container.
 #
-#   curl -fsSL https://genestack.dev/console.sh | bash
+#   curl -fsSL https://get.genestack.dev/console.sh | bash
+#   curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update
 #
 # Safe to re-run. The UI binds loopback only — SSH tunnel or VPN.
 set -euo pipefail
@@ -48,6 +49,7 @@ needs_container_runtime() {
 NON_INTERACTIVE=0
 DO_UNINSTALL=0
 DO_UPDATE=0
+DO_UPDATE_CHECK=0
 AUTO_UPDATE="${GSC_AUTO_UPDATE:-0}"
 GSC_VERSION_URL="${GSC_VERSION_URL:-https://github.com/PIndustries/genestack-console/releases/latest/download/version.json}"
 
@@ -164,15 +166,20 @@ Reach the UI over an SSH tunnel or VPN (binds 127.0.0.1). Then Guided setup
 or the seeded demo/walkthrough tenant.
 
 Usage:
-  curl -fsSL https://genestack.dev/console.sh | bash
-  curl -fsSL https://genestack.dev/console.sh | bash -s -- --dev
+  curl -fsSL https://get.genestack.dev/console.sh | bash
+  curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --dev
+  curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update
+  genestack-console update
   genestack-console.sh --install [--prefix DIR] [--port N] [--advertise-url URL]
   genestack-console.sh --uninstall [--prefix DIR] [--non-interactive]
-  genestack-console.sh --update [--prefix DIR]   # pull a newer binary if published
+  genestack-console.sh update [--prefix DIR] [--check]
 
 Actions:
   --install           Install the console (default when no action is given)
-  --update            Check genestack.dev and replace the binary if newer
+  update, --update    Read the latest GitHub release and replace the Linux
+                      binary when it is newer, then restart both units.
+                      Does not change config.yaml, the database, or Genestack.
+  --check             With update: print installed and latest, do not replace
   --uninstall         Stop services, remove units, VM, and the prefix
 
 Flags:
@@ -188,11 +195,12 @@ Flags:
                       (no source). Default on Linux is the host ELF + systemd.
                       Default on macOS and Windows Git Bash (the ELF is Linux-only).
   --from-source       Developer path: build from a local checkout (not default)
-  --auto-update       Daily systemd timer that runs --update
+  --auto-update       Daily systemd timer that runs the update command
   --non-interactive   Never prompt; assume yes (for curl | bash and CI)
   -h, --help          This help
 
 Environment knobs:
+  GSC_VERSION_URL     version.json channel (default: the GitHub latest release)
   GSC_BINARY_URL      compiled Linux binary (default: the GitHub release asset)
   GSC_IMAGE           docker image tag after --docker load (default: genestack-console:stable)
   GSC_IMAGE_TAR       docker-save tarball of that image (default: genestack.dev/releases/…-docker.tar.gz)
@@ -264,7 +272,8 @@ parse_args() {
       --auto-update) AUTO_UPDATE=1; shift ;;
       --non-interactive) NON_INTERACTIVE=1; shift ;;
       --install) DO_INSTALL=1; shift ;;
-      --update) DO_UPDATE=1; shift ;;
+      --update | update) DO_UPDATE=1; shift ;;
+      --check) DO_UPDATE_CHECK=1; shift ;;
       --uninstall) DO_UNINSTALL=1; shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown argument: $1 (see --help)" ;;
@@ -278,6 +287,9 @@ parse_args() {
   fi
   if [ "${DO_UPDATE:-0}" -eq 1 ] && [ "${DO_UNINSTALL:-0}" -eq 1 ]; then
     die "pick one: --update or --uninstall"
+  fi
+  if [ "${DO_UPDATE_CHECK:-0}" -eq 1 ] && [ "${DO_UPDATE:-0}" -ne 1 ]; then
+    die "--check is only valid with update"
   fi
   PREFIX="${PREFIX%/}"
   case "$PREFIX" in
@@ -685,6 +697,14 @@ install_source_from_checkout() {
   ok "source installed at $SRC"
 }
 
+file_is_elf() {
+  local path="$1"
+  if file "$path" 2>/dev/null | grep -qi 'executable\|ELF'; then
+    return 0
+  fi
+  [ "$(od -An -tx1 -N4 "$path" 2>/dev/null | tr -d ' \n')" = "7f454c46" ]
+}
+
 install_binary() {
   CONSOLE_BIN="$PREFIX/bin/genestack-console"
   ensure_prefix
@@ -705,12 +725,9 @@ install_binary() {
     rm -f "$tmp"
     return 1
   fi
-  if ! file "$tmp" 2>/dev/null | grep -qi 'executable\|ELF'; then
-    # still accept if it has a shebang-less ELF magic
-    if [ "$(od -An -tx1 -N4 "$tmp" 2>/dev/null | tr -d ' \n')" != "7f454c46" ]; then
-      rm -f "$tmp"
-      return 1
-    fi
+  if ! file_is_elf "$tmp"; then
+    rm -f "$tmp"
+    return 1
   fi
   mv "$tmp" "$CONSOLE_BIN"
   chmod 0755 "$CONSOLE_BIN"
@@ -1233,9 +1250,69 @@ EOF
 # ---------------------------------------------------------------------------
 # Phase: systemd
 # ---------------------------------------------------------------------------
+install_cli_link() {
+  # PATH wrapper. `update` re-fetches the published installer so a binary
+  # that still drops the build number cannot decide what is newer.
+  local bin="${CONSOLE_BIN:-$PREFIX/bin/genestack-console}"
+  [ -x "$bin" ] || return 0
+  local dest="${GSC_CLI_LINK:-/usr/local/bin/genestack-console}"
+  [ -n "$dest" ] || return 0
+  if [ -e "$dest" ] && ! grep -q 'genestack-console-wrapper' "$dest" 2>/dev/null; then
+    warn "$dest exists and is not the console wrapper — leaving it in place"
+    return 0
+  fi
+  local dir tmp prefix_quoted
+  dir="$(dirname "$dest")"
+  tmp="$(mktemp)"
+  prefix_quoted="$(printf '%q' "$PREFIX")"
+  cat > "$tmp" <<EOF
+#!/bin/sh
+# genestack-console-wrapper
+# Installed by the Genestack Console installer. Safe to replace.
+PREFIX=${prefix_quoted}
+if [ "\${1:-}" = "update" ]; then
+  shift
+  tmp=\$(/usr/bin/mktemp)
+  /usr/bin/curl -fsSL "https://get.genestack.dev/console.sh" -o "\$tmp" || {
+    rm -f "\$tmp"
+    exit 1
+  }
+  exec /bin/bash "\$tmp" --prefix "\$PREFIX" update "\$@"
+fi
+exec "\$PREFIX/bin/genestack-console" "\$@"
+EOF
+  chmod 0755 "$tmp"
+  if { [ -d "$dir" ] && [ -w "$dir" ]; } || { [ ! -d "$dir" ] && [ -w "$(dirname "$dir")" ]; }; then
+    mkdir -p "$dir"
+    mv "$tmp" "$dest"
+    chmod 0755 "$dest"
+    ok "command: $dest — genestack-console update"
+    return 0
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    mkdir -p "$dir"
+    mv "$tmp" "$dest"
+    chmod 0755 "$dest"
+    ok "command: $dest — genestack-console update"
+    return 0
+  fi
+  if [ -n "${SUDO:-}" ] && sudo -n mkdir -p "$dir" && sudo -n mv "$tmp" "$dest" && sudo -n chmod 0755 "$dest"; then
+    ok "command: $dest — genestack-console update"
+    return 0
+  fi
+  rm -f "$tmp"
+  warn "could not write $dest — use: curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update"
+  return 0
+}
+
 install_update_timer() {
   [ "${AUTO_UPDATE}" = "1" ] || return 0
   local bin="${CONSOLE_BIN:-$PREFIX/bin/genestack-console}"
+  local updater="${GSC_CLI_LINK:-/usr/local/bin/genestack-console}"
+  local exec_update="${bin} update"
+  if [ -x "$updater" ]; then
+    exec_update="${updater} update"
+  fi
   mkdir -p "$PREFIX/systemd"
   cat > "$PREFIX/systemd/genestack-console-update.service" <<EOF
 [Unit]
@@ -1246,7 +1323,7 @@ After=network-online.target
 Type=oneshot
 Environment=GSC_PREFIX=${PREFIX}
 Environment=CONSOLE_CONFIG=${PREFIX}/config.yaml
-ExecStart=${bin} update
+ExecStart=${exec_update}
 EOF
   cat > "$PREFIX/systemd/genestack-console-update.timer" <<EOF
 [Unit]
@@ -1270,16 +1347,295 @@ EOF
   fi
 }
 
+version_num() {
+  local n="${1:-0}"
+  case "$n" in
+    '' | *[!0-9]*) printf '0' ;;
+    *) printf '%s' "$((10#$n))" ;;
+  esac
+}
+
+# Print: year month day build release_flag suffix
+# Three-part versions have build 0. A hyphen suffix sorts lower.
+version_fields() {
+  local raw="$1" main suf flag rest y m d b
+  raw="${raw#v}"
+  raw="${raw#V}"
+  case "$raw" in
+    *-*)
+      main="${raw%%-*}"
+      suf="${raw#*-}"
+      flag=0
+      ;;
+    *)
+      main="$raw"
+      suf=
+      flag=1
+      ;;
+  esac
+  y=0
+  m=0
+  d=0
+  b=0
+  rest="$main"
+  y="${rest%%.*}"
+  if [ "$rest" != "$y" ]; then
+    rest="${rest#*.}"
+    m="${rest%%.*}"
+    if [ "$rest" != "$m" ]; then
+      rest="${rest#*.}"
+      d="${rest%%.*}"
+      if [ "$rest" != "$d" ]; then
+        rest="${rest#*.}"
+        b="${rest%%.*}"
+      fi
+    fi
+  fi
+  y="$(version_num "$y")"
+  m="$(version_num "$m")"
+  d="$(version_num "$d")"
+  b="$(version_num "$b")"
+  printf '%s %s %s %s %s %s\n' "$y" "$m" "$d" "$b" "$flag" "$suf"
+}
+
+version_is_newer() {
+  local latest="${1:-}" current="${2:-}"
+  [ -n "$latest" ] && [ -n "$current" ] || return 1
+  local ly lm ld lb lf ls cy cm cd cb cf cs higher
+  # shellcheck disable=SC2034
+  IFS=' ' read -r ly lm ld lb lf ls <<EOF
+$(version_fields "$latest")
+EOF
+  IFS=' ' read -r cy cm cd cb cf cs <<EOF
+$(version_fields "$current")
+EOF
+  if [ "$ly" -ne "$cy" ]; then [ "$ly" -gt "$cy" ]; return; fi
+  if [ "$lm" -ne "$cm" ]; then [ "$lm" -gt "$cm" ]; return; fi
+  if [ "$ld" -ne "$cd" ]; then [ "$ld" -gt "$cd" ]; return; fi
+  if [ "$lb" -ne "$cb" ]; then [ "$lb" -gt "$cb" ]; return; fi
+  if [ "$lf" -ne "$cf" ]; then [ "$lf" -gt "$cf" ]; return; fi
+  [ "$ls" = "$cs" ] && return 1
+  higher="$(printf '%s\n%s\n' "$cs" "$ls" | LC_ALL=C sort | tail -n 1)"
+  [ "$higher" = "$ls" ]
+}
+
+channel_from_config() {
+  local cfg="$PREFIX/config.yaml" line trimmed
+  [ -f "$cfg" ] || return 0
+  local in_update=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      update:*)
+        in_update=1
+        continue
+        ;;
+    esac
+    [ "$in_update" -eq 1 ] || continue
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in
+      url:*)
+        line="${trimmed#url:}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%$'\r'}"
+        case "$line" in
+          \"*\") line="${line#\"}"; line="${line%\"}" ;;
+          \'*\') line="${line#\'}"; line="${line%\'}" ;;
+        esac
+        printf '%s' "$line"
+        return 0
+        ;;
+      "")
+        ;;
+      *)
+        case "$line" in
+          [[:space:]]*) ;;
+          *) return 0 ;;
+        esac
+        ;;
+    esac
+  done < "$cfg"
+}
+
+fetch_to() {
+  local src="$1" dest="$2" path
+  if [ -f "$src" ]; then
+    cp -f "$src" "$dest"
+    return 0
+  fi
+  case "$src" in
+    file://*)
+      path="${src#file://}"
+      [ -f "$path" ] || return 1
+      cp -f "$path" "$dest"
+      return 0
+      ;;
+  esac
+  curl -fsSL "$src" -o "$dest"
+}
+
+installed_version() {
+  local bin="$1" line=""
+  if ! line="$("$bin" --version 2>&1)"; then
+    line=""
+  fi
+  line="${line##* }"
+  line="${line%$'\r'}"
+  printf '%s' "$line"
+}
+
+read_channel() {
+  # Prints version then binary URL, one per line. Dies on a bad channel.
+  local channel="$1" tmp version binary
+  tmp="$(mktemp)"
+  if ! fetch_to "$channel" "$tmp"; then
+    rm -f "$tmp"
+    die "could not read $channel"
+  fi
+  if ! python3 - "$tmp" >"${tmp}.out" <<'PY'
+import json
+import os
+import sys
+
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+if not isinstance(data, dict):
+    sys.exit(1)
+version = str(data.get("version") or "").strip()
+binary = str(data.get("binary") or "").strip()
+# Older channels stored a site path (/releases/...). A real file stays a file.
+if binary.startswith("/") and not os.path.isfile(binary):
+    binary = "https://genestack.dev" + binary
+print(version)
+print(binary)
+PY
+  then
+    rm -f "$tmp" "${tmp}.out"
+    die "could not read version.json from $channel"
+  fi
+  version="$(sed -n '1p' "${tmp}.out")"
+  binary="$(sed -n '2p' "${tmp}.out")"
+  rm -f "$tmp" "${tmp}.out"
+  [ -n "$version" ] || die "channel has no version: $channel"
+  printf '%s\n%s\n' "$version" "$binary"
+}
+
+replace_binary() {
+  local bin="$1" url="$2" tmp
+  tmp="$(mktemp)"
+  if ! fetch_to "$url" "$tmp"; then
+    rm -f "$tmp"
+    die "could not download $url"
+  fi
+  if ! file_is_elf "$tmp"; then
+    rm -f "$tmp"
+    die "download is not a Linux ELF: $url"
+  fi
+  local dest_dir
+  dest_dir="$(dirname "$bin")"
+  if [ -w "$dest_dir" ]; then
+    mv "$tmp" "$bin"
+    chmod 0755 "$bin"
+  else
+    need_root_or_die "replacing $bin"
+    as_root mv "$tmp" "$bin"
+    as_root chmod 0755 "$bin"
+  fi
+  ok "replaced $bin"
+}
+
+restart_console_units() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    info "binary replaced. systemctl is not on this host, so the services were not restarted."
+    return 0
+  fi
+  if [ ! -f /etc/systemd/system/genestack-console.service ]; then
+    info "binary replaced. genestack-console.service is not installed, so nothing was restarted."
+    return 0
+  fi
+  if as_root systemctl restart genestack-console.service genestack-console-worker.service; then
+    ok "restarted genestack-console and genestack-console-worker"
+    return 0
+  fi
+  warn "binary replaced, but the services did not restart"
+  return 1
+}
+
 do_update() {
+  # Compare here. Do not exec the installed binary's update command: copies
+  # already in the field drop the build number, so 2026.10.04.3 never looks
+  # newer than 2026.10.04.2.
   phase "Update"
   local bin="${PREFIX}/bin/genestack-console"
-  if [ -x "$bin" ]; then
-    GSC_PREFIX="$PREFIX" CONSOLE_CONFIG="${PREFIX}/config.yaml" "$bin" update
-    local rc=$?
-    harden_secret_perms
-    return $rc
+  if [ ! -x "$bin" ]; then
+    if needs_container_runtime; then
+      die "update replaces the Linux binary. This host runs the Docker image. Re-run the installer to refresh that image. The image was not changed."
+    fi
+    die "no compiled binary at $bin — install first"
   fi
-  die "no compiled binary at $bin — install first"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to read the version channel"
+  command -v curl >/dev/null 2>&1 || die "curl is required to download the update"
+  local channel
+  channel="$(channel_from_config)"
+  [ -n "$channel" ] || channel="$GSC_VERSION_URL"
+  local fields latest binary current url
+  fields="$(read_channel "$channel")"
+  latest="$(printf '%s\n' "$fields" | sed -n '1p')"
+  binary="$(printf '%s\n' "$fields" | sed -n '2p')"
+  current="$(installed_version "$bin")"
+  [ -n "$current" ] || die "could not read the version from $bin"
+  info "installed: $current"
+  info "latest:    $latest"
+  info "channel:   $channel"
+  if ! version_is_newer "$latest" "$current"; then
+    ok "already current ($current)"
+    install_cli_link
+    return 0
+  fi
+  url="$binary"
+  [ -n "$url" ] || url="$GSC_BINARY_URL"
+  info "binary:    $url"
+  if [ "${DO_UPDATE_CHECK:-0}" -eq 1 ]; then
+    info "update available ($current -> $latest). --check did not replace the binary."
+    return 0
+  fi
+  info "downloading $url"
+  replace_binary "$bin" "$url"
+  install_cli_link
+  restart_console_units
+}
+
+_self_expect_newer() {
+  # $1 = 0 when $2 should be newer than $3, else 1.
+  local want="$1" latest="$2" current="$3" got=1
+  if version_is_newer "$latest" "$current"; then
+    got=0
+  fi
+  if [ "$got" -eq "$want" ]; then
+    return 0
+  fi
+  printf 'FAIL: version_is_newer %s %s -> %s (want %s)\n' \
+    "$latest" "$current" "$got" "$want" >&2
+  return 1
+}
+
+self_test() {
+  local fail=0
+  _self_expect_newer 0 "2026.09.01" "2026.08.06" || fail=1
+  _self_expect_newer 1 "2026.08.06" "2026.08.06" || fail=1
+  _self_expect_newer 1 "2026.07.01" "2026.08.06" || fail=1
+  _self_expect_newer 0 "2026.08.06" "2026.08.06-rc1" || fail=1
+  _self_expect_newer 0 "2026.10.04.3" "2026.10.04.2" || fail=1
+  _self_expect_newer 1 "2026.10.04.2" "2026.10.04.3" || fail=1
+  _self_expect_newer 0 "2026.10.04.1" "2026.10.04.1-rc1" || fail=1
+  _self_expect_newer 0 "2026.10.05.1" "2026.10.04.9" || fail=1
+  _self_expect_newer 1 "2026.10.04.3" "2026.10.04.3" || fail=1
+  _self_expect_newer 0 "2026.10.04.1" "2026.10.03" || fail=1
+  _self_expect_newer 1 "v2026.10.04.3" "2026.10.04.3" || fail=1
+  _self_expect_newer 1 "" "2026.10.04.3" || fail=1
+  _self_expect_newer 1 "2026.10.04.3" "" || fail=1
+  [ "$fail" -eq 0 ]
 }
 
 render_systemd_binary() {
@@ -2083,6 +2439,9 @@ uninstall() {
 # ---------------------------------------------------------------------------
 summary() {
   phase "Install complete"
+  local channel
+  channel="$(channel_from_config)"
+  [ -n "$channel" ] || channel="$GSC_VERSION_URL"
   local dry_note="Set dry_run: false in config.yaml before Deploy will touch servers."
   if [ -f "$PREFIX/config.yaml" ] && grep -Eq '^dry_run:[[:space:]]*true([[:space:]]|$)' "$PREFIX/config.yaml"; then
     dry_note="dry_run is true — Deploy will not touch servers until you set dry_run: false."
@@ -2104,7 +2463,13 @@ summary() {
     "  ssh -L ${PORT}:127.0.0.1:${PORT} <this-host>" \
     "The console binds loopback only." \
     "" \
-    "Docs: docs/install.md — Linux/WSL2 binary, macOS/Windows Docker, --dev for the AIO VM"
+    "Docs: docs/install.md — Linux/WSL2 binary, macOS/Windows Docker, --dev for the AIO VM" \
+    "" \
+    "Latest release: ${channel}" \
+    "Update: genestack-console update" \
+    "  or: curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update" \
+    "Update replaces the binary and restarts both units." \
+    "It does not change config.yaml, the database, or /opt/genestack."
   if [ "$HOST_KIND" = "darwin" ] || [ "$HOST_KIND" = "windows" ]; then
     info "${HOST_KIND}: Console is the Docker image; start Docker Desktop if the UI is down."
     info "Tenant demo / environment walkthrough is seeded for the UI."
@@ -2136,6 +2501,7 @@ main() {
   render_config
   render_compose
   install_systemd
+  install_cli_link
   install_update_timer
   launch_console
   bootstrap
@@ -2145,5 +2511,10 @@ main() {
   harden_secret_perms
   summary
 }
+
+if [ "${1:-}" = "--self-test" ]; then
+  self_test
+  exit $?
+fi
 
 main "$@"

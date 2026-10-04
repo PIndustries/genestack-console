@@ -10,6 +10,7 @@ function Quote-Bash([string]$s) {
   "'" + ($s -replace "'", "'\''") + "'"
 }
 
+# Extra arguments are forwarded, including: console.ps1 update
 $pass = ""
 if ($extra.Count -gt 0) {
   $pass = ($extra | ForEach-Object { Quote-Bash $_ }) -join " "

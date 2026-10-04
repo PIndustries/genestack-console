@@ -24,6 +24,8 @@ INSTALLER="$HERE/genestack-console.sh"
 AGENT_INSTALLER="$HERE/../agent/install.sh"
 PREFIX="${GSC_TEST_PREFIX:-/tmp/gsc-test}"
 PORT="${GSC_TEST_PORT:-18099}"
+# Keep the PATH wrapper inside the scratch tree.
+export GSC_CLI_LINK="${PREFIX}-cli/genestack-console"
 WITH_AIO="${GSC_TEST_WITH_AIO:-0}"
 
 PASS=0
@@ -167,6 +169,16 @@ if "$INSTALLER" --help | grep -q 'PIndustries/genestack-console'; then
   ok "--help shows the public console repository"
 else
   bad "--help should show GSC_REPO_URL=...PIndustries/genestack-console.git"
+fi
+if "$INSTALLER" --help | grep -q 'genestack-console update'; then
+  ok "--help documents genestack-console update"
+else
+  bad "--help missing genestack-console update"
+fi
+if "$INSTALLER" --self-test; then
+  ok "--self-test version compare"
+else
+  bad "--self-test version compare"
 fi
 if grep -q 'python3' "$INSTALLER"; then
   ok "installer requires python3 (rand_token/fernet_key)"
@@ -426,6 +438,100 @@ else
   fi
   assert_file "$PREFIX/vms/genestack-aio/serial.log"
 fi
+
+# ---------------------------------------------------------------------------
+hdr "update command"
+# ---------------------------------------------------------------------------
+UPD="$(mktemp -d)"
+UPD_LOG="$(mktemp)"
+if "$INSTALLER" --prefix "$UPD" update >"$UPD_LOG" 2>&1; then
+  bad "update with no binary should fail"
+else
+  if grep -q 'unknown argument' "$UPD_LOG"; then
+    bad "positional update was rejected as an unknown argument"
+  else
+    ok "positional update is a command"
+  fi
+fi
+rm -rf "$UPD"
+
+plant_console() {
+  # plant_console PREFIX VERSION
+  local root="$1" ver="$2"
+  mkdir -p "$root/bin"
+  cat > "$root/bin/genestack-console" <<EOF
+#!/bin/sh
+# MARKER-${ver}
+echo "genestack-console ${ver}"
+EOF
+  chmod 0755 "$root/bin/genestack-console"
+}
+
+UPD_SAME="$(mktemp -d)"
+SAME_JSON="$(mktemp)"
+printf '{"version":"2026.10.04.3","binary":"%s"}\n' "$STUB_BIN" > "$SAME_JSON"
+plant_console "$UPD_SAME" "2026.10.04.3"
+cat > "$UPD_SAME/config.yaml" <<EOF
+update:
+  url: ${SAME_JSON}
+sentinel: keep-me
+EOF
+SAME_LOG="$(mktemp)"
+if "$INSTALLER" --prefix "$UPD_SAME" update >"$SAME_LOG" 2>&1; then
+  ok "update exit 0 when already current"
+else
+  bad "update exit 0 when already current — log: $SAME_LOG"
+fi
+if grep -q 'already current' "$SAME_LOG" && grep -q 'MARKER-2026.10.04.3' "$UPD_SAME/bin/genestack-console"; then
+  ok "already current does not replace the binary"
+else
+  bad "already current should keep the binary"
+fi
+if grep -q 'sentinel: keep-me' "$UPD_SAME/config.yaml"; then
+  ok "update leaves config.yaml alone"
+else
+  bad "update rewrote config.yaml"
+fi
+rm -rf "$UPD_SAME"
+rm -f "$SAME_JSON"
+
+UPD_NEW="$(mktemp -d)"
+NEW_JSON="$(mktemp)"
+printf '{"version":"2026.10.04.3","binary":"%s"}\n' "$STUB_BIN" > "$NEW_JSON"
+plant_console "$UPD_NEW" "2026.10.04.2"
+cat > "$UPD_NEW/config.yaml" <<EOF
+update:
+  url: ${NEW_JSON}
+EOF
+NEW_LOG="$(mktemp)"
+if "$INSTALLER" --prefix "$UPD_NEW" --check update >"$NEW_LOG" 2>&1; then
+  ok "update --check exit 0"
+else
+  bad "update --check exit 0 — log: $NEW_LOG"
+fi
+if grep -q 'did not replace' "$NEW_LOG" && grep -q 'MARKER-2026.10.04.2' "$UPD_NEW/bin/genestack-console"; then
+  ok "--check prints the newer version and does not replace the binary"
+else
+  bad "--check should not replace the binary"
+fi
+if "$INSTALLER" --prefix "$UPD_NEW" update >"$NEW_LOG" 2>&1; then
+  ok "update exit 0 when a newer build is published"
+else
+  bad "update exit 0 when a newer build is published — log: $NEW_LOG"
+fi
+NEW_MAGIC="$(od -An -tx1 -N4 "$UPD_NEW/bin/genestack-console" 2>/dev/null | tr -d ' \n' || true)"
+if [ "$NEW_MAGIC" = "7f454c46" ] && grep -q '2026.10.04.2' "$NEW_LOG" && grep -q '2026.10.04.3' "$NEW_LOG"; then
+  ok "update replaced the binary with the published ELF"
+else
+  bad "update did not install the newer ELF — log: $NEW_LOG"
+fi
+if [ -f "$GSC_CLI_LINK" ] && grep -q 'genestack-console-wrapper' "$GSC_CLI_LINK" && grep -q 'update' "$GSC_CLI_LINK"; then
+  ok "PATH wrapper offers genestack-console update"
+else
+  bad "PATH wrapper missing at $GSC_CLI_LINK"
+fi
+rm -rf "$UPD_NEW"
+rm -f "$NEW_JSON"
 
 # ---------------------------------------------------------------------------
 hdr "uninstall"

@@ -22,6 +22,7 @@ Installers and the update check read:
 - `https://github.com/PIndustries/genestack-console/releases/latest/download/genestack-console-linux-amd64`
 
 `https://get.genestack.dev/console.sh` redirects to the `console.sh` asset.
+`genestack-console update` and `console.sh update` read that `version.json`, download the Linux binary it names, and restart both systemd units. They do not change `config.yaml`, the database, or `/opt/genestack`.
 
 A hyphen suffix such as `v2026.10.04.1-rc1` is published as a prerelease and is
 not marked latest. You can also run the release workflow by hand with a
