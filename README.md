@@ -38,7 +38,7 @@ An environment is one cloud: a lab, one rack, or one site. You create it in the 
 
 ## How a physical server gets an operating system
 
-This is the path when the console installs the operating system. A management port is how that path powers the machine. It is optional. [Your first cluster](docs/first-cluster.md) covers Talos you installed from an ISO, and Ubuntu that is already on the machines. A hostname and an IP are enough for those two starts.
+This is the path when the console installs the operating system. A management port is how that path powers the machine. It is optional. [Your first cluster](docs/first-cluster.md) covers a Mac lab, one ESXi server, one dedicated server, and three machines in one environment. It also covers Talos you installed from an ISO, and Ubuntu that is already on the machines. A hostname and an IP are enough for those two starts.
 
 Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. DHCP is how a machine asks for an IP address. The boot file is the small program the network card downloads when the server is told to start from the network instead of from its disk. Both of those services run inside the console process. This is how a server gets Talos. Talos is installed from the network, and the console is the program that does it. You do not set up a separate DHCP server, or another program, to boot the machines.
 
@@ -84,7 +84,7 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 
 ## Where to read next
 
-- [docs/first-cluster.md](docs/first-cluster.md) — the console is up. Attach a cluster you already have, point at Talos from an ISO, or record Ubuntu that is already installed. A management port is optional.
+- [docs/first-cluster.md](docs/first-cluster.md) — the console is up. A Mac lab, one ESXi server, one dedicated server, or three machines. Also a cluster you already have, Talos from an ISO, or Ubuntu that is already installed. A management port is optional.
 - [docs/install.md](docs/install.md) — the install on Linux, and the laptop lab on a Mac or Windows.
 - [docs/architecture.md](docs/architecture.md) — the processes on the deploy host, the boot sequence, and the job runner.
 - [docs/modules.md](docs/modules.md) — where each operation lives, and how to add a module of your own.
