@@ -576,7 +576,7 @@ function metalNextHint(src, provider) {
   if (src === "pxe") return "Claim PXE nodes on Hardware → Inventory, then continue Workflow.";
   if (src === "bmc") return "Register BMCs on Hardware → Bare metal, then continue Workflow.";
   if (src === "static" && provider === "talos") {
-    return "Boot the Talos ISO on each guest. Then Hosts, Talos is already installed. The console does not power them. After Kubernetes is up, Settings, Config, Deploy, start stage infrastructure.";
+    return "Boot the Talos ISO on each machine. Then Hosts, Talos is already installed. The console does not power them. After Kubernetes is up, Hosts, Deploy from infrastructure.";
   }
   if (src === "static") {
     return "Hosts, Already have an OS, records them. Deploy from this console installs Kubernetes and OpenStack over SSH.";

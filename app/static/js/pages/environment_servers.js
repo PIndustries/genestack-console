@@ -5,7 +5,9 @@
 // Checked inventory rows can queue one next-boot job each when they have a
 // management port. Apply names the servers first. Nothing is queued until
 // that confirm. Talos is already installed applies a config to every saved
-// address and does not power the machines. Already have an OS only records.
+// address and does not power the machines. After that job succeeds, Deploy
+// from infrastructure starts OpenStack and does not run Talos bootstrap again.
+// Already have an OS only records.
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { ROLES, ROLE_LABELS } from "../roles.js";
@@ -104,6 +106,9 @@ export function serversCardHtml() {
 #srv-card .srv-pick { width:1rem; height:1rem; }
 #srv-card .srv-path-switch { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem .75rem; margin:0 0 .7rem; color:var(--text,#eafaef); }
 #srv-card .srv-path-switch label { display:inline-flex; align-items:center; gap:.35rem; font-size:.82rem; color:var(--text,#eafaef); }
+#srv-card .srv-flow { margin:0 0 .7rem; padding:.6rem .7rem; background:rgba(7,14,9,.35); border:1px solid rgba(125,255,176,.18); border-radius:.45rem; }
+#srv-card .srv-flow pre { margin:0 0 .55rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.75rem; line-height:1.35; white-space:pre; overflow-x:auto; color:var(--fg-muted,#b7d4c4); }
+#srv-card .srv-flow-actions { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; }
 @media (max-width:700px) {
   #srv-card .srv-become { align-items:flex-start; left:0; width:calc(100vw - 1.5rem); max-width:calc(100vw - 1.5rem); box-sizing:border-box; }
   #srv-card .srv-become label { flex-basis:100%; }
@@ -135,6 +140,13 @@ export function serversCardHtml() {
     <button class="btn-sm" id="srv-path-save" type="button" disabled>Save path</button>
     <button class="btn-sm" id="srv-talos-installed" type="button">Talos is already installed</button>
     <span id="srv-path-msg" class="muted"></span>
+  </div>
+  <div id="srv-talos-flow" class="srv-flow" hidden>
+    <pre id="srv-talos-flow-map"></pre>
+    <div class="srv-flow-actions">
+      <button class="btn-sm" id="srv-talos-deploy" type="button" data-srv-talos-deploy disabled>Deploy from infrastructure</button>
+      <span id="srv-talos-flow-msg" class="muted"></span>
+    </div>
   </div>
   <div id="srv-ovh-banner"></div>
   <div id="srv-vrack"></div>
@@ -181,6 +193,11 @@ export function wireServersCard(getEnvId) {
   // loadServersCard render, so direct listeners (wired once at page mount)
   // would never land on them.
   card?.addEventListener("click", async (e) => {
+    const deployBtn = e.target.closest("[data-srv-talos-deploy]");
+    if (deployBtn && !deployBtn.disabled) {
+      await deployFromInfrastructure(getEnvId());
+      return;
+    }
     const btn = e.target.closest("[data-srv-copy-key],[data-srv-view-key]");
     if (!btn) return;
     if (btn.hasAttribute("data-srv-copy-key")) {
@@ -1466,6 +1483,7 @@ async function pointAtInstalledTalos(envId) {
     const text = id ? `Talos bootstrap queued ${id.slice(0, 8)}` : "Talos bootstrap queued";
     if (msg) msg.textContent = text;
     toast(text, "ok");
+    loadTalosFlow(envId);
   } catch (e) {
     if (msg) msg.textContent = e.message;
     toast(e.message, "bad");
@@ -1651,6 +1669,7 @@ export async function loadServersCard(envId) {
   const pathLine = document.getElementById("srv-path");
   if (pathLine) pathLine.textContent = metalPathSentence(metalPath);
   paintPathSwitch(metalPath);
+  loadTalosFlow(envId);
   msg.textContent = servers.length ? `${servers.length} server(s)` : "No servers in inventory yet.";
   const ovhBanner = document.getElementById("srv-ovh-banner");
   if (ovhBanner) {
@@ -2057,9 +2076,173 @@ function renderTopologySelector() {
   });
 }
 
+const TALOS_FLOW = [
+  ["talos", "Talos is already installed"],
+  ["infrastructure", "infrastructure"],
+  ["operators", "operators"],
+  ["cni", "cni"],
+  ["core", "openstack core"],
+  ["compute-network", "compute and network"],
+];
+
+let talosFlowTimer = null;
+let talosFlowGen = 0;
+
+function clearTalosFlowTimer() {
+  if (talosFlowTimer) {
+    clearTimeout(talosFlowTimer);
+    talosFlowTimer = null;
+  }
+}
+
+function flowDiagram(marks) {
+  const lines = [];
+  TALOS_FLOW.forEach(([id, label], i) => {
+    const mark = marks[id] || { glyph: " ", note: "" };
+    lines.push(`${mark.glyph} ${label}`.padEnd(34, " ") + (mark.note || ""));
+    if (i < TALOS_FLOW.length - 1) {
+      lines.push("  |");
+      lines.push("  v");
+    }
+  });
+  return lines.join("\n");
+}
+
+function jobStage(job) {
+  const params = job && job.params;
+  const stage = params && typeof params.from_stage === "string" ? params.from_stage : "";
+  return stage;
+}
+
+function paintTalosFlow(bootstrap, deploy) {
+  const box = document.getElementById("srv-talos-flow");
+  const map = document.getElementById("srv-talos-flow-map");
+  const msg = document.getElementById("srv-talos-flow-msg");
+  const btn = document.getElementById("srv-talos-deploy");
+  if (!box || !map || !btn) return;
+  const boot = bootstrap && bootstrap.status ? bootstrap.status : "";
+  const dep = deploy && deploy.status ? deploy.status : "";
+  const depStage = jobStage(deploy);
+  const depLive = dep === "queued" || dep === "running";
+  const marks = {};
+  let note = "Boot each machine from the Talos ISO, then Talos is already installed. Deploy waits until that job succeeds.";
+  let allow = false;
+  if (!boot) {
+    marks.talos = { glyph: ">", note: "next" };
+    marks.infrastructure = { glyph: " ", note: "after Kubernetes is up" };
+  } else if (boot === "queued" || boot === "running") {
+    marks.talos = { glyph: "*", note: boot };
+    marks.infrastructure = { glyph: " ", note: "Deploy waits" };
+    note = "Talos bootstrap is in Activity. Deploy stays here until Kubernetes is up.";
+  } else if (boot === "failed") {
+    marks.talos = { glyph: "x", note: "failed" };
+    note = "Talos bootstrap failed. Activity has the log. Deploy stays closed.";
+  } else if (boot === "success") {
+    marks.talos = { glyph: "+", note: "done" };
+    if (depLive && depStage === "infrastructure") {
+      marks.infrastructure = { glyph: "*", note: dep };
+      note = "Deploy is running from infrastructure. Talos bootstrap is not in this job.";
+    } else if (depLive && depStage) {
+      marks.infrastructure = { glyph: " ", note: "waiting" };
+      note = `A Deploy is ${dep} from ${depStage}. This button starts at infrastructure, and it waits.`;
+    } else if (depLive) {
+      marks.infrastructure = { glyph: "*", note: dep };
+      note = "A Deploy is running. It may include Talos bootstrap. This button waits until that job finishes.";
+    } else if (dep === "failed" && depStage === "infrastructure") {
+      marks.infrastructure = { glyph: "x", note: "failed" };
+      note = "Deploy from infrastructure failed. Activity has the log. Talos is still in place.";
+      allow = true;
+    } else if (dep === "failed") {
+      marks.infrastructure = { glyph: " ", note: "ready" };
+      note = depStage
+        ? `A Deploy failed from ${depStage}. Activity has the log. This button starts at infrastructure.`
+        : "A Deploy failed. Activity has the log. This button starts at infrastructure and does not run Talos bootstrap again.";
+      allow = true;
+    } else if (dep === "success" && depStage === "infrastructure") {
+      marks.infrastructure = { glyph: "+", note: "Deploy finished" };
+      note = "Deploy from infrastructure finished. Run it again only when you mean to.";
+      allow = true;
+    } else if (dep === "success") {
+      marks.infrastructure = { glyph: "+", note: "earlier Deploy" };
+      note = depStage
+        ? `A Deploy finished from ${depStage}. Run Deploy from infrastructure only when you mean to.`
+        : "A Deploy finished. It may have started at hosts. Run Deploy from infrastructure only when you mean to.";
+      allow = true;
+    } else {
+      marks.infrastructure = { glyph: ">", note: "Deploy starts here" };
+      note = "Kubernetes is up. This Deploy starts at infrastructure and does not run Talos bootstrap again.";
+      allow = true;
+    }
+  }
+  map.textContent = flowDiagram(marks);
+  if (msg) msg.textContent = note;
+  const admin = canAdmin();
+  btn.disabled = !admin || !allow;
+  btn.title = admin
+    ? (allow ? "OpenStack from infrastructure. Talos bootstrap does not run again." : "Deploy waits until Talos bootstrap succeeds.")
+    : "Requires admin role";
+}
+
+async function loadTalosFlow(envId) {
+  const gen = ++talosFlowGen;
+  clearTalosFlowTimer();
+  const box = document.getElementById("srv-talos-flow");
+  if (!box) return;
+  if (!envId || savedMetalPath === "kubespray") {
+    box.hidden = true;
+    return;
+  }
+  const btn = document.getElementById("srv-talos-deploy");
+  if (btn) btn.disabled = true;
+  box.hidden = false;
+  let jobs = [];
+  try {
+    jobs = await api(`/api/v1/jobs?environment_id=${encodeURIComponent(envId)}&limit=20`) || [];
+  } catch {
+    jobs = [];
+  }
+  if (gen !== talosFlowGen || serversLoadedEnvId !== envId) return;
+  const bootstrap = (jobs || []).find((j) => j && j.operation === "genestack.talos.bootstrap");
+  const deploy = (jobs || []).find((j) => j && j.operation === "genestack.deploy");
+  paintTalosFlow(bootstrap, deploy);
+  const live = [bootstrap, deploy].some((j) => j && (j.status === "queued" || j.status === "running"));
+  if (live) {
+    talosFlowTimer = setTimeout(() => { loadTalosFlow(envId); }, 5000);
+  }
+}
+
+async function deployFromInfrastructure(envId) {
+  if (!envId || !canAdmin()) return;
+  if (!window.confirm(
+    "Deploy from infrastructure?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nOpenStack is the work from here: infrastructure, operators, cni, openstack core, then compute and network.\n\nIf this environment is only logging, the job logs and does not change the machines."
+  )) return;
+  const btn = document.getElementById("srv-talos-deploy");
+  const msg = document.getElementById("srv-talos-flow-msg");
+  if (btn) btn.disabled = true;
+  try {
+    const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({
+        operation: "genestack.deploy",
+        params: { from_stage: "infrastructure" },
+      }),
+    });
+    const id = job && job.id != null ? String(job.id) : "";
+    toast(id ? `Deploy from infrastructure queued ${id.slice(0, 8)}` : "Deploy from infrastructure queued", "ok");
+    if (msg && id) msg.textContent = `Deploy queued ${id.slice(0, 8)}. Talos bootstrap is not in this job.`;
+    loadTalosFlow(envId);
+  } catch (e) {
+    if (msg) msg.textContent = e.message || "Deploy did not start";
+    toast(e.message || "Deploy did not start", "bad");
+    loadTalosFlow(envId);
+  }
+}
+
 export function destroyServersCard() {
   clearOvhPoll();
   adoptingOvh = false;
+  talosFlowGen += 1;
+  clearTalosFlowTimer();
 }
 
 async function addHost(envId, addBtn = null) {

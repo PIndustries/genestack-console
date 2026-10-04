@@ -148,7 +148,7 @@ Use this when Talos is already running and waiting for a config. A Talos ISO doe
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
 5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.
 
-Kubernetes is up after that job succeeds. OpenStack is Deploy, on Settings, then Config. Open Start stage and choose `infrastructure`, so Deploy does not run the Talos bootstrap a second time. A second bootstrap stops when the talos directory under the inventory path, usually `/etc/genestack/talos`, already holds `secrets.yaml` or `talosconfig`. Remove those files only when you mean to create a new cluster identity.
+Kubernetes is up after that job succeeds. On Hosts, the diagram marks infrastructure, and the button is Deploy from infrastructure. That Deploy starts there, so it does not run the Talos bootstrap a second time. A second bootstrap stops when the talos directory under the inventory path, usually `/etc/genestack/talos`, already holds `secrets.yaml` or `talosconfig`. Remove those files only when you mean to create a new cluster identity.
 
 ### Ubuntu is already installed
 
