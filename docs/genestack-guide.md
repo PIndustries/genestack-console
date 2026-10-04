@@ -159,6 +159,7 @@ The first rows are the rest of this chapter. Install, the one-machine lab, and h
 
 | You need | Read |
 | --- | --- |
+| The console is installed and you want a cluster | [Your first cluster](first-cluster.md) |
 | The two processes and the database | [The program](program.md) |
 | How a click becomes a command | [How a job runs](runtime.md) |
 | Every operation, and how to add one | [Jobs](jobs.md) |

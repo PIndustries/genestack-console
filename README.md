@@ -80,6 +80,7 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 
 ## Where to read next
 
+- [docs/first-cluster.md](docs/first-cluster.md) — the console is up. Attach a cluster you already have, or install one.
 - [docs/install.md](docs/install.md) — the install on Linux, and the laptop lab on a Mac or Windows.
 - [docs/architecture.md](docs/architecture.md) — the processes on the deploy host, the boot sequence, and the job runner.
 - [docs/modules.md](docs/modules.md) — where each operation lives, and how to add a module of your own.

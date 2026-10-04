@@ -139,6 +139,8 @@ ssh -L 8080:127.0.0.1:8080 <console-host>
 
 Open `http://127.0.0.1:8080/ui`. Login is `admin` plus the password in
 `/opt/genestack-console/ADMIN_CREDENTIALS.txt` (mode 600). Then Guided setup.
+[Your first cluster](first-cluster.md) is the next page: a cluster you already
+have, a new install, or a lab of virtual machines.
 
 ## What the operator gets
 
