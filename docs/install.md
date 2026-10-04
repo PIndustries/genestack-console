@@ -25,6 +25,21 @@ To connect that console to the account portal at `https://my.genestack.dev`, see
 
 ## Update an install
 
+Run the same command again. It reads the latest release and, when that build
+is newer, replaces the Linux binary. It does not change `config.yaml`, the
+database, or `/opt/genestack`.
+
+```bash
+curl -fsSL https://get.genestack.dev/console.sh | bash
+```
+
+Every published tag stays on GitHub. Name one to install that build instead
+of latest. A later run without a version moves back to latest.
+
+```bash
+curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3
+```
+
 The latest version is the `version` field in
 `https://github.com/PIndustries/genestack-console/releases/latest/download/version.json`.
 

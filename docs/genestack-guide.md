@@ -27,7 +27,7 @@ curl -fsSL https://get.genestack.dev/console.sh | bash
 
 That address redirects to the current installer attached to a GitHub Release. The script installs the program under `/opt/genestack-console` and starts a web page at `127.0.0.1:8080`. The page listens only on the deploy host until you change `server.host`.
 
-`genestack-console update` reads the latest release, replaces that binary, and restarts the console and the worker. It does not change `config.yaml`, the database, or `/opt/genestack`. The same step is `curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update`.
+Run the same install command again and it moves the binary to the latest release. `genestack-console update` does only that replace. Neither one changes `config.yaml`, the database, or `/opt/genestack`. A published tag stays available: `curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3`.
 
 From a laptop, forward that port:
 

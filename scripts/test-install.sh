@@ -175,6 +175,11 @@ if "$INSTALLER" --help | grep -q 'genestack-console update'; then
 else
   bad "--help missing genestack-console update"
 fi
+if "$INSTALLER" --help | grep -q -- '--version'; then
+  ok "--help documents --version"
+else
+  bad "--help missing --version"
+fi
 if "$INSTALLER" --self-test; then
   ok "--self-test version compare"
 else
@@ -532,6 +537,102 @@ else
 fi
 rm -rf "$UPD_NEW"
 rm -f "$NEW_JSON"
+
+# A named release, including an older one, and a repeat install that follows latest.
+REL_BASE="$(mktemp -d)"
+mkdir -p "$REL_BASE/v2026.10.04.2" "$REL_BASE/v2026.10.04.4"
+printf '{"version":"2026.10.04.2","binary":"%s"}\n' "$STUB_BIN" > "$REL_BASE/v2026.10.04.2/version.json"
+printf '{"version":"2026.10.04.4","binary":"%s"}\n' "$STUB_BIN" > "$REL_BASE/v2026.10.04.4/version.json"
+PIN_ROOT="$(mktemp -d)"
+plant_console "$PIN_ROOT" "2026.10.04.4"
+PIN_LOG="$(mktemp)"
+if GSC_RELEASE_BASE="$REL_BASE" "$INSTALLER" --prefix "$PIN_ROOT" v2026.10.04.2 --check update >"$PIN_LOG" 2>&1; then
+  ok "positional release tag is accepted"
+else
+  bad "positional release tag was rejected — log: $PIN_LOG"
+fi
+if ! grep -q 'did not replace' "$PIN_LOG"; then
+  bad "positional --check should not replace the binary"
+fi
+if GSC_RELEASE_BASE="$REL_BASE" "$INSTALLER" --prefix "$PIN_ROOT" --version 2026.10.04.2 update >"$PIN_LOG" 2>&1; then
+  ok "update --version exit 0"
+else
+  bad "update --version exit 0 — log: $PIN_LOG"
+fi
+PIN_MAGIC="$(od -An -tx1 -N4 "$PIN_ROOT/bin/genestack-console" 2>/dev/null | tr -d ' \n' || true)"
+if [ "$PIN_MAGIC" = "7f454c46" ] && grep -q 'selected 2026.10.04.2' "$PIN_LOG"; then
+  ok "named release replaces the binary even when it is older"
+else
+  bad "named release did not install the selected build — log: $PIN_LOG"
+fi
+rm -rf "$PIN_ROOT"
+
+# Repeat of the default install: upgrade, and do not downgrade, and keep config.
+smart_install() {
+  local root="$1" log="$2"
+  shift 2
+  mkdir -p "$root"
+  env -u GSC_BINARY_URL \
+    HOME="$(mktemp -d)" \
+    GSC_FORCE_BINARY=1 \
+    GSC_RELEASE_BASE="$REL_BASE" \
+    GSC_SKIP_APT=1 \
+    GSC_SKIP_ENGINE=1 \
+    GSC_CLI_LINK="$root/cli/genestack-console" \
+    "$INSTALLER" --prefix "$root" "$@" >"$log" 2>&1
+}
+UP_ROOT="$(mktemp -d)"
+mkdir -p "$UP_ROOT"
+plant_console "$UP_ROOT" "2026.10.04.2"
+cat > "$UP_ROOT/config.yaml" <<EOF
+update:
+  url: ${REL_BASE}/v2026.10.04.4/version.json
+sentinel: keep-me
+EOF
+UP_LOG="$(mktemp)"
+if smart_install "$UP_ROOT" "$UP_LOG"; then
+  ok "repeat install exit 0"
+else
+  bad "repeat install exit 0 — log: $UP_LOG"
+fi
+UP_MAGIC="$(od -An -tx1 -N4 "$UP_ROOT/bin/genestack-console" 2>/dev/null | tr -d ' \n' || true)"
+if [ "$UP_MAGIC" = "7f454c46" ] && grep -q 'sentinel: keep-me' "$UP_ROOT/config.yaml"; then
+  ok "repeat install pulled the newer release and kept config"
+else
+  bad "repeat install did not pull the newer release — log: $UP_LOG"
+fi
+# The file is now the stub ELF, which cannot report a version. Plant again
+# to prove a plain re-run does not move backward.
+plant_console "$UP_ROOT" "2026.10.04.4"
+cat > "$UP_ROOT/config.yaml" <<EOF
+update:
+  url: ${REL_BASE}/v2026.10.04.2/version.json
+sentinel: keep-me
+EOF
+if smart_install "$UP_ROOT" "$UP_LOG"; then
+  ok "repeat install exit 0 when already newer"
+else
+  bad "repeat install exit 0 when already newer — log: $UP_LOG"
+fi
+if grep -q 'MARKER-2026.10.04.4' "$UP_ROOT/bin/genestack-console" && grep -q 'sentinel: keep-me' "$UP_ROOT/config.yaml"; then
+  ok "repeat install does not downgrade"
+else
+  bad "repeat install downgraded or rewrote config — log: $UP_LOG"
+fi
+# Naming the older release does install it.
+if smart_install "$UP_ROOT" "$UP_LOG" --version 2026.10.04.2; then
+  ok "install --version exit 0"
+else
+  bad "install --version exit 0 — log: $UP_LOG"
+fi
+UP_MAGIC="$(od -An -tx1 -N4 "$UP_ROOT/bin/genestack-console" 2>/dev/null | tr -d ' \n' || true)"
+if [ "$UP_MAGIC" = "7f454c46" ] && grep -q 'sentinel: keep-me' "$UP_ROOT/config.yaml"; then
+  ok "install --version selected that release and kept config"
+else
+  bad "install --version did not select that release — log: $UP_LOG"
+fi
+rm -rf "$UP_ROOT" "$REL_BASE"
+rm -f "$PIN_LOG" "$UP_LOG"
 
 # ---------------------------------------------------------------------------
 hdr "uninstall"

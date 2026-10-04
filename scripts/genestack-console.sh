@@ -52,9 +52,13 @@ DO_UPDATE=0
 DO_UPDATE_CHECK=0
 AUTO_UPDATE="${GSC_AUTO_UPDATE:-0}"
 GSC_VERSION_URL="${GSC_VERSION_URL:-https://github.com/PIndustries/genestack-console/releases/latest/download/version.json}"
+# Empty means the latest release. A value such as 2026.10.04.3 pins that tag.
+GSC_PIN="${GSC_VERSION:-}"
+GSC_RELEASE_BASE="${GSC_RELEASE_BASE:-https://github.com/PIndustries/genestack-console/releases/download}"
 
 # Compiled Linux binary (Nuitka). Default install never clones source.
-GSC_BINARY_URL="${GSC_BINARY_URL:-https://github.com/PIndustries/genestack-console/releases/latest/download/genestack-console-linux-amd64}"
+GSC_BINARY_DEFAULT="https://github.com/PIndustries/genestack-console/releases/latest/download/genestack-console-linux-amd64"
+GSC_BINARY_URL="${GSC_BINARY_URL:-$GSC_BINARY_DEFAULT}"
 GSC_IMAGE="${GSC_IMAGE:-genestack-console:stable}"
 GSC_IMAGE_TAR="${GSC_IMAGE_TAR:-https://genestack.dev/releases/genestack-console-linux-amd64-docker.tar.gz}"
 GSC_FROM_SOURCE="${GSC_FROM_SOURCE:-0}"
@@ -168,6 +172,7 @@ or the seeded demo/walkthrough tenant.
 Usage:
   curl -fsSL https://get.genestack.dev/console.sh | bash
   curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --dev
+  curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3
   curl -fsSL https://get.genestack.dev/console.sh | bash -s -- update
   genestack-console update
   genestack-console.sh --install [--prefix DIR] [--port N] [--advertise-url URL]
@@ -175,14 +180,20 @@ Usage:
   genestack-console.sh update [--prefix DIR] [--check]
 
 Actions:
-  --install           Install the console (default when no action is given)
-  update, --update    Read the latest GitHub release and replace the Linux
-                      binary when it is newer, then restart both units.
+  --install           Install the console (default when no action is given).
+                      Running it again moves an existing Linux binary to the
+                      latest release. Config, the database, and Genestack stay.
+  update, --update    Same binary replace, without the rest of the install.
                       Does not change config.yaml, the database, or Genestack.
   --check             With update: print installed and latest, do not replace
   --uninstall         Stop services, remove units, VM, and the prefix
 
 Flags:
+  --version VER       Install this published release (2026.10.04.3 or
+                      v2026.10.04.3). Every GitHub Release tag stays
+                      downloadable. Omit it to follow the latest release.
+                      The same curl command with no version always moves to
+                      latest, including over a previously pinned install.
   --prefix DIR        Install root (default: /opt/genestack-console;
                       on macOS/Windows: ~/genestack-console)
   --port N            Host port for the console UI/API (default: 8080)
@@ -200,7 +211,9 @@ Flags:
   -h, --help          This help
 
 Environment knobs:
+  GSC_VERSION         same as --version (a published release, or empty for latest)
   GSC_VERSION_URL     version.json channel (default: the GitHub latest release)
+  GSC_RELEASE_BASE    download root for a named release (default: GitHub releases/download)
   GSC_BINARY_URL      compiled Linux binary (default: the GitHub release asset)
   GSC_IMAGE           docker image tag after --docker load (default: genestack-console:stable)
   GSC_IMAGE_TAR       docker-save tarball of that image (default: genestack.dev/releases/…-docker.tar.gz)
@@ -247,6 +260,21 @@ append_cors_origins() {
   done
 }
 
+set_pin() {
+  local raw="${1:-}"
+  case "$raw" in
+    "" | latest | stable)
+      GSC_PIN=""
+      ;;
+    *)
+      release_tag "$raw" >/dev/null
+      raw="${raw#v}"
+      raw="${raw#V}"
+      GSC_PIN="$raw"
+      ;;
+  esac
+}
+
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -274,7 +302,12 @@ parse_args() {
       --install) DO_INSTALL=1; shift ;;
       --update | update) DO_UPDATE=1; shift ;;
       --check) DO_UPDATE_CHECK=1; shift ;;
+      --version | --release)
+        [ $# -ge 2 ] || die "--version needs a release such as 2026.10.04.3"
+        set_pin "$2"; shift 2 ;;
+      --version=* | --release=*) set_pin "${1#*=}"; shift ;;
       --uninstall) DO_UNINSTALL=1; shift ;;
+      v[0-9][0-9][0-9][0-9].* | [0-9][0-9][0-9][0-9].*) set_pin "$1"; shift ;;
       -h | --help) usage; exit 0 ;;
       *) die "unknown argument: $1 (see --help)" ;;
     esac
@@ -290,6 +323,9 @@ parse_args() {
   fi
   if [ "${DO_UPDATE_CHECK:-0}" -eq 1 ] && [ "${DO_UPDATE:-0}" -ne 1 ]; then
     die "--check is only valid with update"
+  fi
+  if [ -n "${GSC_PIN:-}" ]; then
+    set_pin "$GSC_PIN"
   fi
   PREFIX="${PREFIX%/}"
   case "$PREFIX" in
@@ -705,23 +741,14 @@ file_is_elf() {
   [ "$(od -An -tx1 -N4 "$path" 2>/dev/null | tr -d ' \n')" = "7f454c46" ]
 }
 
-install_binary() {
-  CONSOLE_BIN="$PREFIX/bin/genestack-console"
-  ensure_prefix
-  mkdir -p "$PREFIX/bin"
-  if [ -x "$CONSOLE_BIN" ]; then
-    ok "binary already at $CONSOLE_BIN"
-    RUNTIME=binary
-    return 0
-  fi
-  local tmp src="$GSC_BINARY_URL"
+binary_url_is_default() {
+  [ "$GSC_BINARY_URL" = "$GSC_BINARY_DEFAULT" ]
+}
+
+download_binary_file() {
+  local src="$1" dest="$2" tmp
   tmp="$(mktemp)"
-  info "installing compiled console from $src"
-  if [ -f "$src" ]; then
-    cp -a "$src" "$tmp"
-  elif [ "${src#file://}" != "$src" ] && [ -f "${src#file://}" ]; then
-    cp -a "${src#file://}" "$tmp"
-  elif ! curl -fSL "$src" -o "$tmp"; then
+  if ! fetch_to "$src" "$tmp"; then
     rm -f "$tmp"
     return 1
   fi
@@ -729,8 +756,31 @@ install_binary() {
     rm -f "$tmp"
     return 1
   fi
-  mv "$tmp" "$CONSOLE_BIN"
-  chmod 0755 "$CONSOLE_BIN"
+  mv "$tmp" "$dest"
+  chmod 0755 "$dest"
+  return 0
+}
+
+install_binary() {
+  CONSOLE_BIN="$PREFIX/bin/genestack-console"
+  ensure_prefix
+  mkdir -p "$PREFIX/bin"
+  # A named release, or a repeat of the default install, follows the channel.
+  # A local GSC_BINARY_URL (tests, airgap) still keeps the file it already wrote.
+  if [ -n "${GSC_PIN:-}" ] || { [ -x "$CONSOLE_BIN" ] && binary_url_is_default; }; then
+    sync_release_binary
+    return $?
+  fi
+  if [ -x "$CONSOLE_BIN" ]; then
+    ok "binary already at $CONSOLE_BIN"
+    RUNTIME=binary
+    return 0
+  fi
+  local src="$GSC_BINARY_URL"
+  info "installing compiled console from $src"
+  if ! download_binary_file "$src" "$CONSOLE_BIN"; then
+    return 1
+  fi
   RUNTIME=binary
   ok "installed binary $CONSOLE_BIN"
   return 0
@@ -814,6 +864,15 @@ resolve_image() {
     RUNTIME=image
     RUNTIME_IMAGE="genestack-console:local"
     ok "will build $RUNTIME_IMAGE from source"
+    return 0
+  fi
+
+  if [ -n "${GSC_PIN:-}" ] && needs_container_runtime && [ "${GSC_FORCE_BINARY:-0}" != "1" ]; then
+    die "a named release installs the Linux binary. This host runs the Docker image, and that image is not published per release. Name the version on the Linux deploy host."
+  fi
+
+  if [ "${GSC_FORCE_BINARY:-0}" = "1" ]; then
+    install_binary || die "no compiled binary"
     return 0
   fi
 
@@ -1398,6 +1457,46 @@ version_fields() {
   printf '%s %s %s %s %s %s\n' "$y" "$m" "$d" "$b" "$flag" "$suf"
 }
 
+release_tag() {
+  local raw="${1:-}"
+  raw="${raw#v}"
+  raw="${raw#V}"
+  case "$raw" in
+    [0-9][0-9][0-9][0-9].[0-9]*) ;;
+    *) die "release must look like 2026.10.04.3 (got: ${1:-})" ;;
+  esac
+  printf 'v%s' "$raw"
+}
+
+release_asset_url() {
+  local tag="$1" name="$2" base
+  base="${GSC_RELEASE_BASE:-https://github.com/PIndustries/genestack-console/releases/download}"
+  base="${base%/}"
+  printf '%s/%s/%s' "$base" "$tag" "$name"
+}
+
+same_version() {
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  if version_is_newer "$1" "$2"; then
+    return 1
+  fi
+  if version_is_newer "$2" "$1"; then
+    return 1
+  fi
+  return 0
+}
+
+desired_channel() {
+  if [ -n "${GSC_PIN:-}" ]; then
+    release_asset_url "$(release_tag "$GSC_PIN")" "version.json"
+    return 0
+  fi
+  local channel
+  channel="$(channel_from_config)"
+  [ -n "$channel" ] || channel="$GSC_VERSION_URL"
+  printf '%s' "$channel"
+}
+
 version_is_newer() {
   local latest="${1:-}" current="${2:-}"
   [ -n "$latest" ] && [ -n "$current" ] || return 1
@@ -1489,7 +1588,8 @@ read_channel() {
   tmp="$(mktemp)"
   if ! fetch_to "$channel" "$tmp"; then
     rm -f "$tmp"
-    die "could not read $channel"
+    warn "could not read $channel"
+    return 1
   fi
   if ! python3 - "$tmp" >"${tmp}.out" <<'PY'
 import json
@@ -1512,12 +1612,16 @@ print(binary)
 PY
   then
     rm -f "$tmp" "${tmp}.out"
-    die "could not read version.json from $channel"
+    warn "could not read version.json from $channel"
+    return 1
   fi
   version="$(sed -n '1p' "${tmp}.out")"
   binary="$(sed -n '2p' "${tmp}.out")"
   rm -f "$tmp" "${tmp}.out"
-  [ -n "$version" ] || die "channel has no version: $channel"
+  if [ -z "$version" ]; then
+    warn "channel has no version: $channel"
+    return 1
+  fi
   printf '%s\n%s\n' "$version" "$binary"
 }
 
@@ -1562,6 +1666,59 @@ restart_console_units() {
   return 1
 }
 
+sync_release_binary() {
+  # Latest on a repeat install, or the release named with --version.
+  # A plain re-run never downgrades. A named release installs that build.
+  local bin="$CONSOLE_BIN" channel fields latest binary current url pinned=0
+  [ -n "${GSC_PIN:-}" ] && pinned=1
+  command -v python3 >/dev/null 2>&1 || die "python3 is required to read the version channel"
+  channel="$(desired_channel)"
+  if ! fields="$(read_channel "$channel")"; then
+    if [ "$pinned" -eq 1 ] || [ ! -x "$bin" ]; then
+      die "could not read $channel"
+    fi
+    warn "could not read $channel — leaving the installed binary"
+    RUNTIME=binary
+    return 0
+  fi
+  latest="$(printf '%s\n' "$fields" | sed -n '1p')"
+  binary="$(printf '%s\n' "$fields" | sed -n '2p')"
+  if [ "$pinned" -eq 1 ] && ! same_version "$latest" "$GSC_PIN"; then
+    die "release $GSC_PIN published $latest at $channel"
+  fi
+  current=""
+  if [ -x "$bin" ]; then
+    current="$(installed_version "$bin")"
+  fi
+  if [ -n "$current" ]; then
+    info "installed: $current"
+    info "release:   $latest"
+    info "channel:   $channel"
+    if [ "$pinned" -eq 1 ] && same_version "$latest" "$current"; then
+      ok "binary already at $bin ($current)"
+      RUNTIME=binary
+      return 0
+    fi
+    if [ "$pinned" -eq 0 ] && ! version_is_newer "$latest" "$current"; then
+      ok "binary already at $bin ($current is current)"
+      RUNTIME=binary
+      return 0
+    fi
+  fi
+  url="$binary"
+  if [ -z "$url" ]; then
+    if [ "$pinned" -eq 1 ]; then
+      url="$(release_asset_url "$(release_tag "$GSC_PIN")" "genestack-console-linux-amd64")"
+    else
+      url="$GSC_BINARY_URL"
+    fi
+  fi
+  info "downloading $url"
+  replace_binary "$bin" "$url"
+  RUNTIME=binary
+  ok "installed $latest at $bin"
+}
+
 do_update() {
   # Compare here. Do not exec the installed binary's update command: copies
   # already in the field drop the build number, so 2026.10.04.3 never looks
@@ -1569,18 +1726,18 @@ do_update() {
   phase "Update"
   local bin="${PREFIX}/bin/genestack-console"
   if [ ! -x "$bin" ]; then
-    if needs_container_runtime; then
+    if needs_container_runtime && [ -z "${GSC_PIN:-}" ]; then
       die "update replaces the Linux binary. This host runs the Docker image. Re-run the installer to refresh that image. The image was not changed."
     fi
     die "no compiled binary at $bin — install first"
   fi
   command -v python3 >/dev/null 2>&1 || die "python3 is required to read the version channel"
   command -v curl >/dev/null 2>&1 || die "curl is required to download the update"
-  local channel
-  channel="$(channel_from_config)"
-  [ -n "$channel" ] || channel="$GSC_VERSION_URL"
-  local fields latest binary current url
-  fields="$(read_channel "$channel")"
+  local channel fields latest binary current url
+  channel="$(desired_channel)"
+  if ! fields="$(read_channel "$channel")"; then
+    die "could not read $channel"
+  fi
   latest="$(printf '%s\n' "$fields" | sed -n '1p')"
   binary="$(printf '%s\n' "$fields" | sed -n '2p')"
   current="$(installed_version "$bin")"
@@ -1588,13 +1745,29 @@ do_update() {
   info "installed: $current"
   info "latest:    $latest"
   info "channel:   $channel"
-  if ! version_is_newer "$latest" "$current"; then
+  if [ -n "${GSC_PIN:-}" ]; then
+    if ! same_version "$latest" "$GSC_PIN"; then
+      die "release $GSC_PIN published $latest at $channel"
+    fi
+    if same_version "$latest" "$current"; then
+      ok "already at $current"
+      install_cli_link
+      return 0
+    fi
+    info "selected $latest (installed $current)"
+  elif ! version_is_newer "$latest" "$current"; then
     ok "already current ($current)"
     install_cli_link
     return 0
   fi
   url="$binary"
-  [ -n "$url" ] || url="$GSC_BINARY_URL"
+  if [ -z "$url" ]; then
+    if [ -n "${GSC_PIN:-}" ]; then
+      url="$(release_asset_url "$(release_tag "$GSC_PIN")" "genestack-console-linux-amd64")"
+    else
+      url="$GSC_BINARY_URL"
+    fi
+  fi
   info "binary:    $url"
   if [ "${DO_UPDATE_CHECK:-0}" -eq 1 ]; then
     info "update available ($current -> $latest). --check did not replace the binary."
@@ -1635,6 +1808,11 @@ self_test() {
   _self_expect_newer 1 "v2026.10.04.3" "2026.10.04.3" || fail=1
   _self_expect_newer 1 "" "2026.10.04.3" || fail=1
   _self_expect_newer 1 "2026.10.04.3" "" || fail=1
+  [ "$(release_tag "2026.10.04.3")" = "v2026.10.04.3" ] || fail=1
+  [ "$(release_tag "v2026.10.04.3")" = "v2026.10.04.3" ] || fail=1
+  same_version "v2026.10.04.3" "2026.10.04.3" || fail=1
+  if same_version "2026.10.04.3" "2026.10.04.2"; then fail=1; fi
+  if (release_tag "nope") >/dev/null 2>&1; then fail=1; fi
   [ "$fail" -eq 0 ]
 }
 
@@ -1814,11 +1992,13 @@ EOF
 }
 
 install_systemd() {
-  if [ "$HOST_KIND" = "darwin" ]; then
+  # A Linux ELF does not get a Docker launchd agent, including a forced
+  # binary install on a laptop.
+  if [ "$HOST_KIND" = "darwin" ] && [ "${RUNTIME:-}" != "binary" ]; then
     install_launchd
     return 0
   fi
-  if [ "$HOST_KIND" = "windows" ]; then
+  if [ "$HOST_KIND" = "windows" ] && [ "${RUNTIME:-}" != "binary" ]; then
     phase "Phase 5/8: boot persistence"
     warn "Windows: no systemd/launchd — Docker Desktop restart: unless-stopped keeps the hub up"
     return 0
