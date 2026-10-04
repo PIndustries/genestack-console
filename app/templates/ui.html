@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Genestack Console</title>
-  <link rel="icon" href="/static/brand/p-industries-mark.png" />
+  <link rel="icon" href="/static/brand/genestack-console.svg" />
   <link rel="stylesheet" href="/static/css/portal.css" />
   <link rel="stylesheet" href="/static/css/theme.css" />
   <style>
@@ -132,12 +132,16 @@
   </style>
 </head>
 <body>
+  <canvas id="gsc-breath" aria-hidden="true"></canvas>
   <!-- Login screen (shown when no session token / API key in localStorage) -->
   <div id="login-view" class="login-wrap hidden">
     <div class="card login-card">
       <div class="brand brand-lockup" style="margin-bottom:1rem">
-        <img class="brand-logo" src="/static/brand/p-industries.png" alt="P.Industries" />
-        <div class="brand-powered">Powered by Genestack Console by P.Industries</div>
+        <span class="brand-breath" aria-hidden="true"><canvas></canvas></span>
+        <img class="gsc-mark" src="/static/brand/genestack-console.svg" alt="" />
+        <span class="brand-copy">
+          <span class="brand-title">Genestack Console</span>
+        </span>
       </div>
       <h1>Sign in</h1>
       <div id="login-sso" class="hidden">
@@ -166,14 +170,11 @@
         <div style="display:grid; gap:.75rem; margin-top:1rem">
           <label class="field">
             <span>Service API key</span>
-            <input id="api-key" type="password" placeholder="dev-admin-key" autocomplete="off" />
+            <input id="api-key" type="password" placeholder="Key from config.yaml" autocomplete="off" />
           </label>
           <button id="btn-login-key" type="button">Enter portal</button>
           <button class="secondary btn-sm" id="btn-show-user" type="button">Back to sign in</button>
         </div>
-        <p class="muted" style="font-size:.8rem;margin-top:1rem">
-          Default local keys: <code>dev-admin-key</code> / <code>dev-operator-key</code> / <code>dev-viewer-key</code>
-        </p>
       </div>
       <div id="login-error" class="error hidden" style="margin-top:1rem"></div>
       <div id="login-version" class="muted version-line"></div>
@@ -184,8 +185,11 @@
   <div id="app-shell" class="shell hidden">
     <aside class="sidebar">
       <a class="brand brand-lockup" href="#/fleet">
-        <img class="brand-logo" src="/static/brand/p-industries.png" alt="P.Industries" />
-        <span class="brand-powered">Powered by Genestack Console by P.Industries</span>
+        <span class="brand-breath" aria-hidden="true"><canvas></canvas></span>
+        <img class="gsc-mark" src="/static/brand/genestack-console.svg" alt="" />
+        <span class="brand-copy">
+          <span class="brand-title">Genestack Console</span>
+        </span>
       </a>
       <nav class="nav" aria-label="Primary">
         <div class="nav-label">Fleet</div>
@@ -210,6 +214,9 @@
       <div class="sidebar-foot">
         <a class="nav-link" href="/docs">API docs</a>
         <div id="sidebar-version" class="version-line muted"></div>
+      </div>
+      <div class="sidebar-mark">
+        <img class="brand-wordmark" src="/static/brand/p-industries.png" alt="P.Industries" />
       </div>
     </aside>
 
@@ -254,6 +261,7 @@
     var _s=document.querySelector('script[src*="app.js"]');
     if(_s){var _h=_s.getAttribute('src');if(_h.indexOf('?')===-1)_s.setAttribute('src',_h+'?v='+_v)}
   </script>
+  <script src="/static/js/gsc-breath.js"></script>
   <script type="module" src="/static/js/app.js?v=ls17"></script>
 </body>
 </html>

@@ -41,14 +41,16 @@ _BASE = "http://10.10.0.1:8080"
 def test_load_modules_sees_host_operations():
     clear_module_cache()
     ids = [op.id for op in get_operation_catalog()]
-    assert ids[-3:] == [
+    assert ids[-4:] == [
         "hosts.ubuntu.prepare",
+        "hosts.ubuntu.bringup",
         "hosts.microk8s.install",
         "hosts.kubespray.adopt",
     ]
     assert ids == list(CATALOG_ORDER)
     hmap = handler_map()
     assert "hosts_ubuntu_prepare" in hmap
+    assert "hosts_ubuntu_bringup" in hmap
     assert "hosts_microk8s_install" in hmap
     assert "hosts_kubespray_adopt" in hmap
 
@@ -95,6 +97,51 @@ def test_prepare_dry_writes_user_data_and_ubuntu_ipxe(tmp_path, monkeypatch):
     other = render_profile_ipxe("ubuntu", _BASE, "tok", hostname="lab2")
     assert f"{_BASE}/ubuntu/lab2/" in other
     assert f"{_BASE}/ubuntu/lab1/" not in other
+
+
+def test_bringup_action_picks_one_step():
+    from app.modules.hosts.ubuntu import bringup_action
+
+    assert bringup_action(port_open=True, talos_api=False, leave=False) == "already"
+    assert bringup_action(port_open=False, talos_api=False, leave=False) == "install"
+    assert bringup_action(port_open=True, talos_api=True, leave=False) == "leave"
+    assert bringup_action(port_open=True, talos_api=True, leave=True) == "install"
+
+
+def test_bringup_dry_does_not_boot(monkeypatch):
+    from app.modules.hosts import ubuntu as ubuntu_mod
+    from app.services import envconfig as envconfig_service
+
+    monkeypatch.setattr(
+        envconfig_service,
+        "get_current",
+        lambda _db, _env: ({"servers": {"n1": {"private_ip": "10.1.1.8"}}}, None),
+    )
+
+    class _Db:
+        def scalar(self, *_a, **_k):
+            return SimpleNamespace(expected_ip="10.1.1.8", name="n1")
+
+    def boom(*_a, **_k):
+        raise AssertionError("set_next_boot was called")
+
+    monkeypatch.setattr("app.services.baremetal.set_next_boot", boom)
+    monkeypatch.setattr("app.services.baremetal.talos_api_ready", lambda *_a, **_k: False)
+    monkeypatch.setattr(ubuntu_mod, "_port_open", lambda *_a, **_k: False)
+    result = ubuntu_mod.run(
+        SimpleNamespace(db=_Db(), settings=None),
+        **{
+            **_RUN_ARGS,
+            "handler": "hosts_ubuntu_bringup",
+            "dry": True,
+            "env": SimpleNamespace(id="env"),
+            "params": {"hostnames": ["n1"]},
+        },
+    )
+    assert result["ok"] is True
+    assert result["rebooted"] is False
+    assert result["hosts"][0]["action"] == "install"
+    assert result["hosts"][0]["dry_run"] is True
 
 
 def test_microk8s_dry_does_not_ssh(monkeypatch):

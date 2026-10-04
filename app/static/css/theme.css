@@ -10,7 +10,10 @@
   --panel2: #122418;
   --border: #1a3d28;
   --text: #eafaef;
+  --fg: #eafaef;
   --muted: #7e9b86;
+  /* Hints that used an undefined --fg-muted fell back to #555/#666. */
+  --fg-muted: #b7d4c4;
   --inset: #070e09;
   --shell-bg: rgba(4, 6, 10, 0.75);
   --topbar-bg: rgba(4, 6, 10, 0.88);
@@ -37,48 +40,147 @@
   --bad-text: #ffa198;
 }
 
-/* Brand green is bright. Primary buttons take dark text so the label stays
-   readable. Secondary, danger, and chrome buttons keep light text. */
-button:not(.secondary):not(.danger):not(.nav-link):not(.linkish):not(.user-chip):not(.pill) {
+/* Dark text only on the bright green fill: a classless button, or a
+   small primary button. Every other control keeps the light label from
+   portal.css, including tabs and the map chrome. */
+button:not([class]),
+button.btn-sm:not(.secondary):not(.danger) {
   color: var(--mark-fg);
+}
+.sf-controls button,
+.sf-space3d-space button {
+  color: var(--text);
+}
+.ptab .ptab-kicker { opacity: 1; }
+input::placeholder,
+textarea::placeholder {
+  color: var(--fg-muted);
+  opacity: 1;
 }
 button:hover:not(:disabled) { filter: brightness(1.08); }
 button.secondary:hover:not(:disabled) { filter: none; border-color: #245c38; color: var(--text); }
 button.danger { background: #da3633; color: #fff; }
 
+#gsc-breath {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.shell,
+.login-wrap,
+#toast-root { position: relative; z-index: 1; }
+.sidebar { background: rgba(7, 14, 9, 0.94); }
+
 .brand-lockup {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.45rem;
-}
-.brand-logo {
-  display: block;
-  width: min(100%, 12.25rem);
-  height: auto;
-  min-width: 0;
-}
-.brand-powered {
-  display: block;
-  max-width: 12.25rem;
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 600;
-  line-height: 1.35;
-  letter-spacing: 0.01em;
-}
-.brand-lockup-row {
+  position: relative;
   flex-direction: row;
   align-items: center;
+  gap: 0.55rem;
+  overflow: hidden;
 }
-.brand-lockup-row .brand-logo {
+.brand-breath {
+  position: absolute;
+  left: -0.6rem;
+  top: -0.35rem;
+  width: 5.2rem;
+  height: 3.4rem;
+  z-index: 0;
+  pointer-events: none;
+}
+.brand-breath canvas { width: 100%; height: 100%; display: block; }
+.gsc-mark {
+  position: relative;
+  z-index: 1;
+  width: 3.4rem;
+  height: 3.4rem;
+  flex: none;
+  opacity: 0.92;
+  animation: gsc-breathe 6.8s ease-in-out infinite;
+}
+.brand-copy { position: relative; z-index: 1; min-width: 0; }
+.brand-title {
+  display: block;
+  color: var(--text);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.brand-wordmark {
+  height: 1.45rem;
   width: auto;
-  height: 2.15rem;
-  max-width: 9.5rem;
+  max-width: 100%;
+  display: block;
+  flex: none;
 }
-.brand-lockup-row .brand-powered { max-width: 11rem; }
+.login-card .brand-lockup {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.login-card .gsc-mark { width: 4.8rem; height: 4.8rem; }
+.login-card .brand-title { font-size: 1.35rem; text-align: center; }
+.login-card .brand-breath { width: 12rem; height: 5.4rem; left: 50%; top: -0.2rem; transform: translateX(-50%); }
+.sidebar .brand-lockup {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  gap: 0.4rem;
+}
+.sidebar .gsc-mark { width: 4.6rem; height: 4.6rem; }
+.sidebar .brand-title { font-size: 1.14rem; text-align: center; }
+.sidebar .brand-breath {
+  width: 8.5rem;
+  height: 5.2rem;
+  left: 50%;
+  top: -0.2rem;
+  transform: translateX(-50%);
+}
+.sidebar-foot { text-align: center; }
+.sidebar-mark {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.85rem 0.35rem 0.15rem;
+}
+.card,
+.stat-bar {
+  animation: gsc-tile-breath 9.5s ease-in-out infinite;
+}
+.card:nth-child(2n) { animation-delay: -3.2s; }
+.card:nth-child(3n) { animation-delay: -6.4s; }
+
+@keyframes gsc-breathe {
+  0%, 100% {
+    transform: scale(0.985);
+    opacity: 0.9;
+    filter: drop-shadow(0 0 0 rgba(74, 222, 128, 0));
+  }
+  50% {
+    transform: scale(1.025);
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.28));
+  }
+}
+@keyframes gsc-tile-breath {
+  0%, 100% { box-shadow: 0 0 0 rgba(52, 199, 89, 0); }
+  50% { box-shadow: 0 0 14px rgba(52, 199, 89, 0.07), inset 0 0 0 1px rgba(52, 199, 89, 0.16); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gsc-mark,
+  .card,
+  .stat-bar { animation: none; }
+  .gsc-mark { opacity: 0.9; filter: none; transform: none; }
+  #gsc-breath, .brand-breath { display: none; }
+}
 
 /* Alerts entry points read as alert-red, never brand-red. */
-#alerts-badge { background: var(--danger); border-color: transparent; color: #fff; }
+#alerts-badge { background: var(--danger); border-color: transparent; color: var(--mark-fg); }
 #dm-space3d-toggle.active { color: var(--mark-fg); }
 
 /* Role badges: admin reads as brand green on the dark field. */

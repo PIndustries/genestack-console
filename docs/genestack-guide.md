@@ -96,7 +96,7 @@ For a server you did select:
 3. The console switches that server to Talos and network-boots it once.
 4. Talos comes up in maintenance. Maintenance means Talos is running and waiting for its configuration. The job then continues with the [Talos Linux](k8s-talos.md) steps in this manual.
 
-Those four steps are the Talos path. Install Ubuntu is a separate next boot. It writes that machine's seed and can power the machine from the network. It does not run the wipe, and it does not continue into OpenStack.
+Those four steps are the Talos path. Install Ubuntu is a separate next boot. It writes that machine's seed and can power the machine from the network. It does not run the wipe, and it does not continue into OpenStack. On `main`, the Hosts page can queue that boot and wait until the machine answers. The `v2026.10.03` binary stops at the next-boot menu.
 
 An ISO image cannot be the first boot of a reinstall. An ISO does not wipe the disks, so the console rejects that choice on this path.
 

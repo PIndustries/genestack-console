@@ -1,11 +1,14 @@
 // pages/environment_servers.js — server inventory card for the environment detail page.
-// Saved servers render in an Inventory table with role checkboxes, Save, and Remove.
-// Add a host by address, or import OVH dedicated servers. Talos is installed from
-// the network by this console. Failures degrade to an "unavailable" note.
+// Saved servers render in an Inventory table with role chips, Save, and Remove.
+// OVH import is only for an environment bound to an OVH account. A role is a
+// saved cluster plan. It does not install an operating system.
+// Checked inventory rows can queue one next-boot job each. Apply names the
+// servers first. Nothing is queued until that confirm.
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { ROLES, ROLE_LABELS } from "../roles.js";
 import { clearOvhPoll } from "../ovh.js";
+import { clusterOsHtml, fetchMetalPath, metalPathSentence, osNameHtml } from "../metal_path.js";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
@@ -60,34 +63,102 @@ export function serversCardHtml() {
 #srv-card .card-empty p { font-size:.78rem; margin:.15rem 0; }
 #srv-card .card-empty .empty-hint { font-size:.7rem; color:var(--fg-muted, #555); margin-top:.3rem; }
 #srv-card .hint-row { display:flex; align-items:center; gap:.5rem; padding:.3rem 0; margin-bottom:.3rem; font-size:.72rem; color:var(--fg-muted, #666); }
-#srv-card .pill { display:inline-block; padding:.15rem .45rem; border-radius:.2rem; font-size:.72rem; font-weight:500; }
+#srv-card .pill { display:inline-flex; align-items:center; padding:.15rem .45rem; border-radius:.2rem; font-size:.72rem; font-weight:500; }
+#srv-card .os-name { display:inline-flex; align-items:center; gap:.28rem; }
+#srv-card .os-mark { width:1rem; height:1rem; flex:none; display:block; }
+#srv-card .srv-os-choices { display:inline-flex; flex-wrap:wrap; gap:.25rem; }
+#srv-card .srv-os-choice { display:inline-flex; align-items:center; gap:.28rem; margin:0; padding:.12rem .38rem; border:1px solid var(--border,#1a3d28); border-radius:.35rem; color:var(--text,#eafaef); font-size:.78rem; cursor:pointer; }
+#srv-card .srv-os-choice.on { border-color:#34c759; background:var(--panel2,#122418); }
+#srv-card .srv-os-choice input { margin:0; accent-color:#34c759; }
 #srv-card .pill.ok { background:#1a3a1a; color:#4caf50; }
 #srv-card .pill.bad { background:#3a1a1a; color:#ef5350; }
 #srv-card .pill.warn { background:#3a3a1a; color:#ffc107; }
 #srv-card h3 { font-size:.82rem; font-weight:600; margin:.5rem 0 .3rem; }
 #srv-card .add-host-section { margin-top:.5rem; padding-top:.4rem; border-top:1px solid var(--border, #222); }
+#srv-card .srv-bmc-head { display:flex; align-items:baseline; gap:.5rem; margin:.15rem 0 .35rem; }
+#srv-card .srv-bmc-head h3 { margin:0; color:var(--text,#eafaef); }
+#srv-bmc-modal { position:fixed; inset:0; z-index:1400; width:100vw; height:100vh; background:#04130a; display:flex; padding:0; }
+#srv-bmc-modal[hidden] { display:none !important; }
+#srv-bmc-modal .srv-bmc-panel { width:100%; height:100%; max-width:none; padding:0; border:0; border-radius:0; box-shadow:none; display:flex; flex-direction:column; background:var(--panel,#0c1a12); color:var(--text,#eafaef); overflow:hidden; }
+#srv-bmc-modal .os-console-head { margin:0; padding:.55rem .75rem; border-bottom:1px solid var(--border,#1a3d28); }
+#srv-bmc-modal .srv-bmc-body { display:grid; grid-template-columns:18rem minmax(0,1fr); min-height:0; flex:1; height:100%; }
+#srv-bmc-modal .srv-bmc-list { overflow:auto; border-right:1px solid var(--border,#1a3d28); padding:.4rem; display:flex; flex-direction:column; gap:.25rem; }
+#srv-bmc-modal button.srv-bmc-pick { text-align:left; background:transparent; color:var(--text,#eafaef); border:1px solid transparent; border-radius:.35rem; padding:.4rem .5rem; cursor:pointer; }
+#srv-bmc-modal button.srv-bmc-pick.on { border-color:#34c759; background:var(--panel2,#122418); }
+#srv-bmc-modal button.srv-bmc-pick strong { display:block; font-size:.82rem; }
+#srv-bmc-modal button.srv-bmc-pick span { display:block; margin-top:.1rem; font-size:.72rem; color:var(--fg-muted,#b7d4c4); font-family:ui-monospace,monospace; }
+#srv-bmc-modal .srv-bmc-stage { min-height:0; height:100%; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); grid-auto-rows:minmax(0,1fr); gap:.45rem; padding:.45rem; overflow:auto; }
+#srv-bmc-modal .srv-bmc-empty { grid-column:1 / -1; align-self:center; margin:0; padding:1rem 1.2rem; }
+#srv-bmc-modal .srv-bmc-tile { display:flex; flex-direction:column; min-height:0; height:100%; background:#04130a; border:1px solid var(--border,#1a3d28); border-radius:.35rem; overflow:hidden; }
+#srv-bmc-modal .srv-bmc-tile header { display:flex; justify-content:space-between; gap:.4rem; font-size:.72rem; padding:.28rem .4rem; color:#eafaef; flex:none; }
+#srv-bmc-modal .srv-bmc-tile iframe { flex:1; width:100%; min-height:0; height:100%; border:0; background:#000; }
+@media (max-width:700px) {
+  #srv-bmc-modal .srv-bmc-body { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
+  #srv-bmc-modal .srv-bmc-list { max-height:34vh; border-right:0; border-bottom:1px solid var(--border,#1a3d28); }
+}
+#srv-card .srv-become { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem .75rem; margin:0 0 .7rem; padding:.6rem .7rem; background:var(--panel2,#122418); border:1px solid var(--border,#1a3d28); border-radius:.45rem; color:var(--text,#eafaef); position:sticky; bottom:.4rem; z-index:4; }
+#srv-card .srv-become label { display:inline-flex; align-items:center; gap:.35rem; font-size:.82rem; color:var(--text,#eafaef); }
+#srv-card .srv-become-note { flex-basis:100%; margin:.15rem 0 0; font-size:.75rem; line-height:1.35; color:var(--fg-muted,#b7d4c4); }
+#srv-card .srv-pick { width:1rem; height:1rem; }
+#srv-card .srv-path-switch { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem .75rem; margin:0 0 .7rem; color:var(--text,#eafaef); }
+#srv-card .srv-path-switch label { display:inline-flex; align-items:center; gap:.35rem; font-size:.82rem; color:var(--text,#eafaef); }
+@media (max-width:700px) {
+  #srv-card .srv-become { align-items:flex-start; left:0; width:calc(100vw - 1.5rem); max-width:calc(100vw - 1.5rem); box-sizing:border-box; }
+  #srv-card .srv-become label { flex-basis:100%; }
+  #srv-card .srv-become-note { overflow-wrap:break-word; }
+  #srv-card .srv-path-switch label { flex-basis:100%; }
+}
+#srv-card .srv-os-cell { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
+#srv-card select.srv-os {
+  background: var(--panel2, #122418);
+  color: var(--text, #eafaef);
+  border: 1px solid var(--border, #1a3d28);
+  border-radius: .35rem;
+  font-size: .78rem;
+  padding: .2rem .35rem;
+}
 </style>
 <div class="card span-12" id="srv-card">
   <div class="toolbar">
-    <h2>OVH infrastructure</h2>
-    <span class="muted">Dedicated · vRack · private fabric</span>
+    <h2 id="srv-title">Metal hosts</h2>
+    <span class="muted" id="srv-kicker">BMC, NICs, and the boxes in this environment</span>
     <button class="secondary btn-sm" id="srv-refresh" type="button">Refresh</button>
     <span id="srv-msg" class="muted"></span>
   </div>
-  <div class="hint-row">Rise dual-NIC: public management hole, private NIC on the vRack. Talos control-plane / worker roles are assigned here.</div>
+  <div class="hint-row" id="srv-hint">Reinstall keeps the OS already on that row. Choose Ubuntu or Talos beside it to install the other one. A role only saves the cluster plan.</div>
+  <div class="hint-row" id="srv-path">Reading the metal path for this environment…</div>
+  <div class="srv-path-switch" id="srv-path-switch">
+    <label><input type="radio" name="srv-path-choice" value="talos"> ${osNameHtml("talos", "Talos, preferred")}</label>
+    <label><input type="radio" name="srv-path-choice" value="kubespray"> Kubespray, adopt an existing OS</label>
+    <button class="btn-sm" id="srv-path-save" type="button" disabled>Save path</button>
+    <span id="srv-path-msg" class="muted"></span>
+  </div>
   <div id="srv-ovh-banner"></div>
   <div id="srv-vrack"></div>
   <div id="srv-err"></div>
+  <div id="srv-bmc-wall"><div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted">Loading BMCs…</p></div>
   <h3>Inventory (assigned)</h3>
+  <div id="srv-become" class="srv-become hidden">
+    <strong id="srv-become-count">0 servers</strong>
+    <label><input type="radio" name="srv-become" value="ubuntu"> ${osNameHtml("ubuntu")}</label>
+    <label><input type="radio" name="srv-become" value="talos"> ${osNameHtml("talos", "Talos cluster")}</label>
+    <label><input type="radio" name="srv-become" value="kubespray"> Kubespray</label>
+    <button class="btn-sm" id="srv-become-apply" type="button">Apply</button>
+    <button class="secondary btn-sm" id="srv-adapt" type="button">Adapt</button>
+    <button class="secondary btn-sm" id="srv-adapt-clear" type="button">Clear adapt</button>
+    <span id="srv-become-msg" class="muted"></span>
+    <p class="srv-become-note">Ubuntu brings the selected hosts up by itself. A host that already answers stays on disk and leaves the Talos plan. A host that does not answer is installed, and the job waits until it answers. Talos cluster and Kubespray still reboot. Adapt only records an existing OS.</p>
+  </div>
   <table>
     <thead><tr>
-      <th>Hostname</th><th>IP</th><th>SSH user</th><th>Source</th><th>Roles</th><th></th>
+      <th style="width:2rem"><input type="checkbox" id="srv-select-all" class="srv-pick" aria-label="Select all hosts"></th>
+      <th>Hostname</th><th>IP</th><th>SSH user</th><th>Source</th><th>OS</th><th>Roles</th><th></th>
     </tr></thead>
-    <tbody id="srv-tbody"><tr><td colspan="6">
+    <tbody id="srv-tbody"><tr><td colspan="8">
       <div class="card-empty">
         <div class="empty-icon">⬡</div>
         <p>No servers configured</p>
-        <p class="empty-hint">Import Rise boxes from OVH, or add a host below</p>
+        <p class="empty-hint">Add a host by hostname and IP</p>
       </div>
     </td></tr></tbody>
   </table>
@@ -131,6 +202,314 @@ export function wireServersCard(getEnvId) {
       if (tabBtn) tabBtn.click();
     }
   });
+
+  gateBecome();
+  card?.addEventListener("change", (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    if (t.id === "srv-select-all") {
+      card.querySelectorAll("input[data-srv-pick]").forEach((cb) => {
+        cb.checked = t.checked;
+      });
+      syncBecomeBar();
+      return;
+    }
+    if (t.matches("input[data-srv-pick]")) syncBecomeBar();
+    if (t.name === "srv-path-choice") syncPathSwitch();
+  });
+  card?.addEventListener("click", (e) => {
+    const save = e.target.closest("#srv-path-save");
+    if (save && !save.disabled) {
+      saveMetalPath(getEnvId());
+      return;
+    }
+    const apply = e.target.closest("#srv-become-apply");
+    if (apply && !apply.disabled) {
+      applyBecome(getEnvId());
+      return;
+    }
+    const adapt = e.target.closest("#srv-adapt");
+    if (adapt && !adapt.disabled) {
+      applyAdapt(getEnvId(), "kubespray");
+      return;
+    }
+    const clear = e.target.closest("#srv-adapt-clear");
+    if (clear && !clear.disabled) applyAdapt(getEnvId(), "");
+  });
+}
+
+function assignedRoleChips(roles) {
+  const on = ROLES.filter((r) => roles.includes(r));
+  if (!on.length) return `<span class="muted">no cluster role</span>`;
+  return on.map((r) => `<span class="pill ok">${esc(ROLE_LABELS[r] || r)}</span>`).join(" ");
+}
+
+function roleEditor(scope, rowIdx, roles) {
+  return `<div class="srv-roles">${assignedRoleChips(roles)}
+    <details class="srv-role-edit"><summary>Edit</summary>
+      <div class="row" style="gap:0;margin-top:.3rem">${roleBoxes(scope, rowIdx, roles)}</div>
+    </details></div>`;
+}
+
+let bmcWallNodes = [];
+let bmcWallEnv = "";
+let bmcWallOn = new Set();
+let bmcWallGen = 0;
+
+function sortedBmcNodes(nodes) {
+  return (Array.isArray(nodes) ? nodes : [])
+    .filter((node) => node && typeof node === "object")
+    .slice()
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+}
+
+function stopBmcFrames(root) {
+  if (!root) return;
+  root.querySelectorAll("iframe").forEach((frame) => {
+    frame.src = "about:blank";
+  });
+}
+
+function bmcNodeKey(node, index) {
+  return String((node && node.id) || `idx-${index}`);
+}
+
+function bmcStageHint() {
+  return `<p class="srv-bmc-empty muted">Select servers on the left. Each one you select shows up here. Selecting does not power or boot the machine.</p>`;
+}
+
+function closeBmcWall() {
+  bmcWallGen += 1;
+  bmcWallOn = new Set();
+  const modal = document.getElementById("srv-bmc-modal");
+  stopBmcFrames(modal);
+  if (modal) modal.hidden = true;
+}
+
+function ensureBmcModal() {
+  let modal = document.getElementById("srv-bmc-modal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "srv-bmc-modal";
+  modal.className = "os-console-modal";
+  modal.hidden = true;
+  modal.innerHTML = `<div class="os-console-panel srv-bmc-panel" role="dialog" aria-modal="true" aria-labelledby="srv-bmc-title">
+      <div class="os-console-head">
+        <h2 id="srv-bmc-title">BMC wall</h2>
+        <div class="os-console-actions">
+          <button type="button" class="secondary btn-sm" data-bmc-all>Show all live</button>
+          <button type="button" class="secondary btn-sm" data-bmc-clear>Clear</button>
+          <button type="button" class="secondary btn-sm" data-bmc-close>Close</button>
+        </div>
+      </div>
+      <div class="srv-bmc-body">
+        <aside class="srv-bmc-list" id="srv-bmc-list"></aside>
+        <section class="srv-bmc-stage" id="srv-bmc-stage"></section>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal || event.target.closest("[data-bmc-close]")) {
+      closeBmcWall();
+      return;
+    }
+    if (event.target.closest("[data-bmc-all]")) {
+      showAllBmcLive();
+      return;
+    }
+    if (event.target.closest("[data-bmc-clear]")) clearBmcStage();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && modal.hidden === false) closeBmcWall();
+  });
+  return modal;
+}
+
+async function attachBmcFrame(frame, envId, node, gen) {
+  const status = frame.parentElement && frame.parentElement.querySelector("[data-bmc-status]");
+  if (!node || !node.id) {
+    if (status) status.textContent = "No console id";
+    return;
+  }
+  if (status) status.textContent = "Opening…";
+  try {
+    const data = await api(
+      `/api/v1/environments/${encodeURIComponent(envId)}/baremetal/nodes/${encodeURIComponent(node.id)}/console/session`,
+      { method: "POST", timeout: 25000 }
+    );
+    if (gen !== bmcWallGen || !frame.isConnected) return;
+    const tile = frame.closest("[data-bmc-key]");
+    if (tile && !bmcWallOn.has(tile.dataset.bmcKey || "")) return;
+    const embed = data && data.embed_url ? String(data.embed_url) : "";
+    if (!data || !data.ok || !embed.startsWith("/") || embed.startsWith("//")) {
+      if (status) status.textContent = (data && data.error) || "Console unavailable";
+      return;
+    }
+    frame.src = embed;
+    if (status) status.textContent = "Live";
+  } catch (err) {
+    if (gen !== bmcWallGen || !frame.isConnected) return;
+    if (status) status.textContent = err && err.message ? err.message : "Console unavailable";
+  }
+}
+
+function syncBmcChrome() {
+  const modal = document.getElementById("srv-bmc-modal");
+  if (!modal) return;
+  const title = modal.querySelector("#srv-bmc-title");
+  if (title) title.textContent = `BMC wall · ${bmcWallOn.size} of ${bmcWallNodes.length} live`;
+  modal.querySelectorAll("[data-bmc-pick]").forEach((btn) => {
+    const node = bmcWallNodes[Number(btn.getAttribute("data-bmc-pick"))];
+    const on = !!(node && bmcWallOn.has(bmcNodeKey(node, Number(btn.getAttribute("data-bmc-pick")))));
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+function addBmcTile(node, index, delay) {
+  const key = bmcNodeKey(node, index);
+  const stage = document.getElementById("srv-bmc-stage");
+  if (!stage || bmcWallOn.has(key)) return;
+  bmcWallOn.add(key);
+  const empty = stage.querySelector(".srv-bmc-empty");
+  if (empty) empty.remove();
+  const tile = document.createElement("article");
+  tile.className = "srv-bmc-tile";
+  tile.dataset.bmcKey = key;
+  tile.innerHTML = `<header><strong>${esc(node.name || "BMC")}</strong><span data-bmc-status>Waiting…</span></header><iframe title="${esc((node && node.name) || "BMC")} console" referrerpolicy="no-referrer"></iframe>`;
+  stage.appendChild(tile);
+  const frame = tile.querySelector("iframe");
+  const gen = bmcWallGen;
+  window.setTimeout(() => {
+    if (gen !== bmcWallGen || !bmcWallOn.has(key) || !frame || !frame.isConnected) return;
+    attachBmcFrame(frame, bmcWallEnv, node, gen);
+  }, delay || 0);
+}
+
+function removeBmcTile(key) {
+  bmcWallOn.delete(key);
+  const stage = document.getElementById("srv-bmc-stage");
+  const tile = stage && stage.querySelector(`[data-bmc-key="${CSS.escape(key)}"]`);
+  if (tile) {
+    const frame = tile.querySelector("iframe");
+    if (frame) frame.src = "about:blank";
+    tile.remove();
+  }
+  if (stage && !stage.querySelector(".srv-bmc-tile")) stage.innerHTML = bmcStageHint();
+}
+
+function toggleBmc(index) {
+  const node = bmcWallNodes[index];
+  if (!node) return;
+  const key = bmcNodeKey(node, index);
+  if (bmcWallOn.has(key)) removeBmcTile(key);
+  else addBmcTile(node, index, 0);
+  syncBmcChrome();
+}
+
+function showAllBmcLive() {
+  let delay = 0;
+  bmcWallNodes.forEach((node, index) => {
+    if (bmcWallOn.has(bmcNodeKey(node, index))) return;
+    addBmcTile(node, index, delay);
+    delay += 300;
+  });
+  syncBmcChrome();
+}
+
+function clearBmcStage() {
+  bmcWallGen += 1;
+  bmcWallOn = new Set();
+  const stage = document.getElementById("srv-bmc-stage");
+  stopBmcFrames(stage);
+  if (stage) stage.innerHTML = bmcStageHint();
+  syncBmcChrome();
+}
+
+function paintBmcWall() {
+  const modal = ensureBmcModal();
+  const listEl = modal.querySelector("#srv-bmc-list");
+  const stage = modal.querySelector("#srv-bmc-stage");
+  if (!listEl || !stage) return;
+  listEl.innerHTML = bmcWallNodes.length
+    ? bmcWallNodes
+        .map((node, index) => {
+          const on = bmcWallOn.has(bmcNodeKey(node, index));
+          return `<button type="button" class="srv-bmc-pick${on ? " on" : ""}" data-bmc-pick="${index}" aria-pressed="${on ? "true" : "false"}">
+              <strong>${esc(node.name || "BMC")}</strong>
+              <span>${esc(node.bmc_host || "No BMC address")}</span>
+            </button>`;
+        })
+        .join("")
+    : `<p class="muted">No BMCs are registered.</p>`;
+  listEl.querySelectorAll("[data-bmc-pick]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleBmc(Number(btn.getAttribute("data-bmc-pick"))));
+  });
+  if (!stage.querySelector(".srv-bmc-tile") && !stage.querySelector(".srv-bmc-empty")) {
+    stage.innerHTML = bmcStageHint();
+  }
+  syncBmcChrome();
+}
+
+function openBmcWall(envId, nodes) {
+  bmcWallGen += 1;
+  bmcWallOn = new Set();
+  bmcWallEnv = envId;
+  bmcWallNodes = sortedBmcNodes(nodes);
+  const modal = ensureBmcModal();
+  const stage = modal.querySelector("#srv-bmc-stage");
+  stopBmcFrames(stage);
+  if (stage) stage.innerHTML = bmcStageHint();
+  modal.hidden = false;
+  paintBmcWall();
+}
+
+function renderBmcWall(envId, nodes, note) {
+  const root = document.getElementById("srv-bmc-wall");
+  if (!root) return;
+  if (note) {
+    closeBmcWall();
+    root.innerHTML = `<div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted" style="font-size:.78rem">${esc(note)}</p>`;
+    return;
+  }
+  const list = sortedBmcNodes(nodes);
+  if (!list.length) {
+    closeBmcWall();
+    root.innerHTML = `<div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted" style="font-size:.78rem">No BMCs are registered for this environment.</p>`;
+    return;
+  }
+  root.innerHTML = `
+    <div class="srv-bmc-head">
+      <h3>BMC wall</h3>
+      <span class="muted">${list.length} registered</span>
+      <button class="btn-sm" type="button" id="srv-bmc-open">Open wall</button>
+    </div>
+    <p class="hint-row">Open wall lists every BMC on the left. Select any of them and each one shows up live. Show all live selects every BMC. Opening a console does not power or boot the machine.</p>`;
+  const open = root.querySelector("#srv-bmc-open");
+  if (open) open.addEventListener("click", () => openBmcWall(envId, list));
+}
+
+function hostOsLabel(server, bootByName, clusterIps, metalPath) {
+  const name = String((server && server.hostname) || "");
+  const ip = String((server && (server.private_ip || server.ip)) || "");
+  const boot = bootByName.get(name) || {};
+  const next = String(boot.next_boot || "");
+  const stage = String(boot.boot_stage || "");
+  const inCluster = !!(ip && clusterIps.has(ip));
+  if (String((server && server.adopt) || "") === "kubespray" && !inCluster) {
+    const ubuntuBoot = next === "ubuntu" || stage === "ubuntu";
+    return `<span class="pill ok">Kubespray</span> <span class="muted">recorded, not in the cluster${ubuntuBoot ? `. ${osNameHtml("ubuntu")} next boot` : ""}</span>`;
+  }
+  if (next === "ubuntu" || stage === "ubuntu") {
+    return inCluster
+      ? `<span class="pill warn">${osNameHtml("ubuntu")}</span> <span class="muted">also in the cluster</span>`
+      : `<span class="pill ok">${osNameHtml("ubuntu")}</span> <span class="muted">not in the cluster</span>`;
+  }
+  if (inCluster) return clusterOsHtml(metalPath);
+  if ((Array.isArray(server && server.roles) ? server.roles : []).length) {
+    return `<span class="muted">recorded, not in the cluster</span>`;
+  }
+  return `<span class="muted">not in the cluster</span>`;
 }
 
 function roleBoxes(scope, rowIdx, roles) {
@@ -418,7 +797,7 @@ function renderVrackPanel(envId, data, opts) {
     ${err}
     <h3 style="margin-top:.15rem">vRacks on this account</h3>
     <p class="muted" style="font-size:.75rem;margin:.2rem 0 .35rem">
-      Pick the fabric these Rise nodes share. IDs are OVH <code>pn-…</code> service names;
+      Pick the vRack these dedicated servers share. IDs are OVH <code>pn-…</code> service names;
       the label is the name set in OVH (or suggested from this cluster).
       ${
         suggested
@@ -657,7 +1036,7 @@ async function attachVrackFabric(envId, hostnames) {
   const who = hostnames && hostnames.length ? hostnames.join(", ") : "every OVH server in this environment";
   if (
     !confirm(
-      `Attach ${who} to ${vrack}?\n\nRise boxes plug the private NIC (VNI) into the vRack. VLAN ${body.vlan_id} is applied later at Talos apply-config.`
+      `Attach ${who} to ${vrack}?\n\nDedicated servers plug the private NIC into the vRack. VLAN ${body.vlan_id} is applied later at Talos apply-config.`
     )
   ) {
     return;
@@ -750,9 +1129,395 @@ async function saveNicRow(envId, tr) {
   }
 }
 
+let becomeTargets = [];
+let savedMetalPath = "";
+
+function selectedBecome() {
+  const picks = [];
+  document.querySelectorAll("#srv-card input[data-srv-pick]:checked").forEach((cb) => {
+    const row = becomeTargets[Number(cb.getAttribute("data-srv-pick"))];
+    if (row) picks.push(row);
+  });
+  return picks;
+}
+
+function syncBecomeBar() {
+  const bar = document.getElementById("srv-become");
+  if (!bar) return;
+  const picks = selectedBecome();
+  const count = document.getElementById("srv-become-count");
+  if (count) count.textContent = picks.length === 1 ? "1 server" : `${picks.length} servers`;
+  bar.classList.toggle("hidden", picks.length === 0);
+  const boxes = document.querySelectorAll("#srv-card input[data-srv-pick]");
+  const master = document.getElementById("srv-select-all");
+  if (master) {
+    master.checked = boxes.length > 0 && picks.length === boxes.length;
+    master.indeterminate = picks.length > 0 && picks.length < boxes.length;
+  }
+}
+
+function resetBecome() {
+  becomeTargets = [];
+  document.querySelectorAll("#srv-card input[data-srv-pick]").forEach((cb) => {
+    cb.checked = false;
+  });
+  const master = document.getElementById("srv-select-all");
+  if (master) {
+    master.checked = false;
+    master.indeterminate = false;
+  }
+  const msg = document.getElementById("srv-become-msg");
+  if (msg) msg.textContent = "";
+  document.querySelectorAll("#srv-become input[name='srv-become']").forEach((el) => {
+    el.checked = false;
+  });
+  syncBecomeBar();
+}
+
+function gateBecome() {
+  const allowed = canRun();
+  for (const id of ["srv-become-apply", "srv-adapt", "srv-adapt-clear"]) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.disabled = !allowed;
+    if (!allowed) btn.title = "Requires operator role";
+  }
+}
+
+function syncPathSwitch() {
+  const save = document.getElementById("srv-path-save");
+  if (!save) return;
+  const chosen = document.querySelector("#srv-path-switch input[name='srv-path-choice']:checked");
+  const value = chosen ? chosen.value : "";
+  save.disabled = !canRun() || !value || value === savedMetalPath;
+  if (!canRun()) save.title = "Requires operator role";
+}
+
+function paintPathSwitch(provider) {
+  savedMetalPath = provider === "kubespray" || provider === "talos" ? provider : "";
+  document.querySelectorAll("#srv-path-switch input[name='srv-path-choice']").forEach((el) => {
+    el.checked = el.value === savedMetalPath;
+    el.disabled = !canRun();
+  });
+  syncPathSwitch();
+}
+
+async function saveMetalPath(envId) {
+  const msg = document.getElementById("srv-path-msg");
+  const chosen = document.querySelector("#srv-path-switch input[name='srv-path-choice']:checked");
+  if (!chosen || !chosen.value || chosen.value === savedMetalPath) return;
+  const label = chosen.value === "kubespray" ? "Kubespray" : "Talos";
+  if (!window.confirm(
+    `Save this environment's metal path as ${label}?\n\nThis does not reboot any machine and does not start a playbook.`
+  )) return;
+  const btn = document.getElementById("srv-path-save");
+  if (btn) btn.disabled = true;
+  try {
+    await api(`/api/v1/environments/${encodeURIComponent(envId)}/config/provider`, {
+      method: "PUT",
+      body: JSON.stringify({ provider: chosen.value }),
+    });
+    if (msg) msg.textContent = `Saved ${label}. Nothing rebooted.`;
+    toast(`Metal path saved as ${label}`, "ok");
+    window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: chosen.value } }));
+    await loadServersCard(envId);
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    toast(e.message, "bad");
+    syncPathSwitch();
+  }
+}
+
+function becomeConfirmText(choice, ready, skipped) {
+  const names = ready.map((row) => row.hostname).join("\n");
+  const skipLine = skipped.length
+    ? `\n\nNo bare-metal record, left alone:\n${skipped.map((row) => row.hostname).join("\n")}`
+    : "";
+  if (!ready.length) {
+    return `None of these servers have a bare-metal record, so nothing will boot:\n${skipped.map((row) => row.hostname).join("\n")}`;
+  }
+  if (choice === "talos") {
+    return (
+      `Reboot these servers onto the Talos cluster?\n\n${names}\n\n` +
+      "Talos only proceeds on a machine that already has an accepted commission wipe. " +
+      "Otherwise that job fails and the disks stay as they are." +
+      skipLine
+    );
+  }
+  if (choice === "kubespray") {
+    return (
+      `Install Ubuntu on these servers for a Kubespray set, not Talos?\n\n${names}\n\n` +
+      "They reboot into the Ubuntu installer. This does not start the Kubespray playbook " +
+      "and does not change this environment's provider." +
+      skipLine
+    );
+  }
+  return (
+    `Install Ubuntu on these servers and leave them out of the Talos cluster?\n\n${names}\n\n` +
+    "They reboot into the Ubuntu installer." +
+    skipLine
+  );
+}
+
+async function applyAdapt(envId, adopt) {
+  const msg = document.getElementById("srv-become-msg");
+  const picks = selectedBecome();
+  if (!picks.length) return;
+  const ready = picks.filter((row) => !row.inCluster);
+  const skipped = picks.filter((row) => row.inCluster);
+  const names = ready.map((row) => row.hostname).join("\n");
+  const skipLine = skipped.length
+    ? `\n\nAlready in the cluster, left alone:\n${skipped.map((row) => row.hostname).join("\n")}`
+    : "";
+  const text = !ready.length
+    ? `Every selected machine is already in the cluster, so nothing will be recorded:\n${skipped.map((row) => row.hostname).join("\n")}`
+    : adopt
+      ? `Record these machines for Kubespray? They already have an OS.\n\n${names}\n\nThis does not reboot them, install anything, or start a playbook. Roles stay.${skipLine}`
+      : `Clear the Kubespray record on these machines?\n\n${names}\n\nThis does not reboot them or change their roles.${skipLine}`;
+  if (!window.confirm(text)) return;
+  if (!ready.length) {
+    if (msg) msg.textContent = "Nothing recorded. Those machines are already in the cluster.";
+    return;
+  }
+  const adaptBtn = document.getElementById("srv-adapt");
+  const clearBtn = document.getElementById("srv-adapt-clear");
+  if (adaptBtn) adaptBtn.disabled = true;
+  if (clearBtn) clearBtn.disabled = true;
+  try {
+    const res = await api(`/api/v1/environments/${encodeURIComponent(envId)}/servers/adopt`, {
+      method: "POST",
+      body: JSON.stringify({
+        hostnames: ready.map((row) => row.hostname),
+        adopt,
+      }),
+    });
+    const warn = res && Array.isArray(res.warnings) && res.warnings.length ? ` ${res.warnings.join(" ")}` : "";
+    if (msg) msg.textContent = (adopt ? "Recorded for Kubespray." : "Kubespray record cleared.") + warn;
+    toast(adopt ? "Recorded for Kubespray" : "Kubespray record cleared", "ok");
+    await loadServersCard(envId);
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    toast(e.message, "bad");
+    gateBecome();
+  }
+}
+
+function ubuntuNowText(staying, leaving) {
+  const stay = staying.length
+    ? staying.map((row) => row.hostname).join("\n")
+    : "(none)";
+  const leaveBlock = leaving.length
+    ? `\n\nThese are in the cluster. Confirming reinstalls them and removes them from Kubernetes:\n${leaving.map((row) => row.hostname).join("\n")}`
+    : "\n\nMachines already in the cluster were not selected.";
+  return (
+    `Install Ubuntu on these hosts and bring them up? There is no second step.\n\n` +
+    `If a host already answers, it stays on disk and leaves the Talos plan:\n${stay}` +
+    leaveBlock +
+    `\n\nA host that does not answer reboots into the Ubuntu installer. This job waits until it answers. ` +
+    `No OpenStack and no Kubernetes are installed.`
+  );
+}
+
+function installedOs(server, bootByName, inCluster, metalPath) {
+  const name = String((server && server.hostname) || "");
+  const boot = (bootByName && bootByName.get(name)) || {};
+  const next = String(boot.next_boot || "");
+  const stage = String(boot.boot_stage || "");
+  if (next === "ubuntu" || stage === "ubuntu") return "ubuntu";
+  if (next === "talos" || stage === "talos") return "talos";
+  if (inCluster && metalPath === "talos") return "talos";
+  return "";
+}
+
+function osVerb(choice, installed) {
+  return choice && choice === installed ? "Reinstall" : "Install";
+}
+
+function paintOsButton(btn, choice) {
+  const installed = btn.dataset.installed || "";
+  const inCluster = btn.dataset.inCluster === "1";
+  const verb = choice ? osVerb(choice, installed) : "Install";
+  btn.textContent = verb;
+  const quiet = !choice || inCluster || verb === "Reinstall";
+  btn.className = `${quiet ? "secondary " : ""}btn-sm`;
+  btn.disabled = !canRun() || !choice;
+  if (!choice) btn.title = "Pick Ubuntu or Talos";
+  else if (choice === "ubuntu" && inCluster) btn.title = `${verb} Ubuntu and remove this machine from the cluster`;
+  else if (choice === "ubuntu") btn.title = `${verb} Ubuntu on this machine and leave it out of the cluster`;
+  else btn.title = `${verb} Talos on this machine`;
+}
+
+function osControlHtml(i, server, bootByName, row, metalPath) {
+  const inCluster = !!(row && row.inCluster);
+  const installed = installedOs(server, bootByName, inCluster, metalPath);
+  const selected = installed === "ubuntu" || installed === "talos" ? installed : "";
+  const verb = selected ? "Reinstall" : "Install";
+  const quiet = inCluster || verb === "Reinstall";
+  const host = String((server && server.hostname) || "host");
+  const title = !selected
+    ? "Pick Ubuntu or Talos"
+    : selected === "ubuntu" && inCluster
+      ? "Reinstall Ubuntu and remove this machine from the cluster"
+      : selected === "ubuntu"
+        ? "Reinstall Ubuntu on this machine and leave it out of the cluster"
+        : "Reinstall Talos on this machine";
+  const choice = (value, label) =>
+    `<label class="srv-os-choice${selected === value ? " on" : ""}">` +
+    `<input type="radio" name="srv-os-${i}" value="${value}" data-os="${i}"${selected === value ? " checked" : ""} ${gate(canRun(), "operator")} />` +
+    `${osNameHtml(value, label)}</label>`;
+  return (
+    `<span class="srv-os-choices" role="radiogroup" aria-label="Operating system for ${esc(host)}">` +
+    `${choice("ubuntu", "Ubuntu")}${choice("talos", "Talos")}` +
+    `</span> ` +
+    `<button class="${quiet ? "secondary " : ""}btn-sm" type="button" data-reconfigure="${i}" data-installed="${esc(installed)}" data-in-cluster="${inCluster ? "1" : "0"}" title="${esc(title)}" ${gate(canRun(), "operator")}${selected ? "" : " disabled"}>${verb}</button>`
+  );
+}
+
+async function queueUbuntuBringup(envId, picks) {
+  const msg = document.getElementById("srv-become-msg");
+  const staying = picks.filter((row) => !row.inCluster);
+  const leaving = picks.filter((row) => row.inCluster);
+  if (!staying.length && !leaving.length) return;
+  const applyBtn = document.getElementById("srv-become-apply");
+  if (applyBtn) applyBtn.disabled = true;
+  try {
+    const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({
+        operation: "hosts.ubuntu.bringup",
+        params: {
+          hostnames: staying.map((row) => row.hostname),
+          leave_hostnames: leaving.map((row) => row.hostname),
+        },
+      }),
+    });
+    const id = job && job.id != null ? String(job.id) : "";
+    if (msg) msg.textContent = id ? `Ubuntu bring-up queued ${id.slice(0, 8)}` : "Ubuntu bring-up queued";
+    toast(id ? `Ubuntu bring-up queued ${id.slice(0, 8)}` : "Ubuntu bring-up queued", "ok");
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    toast(e.message, "bad");
+  } finally {
+    gateBecome();
+  }
+}
+
+async function bringUpUbuntu(envId, picks) {
+  const staying = picks.filter((row) => !row.inCluster);
+  const leaving = picks.filter((row) => row.inCluster);
+  if (!window.confirm(ubuntuNowText(staying, leaving))) return;
+  await queueUbuntuBringup(envId, picks);
+}
+
+async function reconfigureHost(envId, row, choice, installed) {
+  const host = row.hostname || "this machine";
+  if (choice === "ubuntu") {
+    const verb = osVerb(choice, installed);
+    const where = row.inCluster
+      ? "This machine is in the cluster. Confirming removes it from Kubernetes."
+      : "It stays out of the cluster.";
+    const how = "If it already answers, it stays on disk. If it does not answer, it reboots into the Ubuntu installer and this job waits.";
+    if (!window.confirm(`${verb} Ubuntu on ${host}?\n\n${where}\n\n${how}\n\nNo OpenStack and no Kubernetes are installed.`)) return;
+    await queueUbuntuBringup(envId, [row]);
+    return;
+  }
+  if (choice !== "talos") return;
+  if (!row.nodeId) {
+    const msg = document.getElementById("srv-become-msg");
+    const text = `${host} has no bare-metal record, so nothing will boot.`;
+    if (msg) msg.textContent = text;
+    toast(text, "bad");
+    return;
+  }
+  const verb = osVerb(choice, installed);
+  if (!window.confirm(
+    `${verb} Talos on ${host}?\n\nThis reboots the machine onto Talos. Talos only proceeds after an accepted commission wipe. Otherwise the job fails and the disks stay as they are.`
+  )) return;
+  const msg = document.getElementById("srv-become-msg");
+  const applyBtn = document.getElementById("srv-become-apply");
+  if (applyBtn) applyBtn.disabled = true;
+  try {
+    const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({
+        operation: "baremetal.node.next_boot",
+        params: {
+          node_id: row.nodeId,
+          next_boot: "talos",
+          boot_now: true,
+        },
+      }),
+    });
+    const id = job && job.id != null ? String(job.id) : "";
+    if (msg) msg.textContent = id ? `${host}: queued ${id.slice(0, 8)}` : `${host}: queued`;
+    toast(id ? `Talos boot queued ${id.slice(0, 8)}` : "Talos boot queued", "ok");
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    toast(e.message, "bad");
+  } finally {
+    gateBecome();
+  }
+}
+
+async function applyBecome(envId) {
+  const msg = document.getElementById("srv-become-msg");
+  const picks = selectedBecome();
+  if (!picks.length) return;
+  const choiceEl = document.querySelector("#srv-become input[name='srv-become']:checked");
+  if (!choiceEl) {
+    if (msg) msg.textContent = "Pick Ubuntu server, Talos cluster, or Kubespray.";
+    return;
+  }
+  if (choiceEl.value === "ubuntu") {
+    await bringUpUbuntu(envId, picks);
+    return;
+  }
+  const ready = picks.filter((row) => row.nodeId);
+  const skipped = picks.filter((row) => !row.nodeId);
+  if (!window.confirm(becomeConfirmText(choiceEl.value, ready, skipped))) return;
+  if (!ready.length) {
+    if (msg) msg.textContent = "Nothing queued. Those servers have no bare-metal record.";
+    return;
+  }
+  const nextBoot = choiceEl.value === "talos" ? "talos" : "ubuntu";
+  const applyBtn = document.getElementById("srv-become-apply");
+  if (applyBtn) applyBtn.disabled = true;
+  const lines = [];
+  let failed = false;
+  try {
+    for (const row of ready) {
+      try {
+        const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
+          method: "POST",
+          body: JSON.stringify({
+            operation: "baremetal.node.next_boot",
+            params: {
+              node_id: row.nodeId,
+              next_boot: nextBoot,
+              boot_now: true,
+            },
+          }),
+        });
+        const id = job && job.id != null ? String(job.id) : "";
+        lines.push(id ? `${row.hostname}: queued ${id.slice(0, 8)}` : `${row.hostname}: queued`);
+      } catch (e) {
+        failed = true;
+        lines.push(`${row.hostname}: ${e.message}`);
+      }
+    }
+    if (skipped.length) lines.push(`Left alone: ${skipped.map((row) => row.hostname).join(", ")}`);
+    if (msg) msg.textContent = lines.join(" · ");
+    const n = lines.filter((line) => line.includes(": queued")).length;
+    toast(failed ? "Some servers were not queued" : `Queued ${n} server${n === 1 ? "" : "s"}`, failed ? "bad" : "ok");
+  } finally {
+    gateBecome();
+  }
+}
+
 export async function loadServersCard(envId) {
   const tbody = document.getElementById("srv-tbody");
   if (!tbody) return;
+  resetBecome();
   if (envId !== serversLoadedEnvId) {
     if (vrackPollTimer) {
       clearTimeout(vrackPollTimer);
@@ -767,29 +1532,68 @@ export async function loadServersCard(envId) {
   discovered.innerHTML = "";
   if (!envId) {
     msg.textContent = "";
-    tbody.innerHTML = `<tr><td colspan="6" class="muted">Select an environment.</td></tr>`;
+    renderBmcWall("", [], "Select an environment.");
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">Select an environment.</td></tr>`;
     return;
   }
   msg.textContent = "Loading…";
 
   let data;
+  const bootByName = new Map();
+  const clusterIps = new Set();
+  let bmNodes = [];
+  let metalPath = "";
   try {
-    data = await api(`/api/v1/environments/${encodeURIComponent(envId)}/servers`);
+    const [serversRes, bmRes, k8sRes, pathName] = await Promise.all([
+      api(`/api/v1/environments/${encodeURIComponent(envId)}/servers`),
+      api(`/api/v1/environments/${encodeURIComponent(envId)}/baremetal`).catch(() => null),
+      api(`/api/v1/environments/${encodeURIComponent(envId)}/k8s/nodes`).catch(() => null),
+      fetchMetalPath(api, envId),
+    ]);
+    metalPath = pathName;
+    data = serversRes;
+    bmNodes = (bmRes && bmRes.nodes) || [];
+    for (const n of bmNodes) {
+      if (n && n.name) bootByName.set(String(n.name), n);
+    }
+    for (const n of (k8sRes && k8sRes.nodes) || []) {
+      const ip = String((n && n.internal_ip) || "");
+      if (ip && String((n && n.status) || "").toLowerCase() === "ready") clusterIps.add(ip);
+    }
   } catch (e) {
     msg.textContent = "";
-    tbody.innerHTML = `<tr><td colspan="6" class="muted">Unavailable</td></tr>`;
+    renderBmcWall(envId, [], "BMC list unavailable");
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">Unavailable</td></tr>`;
     err.innerHTML = `<div class="error">${esc(e.message)}</div>`;
     return;
   }
+  renderBmcWall(envId, bmNodes);
 
   // Contract is an object envelope ({servers, ovh_bound, ...}); tolerate a bare array.
   const servers = Array.isArray(data) ? data : data && Array.isArray(data.servers) ? data.servers : [];
   const ovhBound = !!(data && !Array.isArray(data) && data.ovh_bound);
+  const title = document.getElementById("srv-title");
+  const kicker = document.getElementById("srv-kicker");
+  const hint = document.getElementById("srv-hint");
+  if (title) title.textContent = ovhBound ? "OVH infrastructure" : "Metal hosts";
+  if (kicker) {
+    kicker.textContent = ovhBound
+      ? "Dedicated · vRack · private fabric"
+      : "BMC, NICs, and the boxes in this environment";
+  }
+  if (hint) {
+    hint.textContent = ovhBound
+      ? "Dedicated servers use a public NIC for management and a private NIC on the vRack. Roles here are the saved cluster plan."
+      : "Reinstall keeps the OS already on that row. Choose Ubuntu or Talos beside it to install the other one. A role only saves the cluster plan.";
+  }
+  const pathLine = document.getElementById("srv-path");
+  if (pathLine) pathLine.textContent = metalPathSentence(metalPath);
+  paintPathSwitch(metalPath);
   msg.textContent = servers.length ? `${servers.length} server(s)` : "No servers in inventory yet.";
   const ovhBanner = document.getElementById("srv-ovh-banner");
   if (ovhBanner) {
     ovhBanner.innerHTML = ovhBound
-      ? `<div class="hint-row" style="color:var(--ok,#4caf50)">OVH environment — dedicated servers from the bound account. Talos/Kubernetes/Genestack use the <strong>private NIC</strong> (vRack). The public NIC stays up but the host firewall default-denies the internet edge.</div>`
+      ? `<div class="hint-row" style="color:var(--ok,#4caf50)">OVH environment — dedicated servers from the bound account. ${metalPath === "kubespray" ? "Kubespray" : "Talos"}, Kubernetes, and Genestack use the <strong>private NIC</strong> (vRack). The public NIC stays up but the host firewall default-denies the internet edge.</div>`
       : "";
   }
   const vrackBox = document.getElementById("srv-vrack");
@@ -828,6 +1632,15 @@ export async function loadServersCard(envId) {
   }
 
   const invRows = servers.filter((s) => s && typeof s === "object" && s.assigned);
+  becomeTargets = invRows.map((s) => {
+    const boot = bootByName.get(String(s.hostname || "")) || {};
+    const ip = String((s && (s.private_ip || s.ip)) || "");
+    return {
+      hostname: String(s.hostname || "?"),
+      nodeId: boot.id ? String(boot.id) : "",
+      inCluster: !!(ip && clusterIps.has(ip)),
+    };
+  });
   if (ovhBound) {
     const fabric = Object.assign({}, data.fabric || {}, data.ovh || {});
     if (!Array.isArray(fabric.servers) || !fabric.servers.length) {
@@ -864,13 +1677,20 @@ export async function loadServersCard(envId) {
               (s.public_ip ? `<div style="font-size:.7rem">${esc(s.public_ip)} pub</div>` : "") +
               (s.private_mac ? `<div style="font-size:.7rem">${esc(s.private_mac)}</div>` : "")
             : esc(s.ip || "—");
+          const boot = bootByName.get(String(s.hostname || "")) || {};
+          const ilo = boot.bmc_host
+            ? `<div style="font-size:.7rem;color:var(--fg-muted,#b7d4c4)">iLO ${esc(boot.bmc_host)}</div>`
+            : "";
           return `<tr data-row="${i}">
-            <td><strong>${esc(s.hostname || "?")}</strong>${sub}</td>
+            <td><input type="checkbox" class="srv-pick" data-srv-pick="${i}" aria-label="Select ${esc(s.hostname || "host")}"></td>
+            <td><strong>${esc(s.hostname || "?")}</strong>${sub}${ilo}</td>
             <td class="muted">${ipCell}</td>
             <td class="muted">${esc(s.ssh_user || "—")}</td>
             <td><span class="pill ${sourceCls}">${esc(source)}</span></td>
-            <td><div class="row" style="gap:0">${roleBoxes("inv", i, roles)}</div></td>
-            <td style="white-space:nowrap">
+            <td>${hostOsLabel(s, bootByName, clusterIps, metalPath)}</td>
+            <td>${roleEditor("inv", i, roles)}</td>
+            <td class="srv-os-cell">
+              ${osControlHtml(i, s, bootByName, becomeTargets[i], metalPath)}
               <button class="secondary btn-sm" type="button" data-save="${i}" ${gate(canRun(), "operator")}>Save</button>
               ${removeBtn}
               <span class="muted" style="font-size:.75rem" data-save-msg="${i}"></span>
@@ -878,14 +1698,43 @@ export async function loadServersCard(envId) {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="6" class="muted">No servers in inventory yet.</td></tr>`;
+    : `<tr><td colspan="8" class="muted">No servers in inventory yet.</td></tr>`;
 
+  tbody.querySelectorAll("input[data-os]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const cell = input.closest(".srv-os-cell");
+      const btn = cell && cell.querySelector("button[data-reconfigure]");
+      if (cell) {
+        cell.querySelectorAll(".srv-os-choice").forEach((label) => {
+          const radio = label.querySelector("input");
+          label.classList.toggle("on", !!(radio && radio.checked));
+        });
+      }
+      if (btn) paintOsButton(btn, input.value);
+    });
+  });
+  tbody.querySelectorAll("button[data-reconfigure]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const row = becomeTargets[Number(btn.dataset.reconfigure)];
+      const picked = btn.parentElement && btn.parentElement.querySelector("input[data-os]:checked");
+      const choice = picked ? picked.value : "";
+      if (!row || !choice || btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await reconfigureHost(envId, row, choice, btn.dataset.installed || "");
+      } finally {
+        if (btn.isConnected) paintOsButton(btn, choice);
+      }
+    })
+  );
   tbody.querySelectorAll("button[data-save]").forEach((btn) =>
     btn.addEventListener("click", () => saveInventoryRow(envId, invRows[Number(btn.dataset.save)], btn.dataset.save))
   );
   tbody.querySelectorAll("button[data-remove]").forEach((btn) =>
     btn.addEventListener("click", () => removeRow(envId, invRows[Number(btn.dataset.remove)]))
   );
+  syncBecomeBar();
+  gateBecome();
 
   // Always render the Add host form at top of discovered section.
   // Compute current cluster status across all assigned hosts.
@@ -922,6 +1771,7 @@ export async function loadServersCard(envId) {
           <span style="margin-left:.3rem">View on</span>
           <button type="button" data-srv-view-key style="background:none;border:none;color:var(--accent,#4a9eff);cursor:pointer;font-size:.72rem;padding:0">Config tab → SSH Keys</button>
         </div>
+        <p class="muted" style="margin:.35rem 0 .2rem">Saving a host records it. It does not boot Talos or Ubuntu.</p>
         <div style="margin-top:.35rem;font-size:.78rem;color:var(--fg-muted,#888)">Topology</div>
         <div id="srv-topo-select" style="margin-top:.3rem"></div>
         <div id="srv-add-roles" style="margin-top:.5rem;display:none">
@@ -964,7 +1814,7 @@ export async function loadServersCard(envId) {
     </p>
     <div id="srv-ovh-box"></div>`;
   if (ovhBound && !invRows.length) ovhSection.open = true;
-  document.getElementById("srv-add-host").appendChild(ovhSection);
+  if (ovhBound) document.getElementById("srv-add-host").appendChild(ovhSection);
   ovhSection.addEventListener("toggle", async () => {
     if (!ovhSection.open) return;
     const box = document.getElementById("srv-ovh-box");
@@ -1025,8 +1875,9 @@ export async function loadServersCard(envId) {
     })();
   }
 
-  discovered.innerHTML = `
-      <p class="muted" style="margin:.3rem 0">Import Rise boxes from OVH above, or add a host by hostname and IP. Talos is installed from the network by this console.</p>`;
+  discovered.innerHTML = ovhBound
+    ? `<p class="muted" style="margin:.3rem 0">Import dedicated servers from the bound OVH account, or add a host by hostname and IP.</p>`
+    : `<p class="muted" style="margin:.3rem 0">Add a host by hostname and IP. This only saves the host. It does not boot it.</p>`;
 }
 
 async function saveInventoryRow(envId, server, rowIdx) {

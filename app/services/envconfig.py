@@ -1170,6 +1170,58 @@ def remove_server(
     return put_version(db, env, _dump(doc), actor)
 
 
+def clear_server_roles(
+    db: Session,
+    env: Environment,
+    actor: str | None,
+    *,
+    hostnames: list[str],
+) -> tuple[EnvConfigVersion | None, list[str]]:
+    """Drop the saved cluster plan on existing hosts.
+
+    This is how a host stops being a Talos plan. The provider, the adopt
+    mark, addresses, and next boot stay as they are. A host with no roles
+    does not write a new config version. Does not commit.
+    """
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for raw in hostnames or []:
+        name = str(raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        wanted.append(name)
+    if not wanted:
+        raise ConfigValidationError("hostnames is required")
+    current = get_current(db, env)
+    if current is None:
+        raise ConfigValidationError("No saved inventory for this environment")
+    doc: dict[str, Any] = dict(current[0])
+    servers = dict(doc.get("servers") or {})
+    present = [name for name in wanted if isinstance(servers.get(name), dict)]
+    missing = [name for name in wanted if name not in present]
+    if not present:
+        raise ConfigValidationError(
+            "None of those hostnames are in this environment's inventory"
+        )
+    warnings = (
+        [f"left alone, not in inventory: {', '.join(missing)}"] if missing else []
+    )
+    changed = False
+    for name in present:
+        entry = dict(servers[name])
+        roles = list(entry.get("roles") or [])
+        if roles:
+            entry["roles"] = []
+            changed = True
+        servers[name] = entry
+    if not changed:
+        return current[1], warnings
+    doc["servers"] = servers
+    row, parse_warnings = put_version(db, env, _dump(doc), actor)
+    return row, warnings + parse_warnings
+
+
 def set_provider(
     db: Session,
     env: Environment,

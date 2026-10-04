@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="Genestack Console">
+  <defs>
+    <linearGradient id="gs-top" x1="6" y1="6" x2="58" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e7ffc4"/>
+      <stop offset="0.42" stop-color="#6eef86"/>
+      <stop offset="1" stop-color="#1c9a44"/>
+    </linearGradient>
+    <linearGradient id="gs-mid" x1="6" y1="18" x2="58" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8df06a"/>
+      <stop offset="1" stop-color="#127a34"/>
+    </linearGradient>
+    <linearGradient id="gs-bot" x1="8" y1="30" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34c759"/>
+      <stop offset="1" stop-color="#0b5c28"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#gs-bot)" d="M6 42.2 32 30.2 58 42.2v10.2L32 62.6 6 52.4Z"/>
+  <path fill="#eafaef" fill-opacity=".22" d="M6 42.2 32 30.2 58 42.2 32 37.6Z"/>
+  <path fill="url(#gs-mid)" d="M6 30.4 32 18.4 58 30.4v10.2L32 50.8 6 40.6Z"/>
+  <path fill="#04130a" fill-opacity=".2" d="M6 40.6 32 50.8 58 40.6v-2.6L32 47.6 6 38Z"/>
+  <path fill="url(#gs-top)" d="M6 18.6 32 6.6 58 18.6v10.2L32 39 6 28.8Z"/>
+  <path fill="#f7fff4" fill-opacity=".5" d="M6 18.6 32 6.6 58 18.6 32 14.2Z"/>
+  <path fill="#04130a" fill-opacity=".62" d="M24.5 20.4h15v3.1h-15z"/>
+</svg>

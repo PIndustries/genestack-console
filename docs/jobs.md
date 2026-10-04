@@ -101,6 +101,17 @@ These talk to the server and to the boot service. The management port is the BMC
 
 `node_actions.py` is one file because those five jobs share one body. Everything else is one operation per file.
 
+## Hosts
+
+These install an operating system, or record a cluster that is already there. Talos stays on the bare-metal jobs above.
+
+| Id | File | What it does |
+| --- | --- | --- |
+| `hosts.ubuntu.prepare` | `app/modules/hosts/ubuntu.py` | Writes one machine's Ubuntu autoinstall seed. It does not boot the machine. |
+| `hosts.ubuntu.bringup` | `app/modules/hosts/ubuntu.py` | Brings the named hosts up as Ubuntu and waits until they answer. A host that already answers stays on disk. A host that does not answer reboots into the installer. A host still on Talos is left alone unless it is named to leave. This does not install OpenStack or Kubernetes. On `main`. Not in the `v2026.10.03` binary. |
+| `hosts.microk8s.install` | `app/modules/hosts/microk8s.py` | Installs the MicroK8s snap over SSH when the job is not a dry run. |
+| `hosts.kubespray.adopt` | `app/modules/hosts/kubespray.py` | Records a Kubernetes cluster that already exists. It does not run Ansible. |
+
 ## Ansible, OpenStack, and the platform
 
 | Id | File | What it does |

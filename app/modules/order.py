@@ -74,6 +74,7 @@ CATALOG_ORDER = (
     "k8s.apply",
     "app.deploy",
     "hosts.ubuntu.prepare",
+    "hosts.ubuntu.bringup",
     "hosts.microk8s.install",
     "hosts.kubespray.adopt",
 )

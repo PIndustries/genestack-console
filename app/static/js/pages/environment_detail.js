@@ -3,7 +3,7 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canRun, isDemoEnv } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard } from "./environment_servers.js?v=slot2";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard } from "./environment_servers.js?v=ls18";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
