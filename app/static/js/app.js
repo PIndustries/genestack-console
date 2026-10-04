@@ -3,15 +3,15 @@ import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clea
 import { store, loadEnvs } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
-import * as fleet from "./pages/fleet.js";
+import * as fleet from "./pages/fleet.js?v=ls20";
 import * as hosts from "./pages/hosts.js";
 import * as environments from "./pages/environments.js";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls19";
-import * as envWizard from "./pages/env_wizard.js?v=ls19";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls20";
+import * as envWizard from "./pages/env_wizard.js?v=ls20";
 import * as admin from "./pages/admin.js";
 
 const PAGES = { fleet, hosts, environments, hardware, activity, operations, observe, environment_detail: environmentDetail, setup: envWizard, admin };
@@ -115,7 +115,11 @@ async function refreshTopbar() {
     const hl = $("user-health-line");
     const dl = $("user-dryrun-line");
     if (hl) hl.textContent = h.status === "ok" ? "Console healthy" : `Console ${h.status || "unknown"}`;
-    if (dl) dl.textContent = h.dry_run ? "Dry-run is on — jobs rehearse only" : "Live operations enabled";
+    if (dl) {
+      dl.textContent = h.dry_run
+        ? "Console default is a dry run. Each environment applies from its own switch."
+        : "Console default applies. An environment can still look around only.";
+    }
     setVersionLines(versionText(h));
   } catch {
     setPill($("health-pill"), "health: unreachable", "bad");
@@ -208,20 +212,20 @@ function maybeShowWelcome() {
   overlay.innerHTML = `
     <div class="gs-welcome-card" role="dialog" aria-modal="true" aria-label="Welcome to the Genestack console">
       <h2>Welcome to the Genestack console</h2>
-      <p class="muted">Three steps to a Genestack cloud:</p>
+      <p class="muted">Three steps. This console does the install.</p>
       <div class="gs-welcome-panels">
         <div class="gs-welcome-panel">
           <div class="gs-welcome-num">1</div>
-          <p><strong>Sign in (done)</strong> → Guided setup</p>
+          <p><strong>This machine stays outside the cluster.</strong> The cloud is other machines.</p>
           <a href="#/setup" data-gs-welcome-link>Guided setup →</a>
         </div>
         <div class="gs-welcome-panel">
           <div class="gs-welcome-num">2</div>
-          <p><strong>Bring metal</strong> — Terraform (AWS, Azure, GCP, Rackspace), OVH API, PXE, SSH, or BMC</p>
+          <p><strong>Add those machines by hostname and IP.</strong> Boot a Talos ISO on them yourself, or use Ubuntu that is already installed. A management port is optional.</p>
         </div>
         <div class="gs-welcome-panel">
           <div class="gs-welcome-num">3</div>
-          <p><strong>Deploy</strong> Talos, then Kubernetes, then OpenStack from the same hub</p>
+          <p><strong>Talos is already installed</strong>, or <strong>Already have an OS</strong>. Then Deploy from this console. That Deploy is OpenStack.</p>
         </div>
       </div>
       <div class="gs-welcome-actions">

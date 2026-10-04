@@ -1349,7 +1349,7 @@ def get_provider(db: Session, env: Environment) -> dict[str, Any]:
     deploy = mask_document({"deploy": doc.get("deploy") or {}}).get("deploy") or {}
     ovh_account_id = getattr(env, "ovh_account_id", None) or None
     ovh = doc.get("ovh") if isinstance(doc.get("ovh"), dict) else {}
-    from app.services.talos import DEFAULT_TALOS_IMAGE_URL
+    from app.services.talos import DEFAULT_TALOS_IMAGE_URL, DEFAULT_TALOS_ISO_URL
 
     talos = dict(doc.get("talos") or {}) if isinstance(doc.get("talos"), dict) else {}
     return {
@@ -1362,6 +1362,7 @@ def get_provider(db: Session, env: Environment) -> dict[str, Any]:
         "infra": "ovh" if ovh_account_id else None,
         "ovh_account_id": ovh_account_id,
         "default_image_url": DEFAULT_TALOS_IMAGE_URL,
+        "default_iso_url": DEFAULT_TALOS_ISO_URL,
     }
 
 

@@ -84,8 +84,8 @@ const HARDWARE_SOURCES = new Set(["terraform", "pxe", "bmc"]);
 
 function metalSource() {
   const s = state.serverSource;
-  if (s === "manual") return "static";
-  return METAL_SOURCES.some((o) => o.id === s) ? s : "";
+  if (s === "manual" || !s) return "static";
+  return METAL_SOURCES.some((o) => o.id === s) ? s : "static";
 }
 
 function metalSourceLabel(src) {
@@ -309,13 +309,13 @@ function step2Html() {
   const isTalos = provider !== "kubespray";
   const sel = (p) => `id="wz-prov-${p}" type="radio" name="wz-provider" value="${p}"${provider === p ? " checked" : ""}`;
   return `
-  <p class="wz-lead muted">Talos is the production OS for the plane. The console bootstraps with talosctl; you can change this later on the environment page.</p>
+  <p class="wz-lead muted">Talos is the operating system this console prefers. Machines that are already waiting from an ISO get a config from here. The console does not power them. Empty machines with a management port can still be network-booted later.</p>
   <div class="wz-choice">
     <label class="wz-radio${isTalos ? " selected" : ""}" data-radio="talos">
       <input ${sel("talos")} />
       <div>
         <strong>Talos <span class="pill ok" style="font-size:.65rem;vertical-align:middle">recommended</span></strong>
-        <div class="hint muted">Immutable nodes; console bootstraps with talosctl. Deploy will BYOI boxes that are not yet on Talos.</div>
+        <div class="hint muted">The console applies Talos with talosctl. An ISO you already booted is Talos is already installed. Deploy is OpenStack after Kubernetes is up.</div>
       </div>
     </label>
   </div>
@@ -358,11 +358,11 @@ function talosFieldsHtml() {
     </label>
     <label class="field"><span>Install disk</span>
       <input id="wz-talos-disk" type="text" value="${esc(v("talos_disk", "/dev/sda"))}" placeholder="/dev/sda" autocomplete="off" />
-      <div class="hint muted">Disk Talos installs onto on each node. Confirm the device name on the box.</div>
+      <div class="hint muted">On VMware SCSI this is usually /dev/sda. Confirm the name on the guest.</div>
     </label>
     <label class="field"><span>Image URL</span>
-      <input id="wz-talos-image" type="text" value="${esc(v("talos_image"))}" placeholder="(console factory default)" autocomplete="off" />
-      <div class="hint muted">Leave blank to use the console factory default Talos image.</div>
+      <input id="wz-talos-image" type="text" value="${esc(v("talos_image"))}" placeholder="(leave blank)" autocomplete="off" />
+      <div class="hint muted" id="wz-talos-iso">Leave this blank. Boot each guest from the Talos ISO, then return to this console.</div>
     </label>
   </div>`;
 }
@@ -380,7 +380,7 @@ function step3Html() {
     </label>`;
   }).join("");
   return `
-  <p class="wz-lead muted">A hostname and IP are enough. A BMC is optional. Terraform, OVH, PXE, SSH, and BMC are all valid.</p>
+  <p class="wz-lead muted">Start with a hostname and an IP. That covers a VMware guest and any machine with no management port. Boot a Talos ISO on it yourself, or use Ubuntu that is already installed. Terraform, OVH, PXE, and a management port are optional.</p>
   <div class="wz-choice wz-source-grid">${radios}</div>
   <div id="wz-src-panel" class="wz-src-panel">${metalPanelHtml()}</div>`;
 }
@@ -523,10 +523,17 @@ function step4Html() {
   const detailUrl = state.envId
     ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=workflow"
     : "#/environments";
+  const hostsUrl = state.envId
+    ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=platform&ptab=ovh"
+    : "#/environments";
+  const openHosts = metalSource() === "static";
+  const openUrl = openHosts ? hostsUrl : detailUrl;
+  const openLabel = openHosts ? "Open Hosts" : "Open guided deploy →";
 
   return `
   <div class="wz-success" style="text-align:left">
     <h3>✓ Environment <strong>'${esc(envName)}'</strong> is ready</h3>
+    <div class="hint-row" id="wz-apply">This environment only logs until you apply it. The switch is on the environment. No file edit and no restart.</div>
     ${HARDWARE_SOURCES.has(src) && !servers.length
       ? '<p class="muted" style="font-size:.85rem;margin:.3rem 0">Metal is added from Hardware after this step.</p>'
       : requiredMet
@@ -534,16 +541,46 @@ function step4Html() {
         : '<p style="color:var(--warn);font-size:.85rem;margin:.3rem 0">⚠ Some required roles not yet assigned — add servers from the detail page.</p>'}
     <table class="wz-review"><tbody>${tableRows}</tbody></table>
     <div class="row" style="margin-top:1.2rem">
-      <a class="hero-cta" href="${esc(detailUrl)}">Open guided deploy →</a>
+      <button class="btn-sm" type="button" id="wz-apply-btn" ${gate(canRun(), "operator")}>Apply on this environment</button>
+      <a class="hero-cta" href="${esc(openUrl)}">${esc(openLabel)}</a>
       <button class="hero-cta alt" type="button" id="wz-create-another">Create another</button>
     </div>
   </div>`;
+}
+
+function wireSummaryApply() {
+  const btn = document.getElementById("wz-apply-btn");
+  const slot = document.getElementById("wz-apply");
+  if (!btn || !state.envId) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/v1/environments/${encodeURIComponent(state.envId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ dry_run: false }),
+      });
+      if (slot) {
+        slot.textContent = "This environment applies. Jobs from here change the machines. Open Hosts and continue in this console.";
+      }
+      btn.textContent = "This environment applies";
+      toast("This environment applies", "ok");
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message || "Could not apply this environment", "bad");
+    }
+  });
 }
 
 function metalNextHint(src, provider) {
   if (src === "terraform") return "Save Terraform keys on Hardware → Providers, then plan/apply from there.";
   if (src === "pxe") return "Claim PXE nodes on Hardware → Inventory, then continue Workflow.";
   if (src === "bmc") return "Register BMCs on Hardware → Bare metal, then continue Workflow.";
+  if (src === "static" && provider === "talos") {
+    return "Boot the Talos ISO on each guest. Then Hosts, Talos is already installed. The console does not power them. After Kubernetes is up, Settings, Config, Deploy, start stage infrastructure.";
+  }
+  if (src === "static") {
+    return "Hosts, Already have an OS, records them. Deploy from this console installs Kubernetes and OpenStack over SSH.";
+  }
   if (provider === "talos") return "Next: open Workflow, then Deploy. Deploy wipes boxes that are not yet Talos.";
   return null;
 }
@@ -696,6 +733,7 @@ function renderStep() {
   if (state.step === 1) wireConnectStep();
   if (state.step === 2) wireDeploymentStep();
   if (state.step === 3) wireServersStep();
+  if (state.step === 4) wireSummaryApply();
 
   const nav = document.getElementById("wz-nav");
   const isSummary = state.step === 4;
@@ -824,8 +862,25 @@ function wireDeploymentStep() {
       const adv = document.getElementById("wz-advanced-prov");
       if (adv && !isTalos) adv.open = true;
       saveState();
+      if (isTalos) fillTalosIso();
     });
   });
+  fillTalosIso();
+}
+
+async function fillTalosIso() {
+  const slot = document.getElementById("wz-talos-iso");
+  if (!slot || !state.envId) return;
+  try {
+    const prov = await api(
+      `/api/v1/environments/${encodeURIComponent(state.envId)}/config/provider`
+    );
+    const iso = prov && prov.default_iso_url;
+    if (!iso) return;
+    slot.innerHTML = `Leave this blank. In VMware, boot each guest from <a href="${esc(iso)}" target="_blank" rel="noopener">${esc(iso)}</a>. Then return here. A SCSI disk is usually /dev/sda.`;
+  } catch {
+    /* The blank hint stays. The first-cluster page has the same ISO. */
+  }
 }
 
 // ---------- servers step wiring ----------

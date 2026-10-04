@@ -111,8 +111,10 @@ server:
   port: 8090
 ```
 
-Then `sudo systemctl restart genestack-console`. Same file for dry_run, keys,
-PXE pool, WireGuard overlay, and everything else operators change on the box.
+Then `sudo systemctl restart genestack-console`. The same file holds keys,
+the PXE pool, and the WireGuard overlay. The console-wide dry run lives
+there too. An environment applies from the bar on that environment. That
+switch does not edit this file and does not restart a service.
 
 ## When the deploy host is L2, and when you add an agent
 

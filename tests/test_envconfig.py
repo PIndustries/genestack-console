@@ -1568,6 +1568,8 @@ def test_get_provider_defaults_without_version(db_session):
     assert got["infra"] is None
     assert got["ovh_account_id"] is None
     assert got["default_image_url"].startswith("https://factory.talos.dev/image/")
+    assert got["default_iso_url"].endswith("/metal-amd64.iso")
+    assert "v1.13.9" in got["default_iso_url"]
     # No version was created
     assert envconfig_service.get_current(db, env) is None
 

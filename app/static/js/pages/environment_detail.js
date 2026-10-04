@@ -1,7 +1,7 @@
 // pages/environment_detail.js — tabbed admin layout.
 // Overview is the live environment tree (internal tab id: workflow).
 import { api, esc, fmtTime, toast } from "../api.js";
-import { store, loadEnvs, envOptionsHtml, canRun, isDemoEnv } from "../store.js";
+import { store, loadEnvs, envOptionsHtml, canRun, gate, isDemoEnv } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
 import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard } from "./environment_servers.js?v=ls19";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
@@ -319,6 +319,7 @@ export async function render(root, { param, query } = {}) {
         ? '<span class="muted">Overview loading…</span>'
         : '<span class="muted">Select an environment.</span>'
     }</div>
+    <div id="env-apply" class="hint-row" hidden></div>
     <div class="tab-bar">
       <button class="tab active" data-tab="workflow">Overview</button>
       <button class="tab" data-tab="platform">Platform</button>
@@ -550,6 +551,7 @@ export async function render(root, { param, query } = {}) {
     history.replaceState(null, "", envTabHash(activeTab || "workflow", activePtab));
     window.dispatchEvent(new CustomEvent("gsc-nav-sync"));
     removePageLoading();
+    loadEnvApply();
     if (activeTab === "settings" || activeTab === "expert") {
       loadDescriptor().catch(() => {});
     }
@@ -584,6 +586,61 @@ export function destroy() {
   destroyObserveCard();
   closeOverlay();
   tabLoads.clear();
+}
+
+async function loadEnvApply() {
+  const el = document.getElementById("env-apply");
+  if (!el || !envId) return;
+  let env;
+  try {
+    env = await api(`/api/v1/environments/${encodeURIComponent(envId)}`);
+  } catch {
+    return;
+  }
+  paintEnvApply(el, env);
+}
+
+async function paintEnvApply(el, env) {
+  const inherited = env.dry_run == null;
+  let logs;
+  if (!inherited) {
+    logs = env.dry_run === true;
+  } else {
+    let health = store.health;
+    if (!health) {
+      try {
+        health = await api("/health");
+        store.health = health;
+      } catch {
+        health = null;
+      }
+    }
+    logs = health ? !!health.dry_run : true;
+  }
+  const text = logs
+    ? "This environment only logs. Jobs do not change the machines."
+      + (inherited ? " It follows the console default. Apply here when you mean the jobs to run." : "")
+    : "This environment applies. Jobs from here change the machines.";
+  const label = logs ? "Apply on this environment" : "Look around only";
+  const nextDry = !logs;
+  el.hidden = false;
+  el.innerHTML = `<span>${esc(text)}</span> <button class="${logs ? "btn-sm" : "secondary btn-sm"}" type="button" id="env-apply-btn" ${gate(canRun(), "operator")}>${esc(label)}</button>`;
+  const btn = document.getElementById("env-apply-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const updated = await api(`/api/v1/environments/${encodeURIComponent(envId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ dry_run: nextDry }),
+      });
+      toast(nextDry ? "This environment only logs" : "This environment applies", "ok");
+      paintEnvApply(el, updated);
+    } catch (e) {
+      toast(e.message || "Could not update this environment", "bad");
+      btn.disabled = false;
+    }
+  });
 }
 
 function syncDemoBanner() {

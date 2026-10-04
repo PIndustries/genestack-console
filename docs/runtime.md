@@ -29,7 +29,7 @@ A job that changes an environment is marked mutating in the catalog. A second mu
 
 The worker has a second check. If a queued mutating job's environment already has a running mutating job, the worker leaves it queued and tries again on a later pass. That is the backstop. The API has already refused a second submission.
 
-A dry run logs the command and does not apply it. `dry_run` in `config.yaml` is the default. An environment can override it. A job can ask for it. A fresh config starts with dry run on, so the first deploy you did not mean to run is a log.
+A dry run logs the command and does not apply it. `dry_run` in `config.yaml` is the console-wide default. Each environment has its own switch on the bar above its tabs: Apply on this environment, or Look around only. That switch does not edit the file and does not restart a service. A job can still ask for a dry run. A fresh config starts with dry run on, so the first deploy you did not mean to run is a log.
 
 Secret parameters are not written in the job row in the clear. The catalog marks them. The stored params show `***`. The real value is Fernet-encrypted in `secret_params` and merged back only in the worker, in memory, while the function runs.
 
@@ -181,7 +181,7 @@ One file. `python -m app.cli make-config` prints a new one, with a generated `se
 | `auth.session_ttl_hours` | 12 | Bearer token life for one login. |
 | `auth.refresh_ttl_hours` | 168 | How long that login's refresh token can mint a new bearer. A second login has its own. |
 | `auth.dev_auto_login` | false | Every request is a platform admin, with no password. Leave it off on a machine that is not your laptop. |
-| `dry_run` | true | Jobs log commands and do not apply them. |
+| `dry_run` | true | Console-wide default. Jobs log commands and do not apply them until that environment applies from its own bar. |
 | `database_url` | `sqlite:///./data/console.db` | Postgres when you set a Postgres URL. |
 | `data_dir` | `./data` | Database, PXE files, and the backup live under here. |
 | `genestack.root` | empty, then auto-detect | The checkout. `/opt/genestack` when you followed the install chapter. |

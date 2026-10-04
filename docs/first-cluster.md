@@ -16,7 +16,7 @@ ssh -L 8080:127.0.0.1:8080 <deploy-host>
 
 Sign in as `admin`. The password is in `/opt/genestack-console/ADMIN_CREDENTIALS.txt`. The file mode is `0600`.
 
-The first screen is Guided setup. It creates one environment and points it at two directories on the deploy host.
+The first screen is this console. It says the deploy host stays outside the cluster, the other machines are added by hostname and IP, and Deploy is how OpenStack gets installed. Guided setup creates one environment and points it at two directories on the deploy host.
 
 | Path | What it is |
 | --- | --- |
@@ -25,13 +25,33 @@ The first screen is Guided setup. It creates one environment and points it at tw
 
 An environment is one cloud: a lab, one rack, or one site. Jobs and passwords for that cloud stay inside it.
 
-A fresh install sets `dry_run: true` in `/opt/genestack-console/config.yaml`. A dry run logs what a job would do and does not change servers, and it does not store a kubeconfig. Set `dry_run: false` when you mean the job to apply, then restart both units so the worker reads the file:
+A fresh install leaves the console in a dry run. A dry run logs what a job would do and does not change servers, and it does not store a kubeconfig. The bar on the environment says so. **Apply on this environment** turns that one environment live. Jobs from then on change the machines. **Look around only** puts it back to a log. That switch is in the console. It does not edit a file and it does not restart a service. Leave the environment logging while you are only looking around.
+
+## A lab of virtual machines
+
+Use this when you have no physical servers. VMware ESXi is a supported start. Those guests do not have an iLO, and they do not need one. The console does the install after the guests are booted. The one step outside the console is attaching the ISO in VMware, because a guest has no management port for the console to insert it.
+
+The console is one Ubuntu virtual machine:
 
 ```bash
-sudo systemctl restart genestack-console genestack-console-worker
+curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
-Leave dry run on while you are only looking around.
+Run that command again on a machine that already has the console. It follows the latest release and leaves the settings and the database in place.
+
+The console VM is not the cluster. Add three more guests. One is the control plane. The other two are workers. A starting lab is 4 vCPU, 16 GiB of memory, and an 80 GB disk on each guest. Talos can boot on less. Deploy is where a small guest runs out of room. The console does not refuse a small guest.
+
+Boot those guests from this Talos ISO. It is the same image the console applies. Leave the image field in Guided setup blank so the console keeps that match. Guided setup shows this same address.
+
+```text
+https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64.iso
+```
+
+On VMware SCSI the install disk is usually `/dev/sda`. Confirm the name on the guest before you leave it in Guided setup.
+
+Then follow Talos is already installed, below. Ubuntu that is already on the guests follows Ubuntu is already installed. Both start from a hostname and an IP, and both finish in this console.
+
+Network boot from the console is optional in a lab, and it is easy to get wrong. The guests and the console have to be on a network where this console is the only DHCP server. Set each guest to boot from the network, and power it yourself from VMware. If the hypervisor is also answering DHCP, the guest will not boot from the console.
 
 ## You already have a Genestack cluster
 
@@ -58,7 +78,7 @@ Use this when Talos is already running and waiting for a config. A Talos ISO doe
 2. Servers: Static IPs / SSH. Enter each hostname, IP, and roles. One machine needs the control plane role. Every other saved machine is a worker.
 3. On the environment, Platform, then Hosts. The path above the table stays Talos. Choosing the path does not install an operating system.
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
-5. Set `dry_run: false` and restart the two units before you mean that job to apply. A dry run logs the commands and does not send them.
+5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.
 
 Kubernetes is up after that job succeeds. OpenStack is Deploy, on Settings, then Config. Open Start stage and choose `infrastructure`, so Deploy does not run the Talos bootstrap a second time. A second bootstrap stops when the talos directory under the inventory path, usually `/etc/genestack/talos`, already holds `secrets.yaml` or `talosconfig`. Remove those files only when you mean to create a new cluster identity.
 
@@ -70,7 +90,7 @@ Use this for a group of servers that already have Ubuntu, including guests you i
 2. On Hosts, the path above the table is Kubespray. Choosing the path does not reboot anything.
 3. Select the rows. Already have an OS. That records them. The row shows Kubespray recorded. It does not reboot them, install anything, or start a playbook. Clear that record removes the mark. Roles stay.
 4. Across the group you still want a Kubernetes control plane, etcd, OpenStack control, a worker, and storage. The add-host presets are those roles.
-5. Set `dry_run: false` and restart the two units when you want Deploy to run. Deploy uses SSH. It does not network-boot those machines.
+5. Apply on this environment when you want Deploy to run. Deploy uses SSH. It does not network-boot those machines. While the environment only logs, Deploy records the work and does not change the guests.
 
 A machine may stay a plain Ubuntu server. Install Ubuntu on a Hosts row is a different action. It puts Ubuntu on that one machine and waits until it answers. It does not install Kubernetes or OpenStack. A host that already answers stays on disk. A host that does not answer is network-booted, and that boot uses a management port when the machine has one.
 
@@ -84,27 +104,11 @@ L2 is recommended. L2 means the deploy host is on the same local network as the 
 
 In Guided setup, Servers can be BMC / Redfish or PXE. On Hosts, record the management port and the MAC address of the port on the install network. A MAC address is the hardware address of that network card.
 
-Settings, then Config. Change what you need. Save. Each save is a version. Set `dry_run: false` and restart the two units only when you are ready for the wipe. Deploy cluster asks you to confirm the wipe. It pushes the settings, network-boots Talos, then runs the Genestack pipeline: Kubernetes, then OpenStack. A server you did not select stays on its own disk. The log is Activity, then Jobs.
+Settings, then Config. Change what you need. Save. Each save is a version. Apply on this environment only when you are ready for the wipe. Deploy cluster asks you to confirm the wipe. It pushes the settings, network-boots Talos, then runs the Genestack pipeline: Kubernetes, then OpenStack. A server you did not select stays on its own disk. The log is Activity, then Jobs.
 
 Do not put the console's DHCP on a network other machines depend on.
 
 An ISO is rejected on this wipe path because an ISO does not wipe the disks. `baremetal.node.iso_boot` puts an ISO in the management-port virtual CD when the network card cannot PXE. That needs a management port. It is separate from booting a Talos ISO yourself and then choosing Talos is already installed.
-
-## A lab of virtual machines
-
-Use this when you have no physical servers. VMware ESXi is a supported start. Those guests do not have an iLO, and they do not need one.
-
-The console is one Ubuntu virtual machine:
-
-```bash
-curl -fsSL https://get.genestack.dev/console.sh | bash
-```
-
-The console VM is not the cluster. Add more guests for the cloud.
-
-Boot those guests from a Talos ISO, then follow Talos is already installed. Or install Ubuntu on them and follow Ubuntu is already installed. Both start from a hostname and an IP.
-
-Network boot from the console is optional in a lab, and it is easy to get wrong. The guests and the console have to be on a network where this console is the only DHCP server. Set each guest to boot from the network, and power it yourself from VMware. If the hypervisor is also answering DHCP, the guest will not boot from the console.
 
 ## Change the settings later
 
@@ -113,7 +117,7 @@ Settings, then Config, is one YAML document for the environment: the provider, t
 - Save stores a new version. Older versions stay in the menu. Switch back to current before you edit.
 - Render preview shows the files without writing them.
 - Push writes the current version into `/etc/genestack`. Deploy does this and then runs the install.
-- Deploy (dry-run) rehearses when you want a log without applying. The `dry_run` flag in `config.yaml` does the same for every job.
+- Deploy (dry-run) rehearses one Deploy. The bar on the environment is how that environment logs or applies. The console-wide default stays `dry_run` in `/opt/genestack-console/config.yaml`. You do not edit that file to install a cloud.
 
 Back up `/opt/genestack-console/config.yaml` and the console database together. Passwords in the database are encrypted with the key in that file. A copy of the database without the file cannot be decrypted.
 
