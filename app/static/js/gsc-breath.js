@@ -6,19 +6,19 @@
 
   function meadow(canvas, opts) {
     const ctx = canvas.getContext("2d", { alpha: true });
-    if (!ctx) return;
+    if (!ctx) return null;
     let w = 0;
     let h = 0;
     let dpr = 1;
 
     function resize() {
       const rect = canvas.getBoundingClientRect();
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      dpr = 1;
       w = Math.max(1, rect.width);
       h = Math.max(1, rect.height);
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
     resize();
@@ -48,21 +48,28 @@
           const py = (r + 0.5) * (h / rows) - y * opts.lift;
           const a = opts.alpha * (0.4 + 0.6 * (0.5 + 0.5 * wave));
           ctx.fillStyle = "rgba(" + GREEN[0] + "," + GREEN[1] + "," + GREEN[2] + "," + a.toFixed(3) + ")";
-          ctx.beginPath();
-          ctx.arc(x, py, opts.dot, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillRect(x, py, opts.dot, opts.dot);
         }
       }
-      requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+    return { frame: frame };
   }
 
+  const jobs = [];
   const page = document.getElementById("gsc-breath");
   if (page) {
-    meadow(page, { cols: 36, rows: 20, sp: 1.05, amp: 1.7, lift: 2.8, dot: 1.05, alpha: 0.14, full: true });
+    const job = meadow(page, { cols: 18, rows: 10, sp: 1.05, amp: 1.7, lift: 2.8, dot: 2, alpha: 0.14, full: true });
+    if (job) jobs.push(job);
   }
   document.querySelectorAll(".brand-breath canvas").forEach(function (canvas) {
-    meadow(canvas, { cols: 16, rows: 7, sp: 1.15, amp: 1.6, lift: 2.2, dot: 1.35, alpha: 0.5, full: false });
+    const job = meadow(canvas, { cols: 10, rows: 4, sp: 1.15, amp: 1.6, lift: 2.2, dot: 2, alpha: 0.45, full: false });
+    if (job) jobs.push(job);
   });
+  function tick(now) {
+    if (!document.hidden) {
+      for (let i = 0; i < jobs.length; i++) jobs[i].frame(now);
+    }
+    requestAnimationFrame(tick);
+  }
+  if (jobs.length) requestAnimationFrame(tick);
 })();

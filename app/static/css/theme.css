@@ -121,9 +121,9 @@ button.danger { background: #da3633; color: #fff; }
   align-items: center;
   text-align: center;
 }
-.login-card .gsc-mark { width: 4.8rem; height: 4.8rem; }
+.login-card .gsc-mark { width: 4.15rem; height: 4.15rem; }
 .login-card .brand-title { font-size: 1.35rem; text-align: center; }
-.login-card .brand-breath { width: 12rem; height: 5.4rem; left: 50%; top: -0.2rem; transform: translateX(-50%); }
+.login-card .brand-breath { width: 10rem; height: 4.6rem; left: 50%; top: -0.2rem; transform: translateX(-50%); }
 .sidebar .brand-lockup {
   flex-direction: column;
   align-items: center;
@@ -132,11 +132,11 @@ button.danger { background: #da3633; color: #fff; }
   width: 100%;
   gap: 0.4rem;
 }
-.sidebar .gsc-mark { width: 4.6rem; height: 4.6rem; }
+.sidebar .gsc-mark { width: 3.9rem; height: 3.9rem; }
 .sidebar .brand-title { font-size: 1.14rem; text-align: center; }
 .sidebar .brand-breath {
-  width: 8.5rem;
-  height: 5.2rem;
+  width: 7.2rem;
+  height: 4.4rem;
   left: 50%;
   top: -0.2rem;
   transform: translateX(-50%);
@@ -148,34 +148,46 @@ button.danger { background: #da3633; color: #fff; }
   align-items: center;
   padding: 0.85rem 0.35rem 0.15rem;
 }
-.card,
-.stat-bar {
-  animation: gsc-tile-breath 9.5s ease-in-out infinite;
+/* Neon edge on the sidenav and the main window. Opacity-only would not
+   light the line, so the two frames animate border and inner glow. */
+.sidebar {
+  border: 1px solid rgba(125, 255, 176, 0.42);
+  animation: gsc-tron-frame 3.6s ease-in-out infinite;
 }
-.card:nth-child(2n) { animation-delay: -3.2s; }
-.card:nth-child(3n) { animation-delay: -6.4s; }
-
+.main {
+  margin: 0.4rem 0.45rem 0.45rem 0;
+  border: 1px solid rgba(125, 255, 176, 0.38);
+  border-radius: 0.75rem;
+  animation: gsc-tron-frame 3.6s ease-in-out infinite;
+  animation-delay: -1.8s;
+}
 @keyframes gsc-breathe {
+  0%, 100% { transform: scale(0.992); opacity: 0.92; }
+  50% { transform: scale(1.012); opacity: 1; }
+}
+@keyframes gsc-tron-frame {
   0%, 100% {
-    transform: scale(0.985);
-    opacity: 0.9;
-    filter: drop-shadow(0 0 0 rgba(74, 222, 128, 0));
+    border-color: rgba(52, 199, 89, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(141, 240, 106, 0.1), inset 0 0 18px rgba(52, 199, 89, 0.04);
   }
   50% {
-    transform: scale(1.025);
-    opacity: 1;
-    filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.28));
+    border-color: rgba(214, 255, 230, 0.96);
+    box-shadow:
+      inset 0 0 0 1px rgba(214, 255, 230, 0.72),
+      inset 0 0 22px rgba(74, 222, 128, 0.22),
+      0 0 18px rgba(52, 199, 89, 0.28);
   }
-}
-@keyframes gsc-tile-breath {
-  0%, 100% { box-shadow: 0 0 0 rgba(52, 199, 89, 0); }
-  50% { box-shadow: 0 0 14px rgba(52, 199, 89, 0.07), inset 0 0 0 1px rgba(52, 199, 89, 0.16); }
 }
 @media (prefers-reduced-motion: reduce) {
   .gsc-mark,
-  .card,
-  .stat-bar { animation: none; }
-  .gsc-mark { opacity: 0.9; filter: none; transform: none; }
+  .sidebar,
+  .main { animation: none; }
+  .gsc-mark { opacity: 0.92; transform: none; }
+  .sidebar,
+  .main {
+    border-color: rgba(125, 255, 176, 0.42);
+    box-shadow: inset 0 0 0 1px rgba(141, 240, 106, 0.16);
+  }
   #gsc-breath, .brand-breath { display: none; }
 }
 
