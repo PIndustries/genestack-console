@@ -3,7 +3,6 @@
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { connect } from "../stream.js";
-import { closeIloConsole, openIloConsole } from "./environment_baremetal.js";
 import {
   mountSpace3d,
   setSpace3dEnabled,
@@ -4728,6 +4727,38 @@ function stopNodeLog() {
     clearInterval(nodeLogTimer);
     nodeLogTimer = null;
   }
+}
+
+let iloLiveFrame = null;
+
+function closeIloConsole() {
+  const frame = iloLiveFrame || document.getElementById("dm-host-frame");
+  if (frame) frame.src = "about:blank";
+  iloLiveFrame = null;
+}
+
+async function openIloConsole(currentEnv, node, opts) {
+  const o = opts || {};
+  const frame = o.frame || document.getElementById("dm-host-frame");
+  closeIloConsole();
+  iloLiveFrame = frame;
+  if (!node || !node.id) {
+    throw new Error("No BMC/iLO registered for this host. Add it under Platform → Hosts.");
+  }
+  const data = await api(
+    `/api/v1/environments/${encodeURIComponent(currentEnv)}/baremetal/nodes/${encodeURIComponent(node.id)}/console/session`,
+    { method: "POST", timeout: 25000 }
+  );
+  const embed = data && data.embed_url ? String(data.embed_url) : "";
+  if (!data || !data.ok || !embed.startsWith("/") || embed.startsWith("//")) {
+    throw new Error((data && (data.error || data.message)) || "iLO console unavailable");
+  }
+  if (frame) {
+    frame.removeAttribute("sandbox");
+    frame.src = embed;
+  }
+  if (o.popEl) o.popEl.disabled = false;
+  if (o.helpEl) o.helpEl.textContent = "iLO HTML5 console. BIOS / PXE / OS for this box.";
 }
 
 function stopNodeConsole() {
