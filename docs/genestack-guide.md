@@ -35,7 +35,7 @@ ssh -L 8080:127.0.0.1:8080 <deploy-host>
 
 Open `http://127.0.0.1:8080/ui`. The first screen is Guided setup. The first admin password is written to `/opt/genestack-console/ADMIN_CREDENTIALS.txt`. The file mode is `0600`.
 
-The build described here is [v2026.10.03](https://github.com/PIndustries/genestack-console/releases/tag/v2026.10.03){:target="_blank"}. The Linux file on that release is `genestack-console-linux-amd64`. [`version.json`](https://github.com/PIndustries/genestack-console/releases/download/v2026.10.03/version.json){:target="_blank"} on the same release names that file. Use those assets when you need this exact version. The `curl` command above follows whatever the latest release is.
+The build described here is [v2026.10.04.1](https://github.com/PIndustries/genestack-console/releases/tag/v2026.10.04.1){:target="_blank"}. The Linux file on that release is `genestack-console-linux-amd64`. [`version.json`](https://github.com/PIndustries/genestack-console/releases/download/v2026.10.04.1/version.json){:target="_blank"} on the same release names that file. Use those assets when you need this exact version. The `curl` command above follows whatever the latest release is.
 
 Back up two things together: `/opt/genestack-console/config.yaml`, and the console database. The database holds the users and the sessions. Passwords stored in it are encrypted with a key from `config.yaml`. A copy of the database without that file cannot be decrypted.
 
@@ -96,7 +96,7 @@ For a server you did select:
 3. The console switches that server to Talos and network-boots it once.
 4. Talos comes up in maintenance. Maintenance means Talos is running and waiting for its configuration. The job then continues with the [Talos Linux](k8s-talos.md) steps in this manual.
 
-Those four steps are the Talos path. Install Ubuntu is a separate next boot. It writes that machine's seed and can power the machine from the network. It does not run the wipe, and it does not continue into OpenStack. On `main`, the Hosts page can queue that boot and wait until the machine answers. The `v2026.10.03` binary stops at the next-boot menu.
+Those four steps are the Talos path. Install Ubuntu is a separate next boot. It writes that machine's seed and can power the machine from the network. It does not run the wipe, and it does not continue into OpenStack. The Hosts page queues that boot and waits until the machine answers. The `v2026.10.03` binary stops at the next-boot menu.
 
 An ISO image cannot be the first boot of a reinstall. An ISO does not wipe the disks, so the console rejects that choice on this path.
 
@@ -155,7 +155,7 @@ The built-in folders live under `app/modules/`. Bare metal is `app/modules/barem
 
 ## The rest of the manual
 
-The first rows are the rest of this chapter. Install, the one-machine lab, and how a release is cut are the other pages in this repository. The binary named on this page is `v2026.10.03`. The source on `main` can be ahead of that tag.
+The first rows are the rest of this chapter. Install, the one-machine lab, and how a release is cut are the other pages in this repository. The binary named on this page is `v2026.10.04.1`. The source on `main` can be ahead of that tag.
 
 | You need | Read |
 | --- | --- |
@@ -168,9 +168,9 @@ The first rows are the rest of this chapter. Install, the one-machine lab, and h
 | A lab with one local virtual machine | [Install AIO](install-aio.md) |
 | The longer design notes | [Architecture](architecture.md) |
 | The account page and the Apple apps | [Connect a console to my.genestack.dev](hosted-mode.md) |
-| Path-by-path HTTP reference | [API reference](https://github.com/PIndustries/genestack-console/blob/v2026.10.03/API_REFERENCE.md){:target="_blank"}, and `/swagger` on a running console |
+| Path-by-path HTTP reference | [API reference](https://github.com/PIndustries/genestack-console/blob/v2026.10.04.1/API_REFERENCE.md){:target="_blank"}, and `/swagger` on a running console |
 | How a release is cut | [Releasing](releasing.md) |
 
 !!! note
 
-    This site is built from the `main` branch of Genestack. The console program is released on its own tags. If a step on this page and the `v2026.10.03` binary disagree, follow the console repository at that tag.
+    This site is built from the `main` branch of Genestack. The console program is released on its own tags. If a step on this page and the `v2026.10.04.1` binary disagree, follow the console repository at that tag.

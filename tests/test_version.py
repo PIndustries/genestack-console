@@ -12,14 +12,15 @@ from app.version import BUILD, VERSION
 
 CONSOLE_ROOT = Path(__file__).resolve().parents[1]
 
-CALVER_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}(-[0-9A-Za-z.-]+)?$")
+CALVER_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}(\.\d+)?(-[0-9A-Za-z.-]+)?$")
 
 
 def test_version_is_calver():
-    """VERSION is CalVer: YYYY.MM.DD (optional -suffix), and a real date."""
-    assert CALVER_RE.match(VERSION), f"VERSION {VERSION!r} is not YYYY.MM.DD[-suffix]"
+    """VERSION is CalVer: YYYY.MM.DD[.build] (optional -suffix), and a real date."""
+    assert CALVER_RE.match(VERSION), f"VERSION {VERSION!r} is not YYYY.MM.DD[.build][-suffix]"
     date_part = VERSION.split("-", 1)[0]
-    datetime.strptime(date_part, "%Y.%m.%d")  # raises on impossible dates
+    year_month_day = ".".join(date_part.split(".")[:3])
+    datetime.strptime(year_month_day, "%Y.%m.%d")  # raises on impossible dates
 
 
 def test_package_version_matches():
@@ -49,18 +50,27 @@ def _run_bump(version_file: Path, *args: str) -> None:
 
 
 def test_bump_version_writes_today(tmp_path):
-    """bump-version.sh rewrites VERSION to today's UTC date."""
+    """bump-version.sh rewrites VERSION to today's UTC date and build 1."""
     version_file = tmp_path / "version.py"
     version_file.write_text('VERSION = "1999.01.01"\n', encoding="utf-8")
     _run_bump(version_file)
     today = datetime.now(timezone.utc).strftime("%Y.%m.%d")
-    assert f'VERSION = "{today}"' in version_file.read_text(encoding="utf-8")
+    assert f'VERSION = "{today}.1"' in version_file.read_text(encoding="utf-8")
+
+
+def test_bump_version_with_build(tmp_path):
+    """bump-version.sh 2 writes build 2 for today."""
+    version_file = tmp_path / "version.py"
+    version_file.write_text('VERSION = "1999.01.01"\n', encoding="utf-8")
+    _run_bump(version_file, "2")
+    today = datetime.now(timezone.utc).strftime("%Y.%m.%d")
+    assert f'VERSION = "{today}.2"' in version_file.read_text(encoding="utf-8")
 
 
 def test_bump_version_with_suffix(tmp_path):
-    """bump-version.sh rc1 appends the suffix with a dash."""
+    """bump-version.sh rc1 keeps build 1 and appends the suffix with a dash."""
     version_file = tmp_path / "version.py"
     version_file.write_text('VERSION = "1999.01.01"\n', encoding="utf-8")
     _run_bump(version_file, "rc1")
     today = datetime.now(timezone.utc).strftime("%Y.%m.%d")
-    assert f'VERSION = "{today}-rc1"' in version_file.read_text(encoding="utf-8")
+    assert f'VERSION = "{today}.1-rc1"' in version_file.read_text(encoding="utf-8")

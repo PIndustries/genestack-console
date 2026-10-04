@@ -58,7 +58,7 @@ jobs:
               tag = raw if raw.startswith("v") else "v" + raw
           else:
               tag = os.environ["REF_NAME"]
-          if not re.fullmatch(r"v\d{4}\.\d{2}\.\d{2}(-[0-9A-Za-z.]+)?", tag):
+          if not re.fullmatch(r"v\d{4}\.\d{2}\.\d{2}(\.\d+)?(-[0-9A-Za-z.]+)?", tag):
               raise SystemExit(f"refused tag shape: {tag}")
           bare = tag[1:]
           if bare != version:
