@@ -62,8 +62,8 @@ DEFAULT_TALOS_IMAGE_URL = (
     f"https://factory.talos.dev/image/{DEFAULT_FACTORY_SCHEMATIC}/"
     f"{DEFAULT_TALOS_VERSION}/metal-amd64.qcow2"
 )
-# Same schematic as the qcow2, as a CD image. A VMware guest boots this ISO
-# itself. The console then applies the matching installer and does not power it.
+# Same schematic as the qcow2, as a CD image. The operator boots this ISO.
+# The console then applies the matching installer and does not power the machine.
 DEFAULT_TALOS_ISO_URL = (
     f"https://factory.talos.dev/image/{DEFAULT_FACTORY_SCHEMATIC}/"
     f"{DEFAULT_TALOS_VERSION}/metal-amd64.iso"

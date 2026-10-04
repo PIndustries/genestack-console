@@ -1451,7 +1451,7 @@ async function pointAtInstalledTalos(envId) {
   }
   if (!window.confirm(
     "Point this console at Talos that is already installed?\n\n" +
-    "This uses every saved host, not one row. Each machine must already be running Talos and waiting for a config. That is what an ISO install does, including a VMware guest.\n\n" +
+    "This uses every saved host, not one row. Each machine must already be running Talos and waiting for a config. That is what an ISO install does, on hardware or a virtual machine.\n\n" +
     "The console does not power the machines and does not use a management port. It applies a Talos config to each address, bootstraps etcd once, and fetches the kubeconfig.\n\n" +
     "One host needs the control plane role. The install disk defaults to /dev/sda. Confirm that disk. Dry run only logs the commands."
   )) return;

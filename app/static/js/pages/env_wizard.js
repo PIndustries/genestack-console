@@ -358,7 +358,7 @@ function talosFieldsHtml() {
     </label>
     <label class="field"><span>Install disk</span>
       <input id="wz-talos-disk" type="text" value="${esc(v("talos_disk", "/dev/sda"))}" placeholder="/dev/sda" autocomplete="off" />
-      <div class="hint muted">On VMware SCSI this is usually /dev/sda. Confirm the name on the guest.</div>
+      <div class="hint muted">A SCSI disk is often /dev/sda. Confirm the name on the machine.</div>
     </label>
     <label class="field"><span>Image URL</span>
       <input id="wz-talos-image" type="text" value="${esc(v("talos_image"))}" placeholder="(leave blank)" autocomplete="off" />
@@ -380,7 +380,7 @@ function step3Html() {
     </label>`;
   }).join("");
   return `
-  <p class="wz-lead muted">Start with a hostname and an IP. That covers a VMware guest and any machine with no management port. Boot a Talos ISO on it yourself, or use Ubuntu that is already installed. Terraform, OVH, PXE, and a management port are optional.</p>
+  <p class="wz-lead muted">Start with a hostname and an IP. That covers a virtual machine and any machine with no management port. Boot a Talos ISO on it yourself, or use Ubuntu that is already installed. Terraform, OVH, PXE, and a management port are optional.</p>
   <div class="wz-choice wz-source-grid">${radios}</div>
   <div id="wz-src-panel" class="wz-src-panel">${metalPanelHtml()}</div>`;
 }
@@ -877,7 +877,7 @@ async function fillTalosIso() {
     );
     const iso = prov && prov.default_iso_url;
     if (!iso) return;
-    slot.innerHTML = `Leave this blank. In VMware, boot each guest from <a href="${esc(iso)}" target="_blank" rel="noopener">${esc(iso)}</a>. Then return here. A SCSI disk is usually /dev/sda.`;
+    slot.innerHTML = `Leave this blank. Boot each machine from <a href="${esc(iso)}" target="_blank" rel="noopener">${esc(iso)}</a>. Then return here. A SCSI disk is often /dev/sda.`;
   } catch {
     /* The blank hint stays. The first-cluster page has the same ISO. */
   }

@@ -55,10 +55,10 @@ Needs `brew install qemu` if QEMU is missing. The console in that lab is still
 the published image. `--from-source` is the separate checkout path above.
 
 After either command, [Your first cluster](first-cluster.md) is the page to
-follow. It has this Mac lab, one ESXi server with an Ubuntu all-in-one guest,
-the same shape on one dedicated server, and an environment of three machines.
-The QEMU virtual machine is the local lab. A guest you create on ESXi, or a
-server with its own address, is the machine Deploy reaches over SSH.
+follow. It has this Mac lab, one Ubuntu machine, the same shape on one
+dedicated server, and an environment of three machines. The QEMU virtual
+machine is the local lab. A machine with its own address, physical or virtual,
+is the one Deploy reaches over SSH.
 
 ## What the installer does, phase by phase
 

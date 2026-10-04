@@ -85,8 +85,8 @@ That is `--with-aio-vm` on a Mac: QEMU + Hypervisor.framework, Ubuntu cloud
 image (arm64 on Apple Silicon), SSH on `127.0.0.1:2222`. Needs Docker Desktop
 running and `brew install qemu`. Not a production rack — a laptop lab.
 [Your first cluster](first-cluster.md) is what to do next: the Mac lab, one
-ESXi server with Ubuntu on one guest, one dedicated server, or three machines
-in one environment.
+Ubuntu machine, one dedicated server, or three machines in one environment.
+The cloud machine can be physical or a virtual machine.
 
 **Windows:**
 

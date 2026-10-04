@@ -4,7 +4,7 @@ You installed the console and the sign-in page opened. This page is what to do n
 
 Genestack is the project that installs OpenStack on Kubernetes. The console is the page you use to run that install, and to operate the cloud after it is up. The computer you installed the console on is the deploy host. It stays outside the cluster. It is not a Kubernetes node and not an OpenStack compute node.
 
-A virtual machine is a fine deploy host. VMware, KVM, or any other Ubuntu guest works for the console. The cluster is other machines. The console VM is not the cloud.
+A virtual machine is a fine deploy host. Any Ubuntu machine works for the console. The cluster is other machines. The console machine is not the cloud.
 
 ## Pick the machines you have
 
@@ -13,9 +13,9 @@ Four starts. Each one ends in this console. The computer that runs the console s
 | You have | Start |
 | --- | --- |
 | A Mac | [Mac, one local virtual machine](#mac-one-local-virtual-machine) |
-| One VMware ESXi server | [One ESXi server, Ubuntu on one guest](#one-esxi-server-ubuntu-on-one-guest) |
+| One machine that already has Ubuntu | [One Ubuntu machine](#one-ubuntu-machine) |
 | One dedicated server | [One dedicated server](#one-dedicated-server) |
-| Three machines, or room for three guests | [Three machines in one environment](#three-machines-in-one-environment) |
+| Three machines | [Three machines in one environment](#three-machines-in-one-environment) |
 
 An environment is one cloud. A second cloud is a second environment. One environment can be a single machine. Another environment can be three machines. They do not share servers. Apply on this environment, and Deploy, belong to that environment.
 
@@ -58,27 +58,27 @@ ssh -i ~/genestack-console/ssh/genestack-aio_key -p 2222 ubuntu@127.0.0.1
 
 Open the environment `genestack-aio`. The bar says this environment only logs. **Apply on this environment** when you mean the jobs to run. `#/hosts` is Host VMs. That page lists this virtual machine and can start it, stop it, and show its serial log. Platform, then Hosts, inside the environment, is the cluster inventory. They are different screens.
 
-On the virtual machine, `sudo /usr/local/sbin/genestack-aio-setup.sh` clones Genestack and runs `bootstrap.sh`. That prepares the checkout. It does not install OpenStack. This lab machine is reached through an SSH port on the Mac, so the inventory cannot record it as a normal address. A cloud you will keep is the ESXi section or the dedicated server below. Those machines have addresses of their own, and Deploy runs from this console.
+On the virtual machine, `sudo /usr/local/sbin/genestack-aio-setup.sh` clones Genestack and runs `bootstrap.sh`. That prepares the checkout. It does not install OpenStack. This lab machine is reached through an SSH port on the Mac, so the inventory cannot record it as a normal address. A cloud you will keep is one Ubuntu machine, below, or the dedicated server. Those machines have addresses of their own, and Deploy runs from this console.
 
-## One ESXi server, Ubuntu on one guest
+## One Ubuntu machine
 
-Use this when the only server is one VMware ESXi host and you want the smallest cloud. The console does not create the guests. You create two Ubuntu guests. Neither guest needs an iLO.
+Use this when the cloud is one computer that already has Ubuntu, and the console is a different computer. The cloud machine can be a physical server or a virtual machine. The hypervisor is the one you already run. The console does not create that machine, and it does not install the hypervisor.
 
-The first guest is the console. Install Ubuntu on it, then:
+The console computer is Ubuntu as well. A virtual machine is fine. Install the console there:
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
-Run that command again on a machine that already has the console. It follows the latest release and leaves the settings and the database in place. This guest is not a Kubernetes node.
+Run that command again on a machine that already has the console. It follows the latest release and leaves the settings and the database in place. This computer is not a Kubernetes node.
 
-The second guest is the cloud. Install Ubuntu on it and give it a hostname and an IP address the console guest can reach. A starting size is 4 vCPU, 16 GiB of memory, and an 80 GB disk. Deploy is where a small guest runs out of room. The console does not refuse a small guest.
+The cloud machine needs a hostname and an IP address the console can reach. A starting size for a virtual machine is 4 vCPU, 16 GiB of memory, and an 80 GB disk. Deploy is where a small machine runs out of room. The console does not refuse a small machine.
 
 In the console, Guided setup:
 
 1. Basics names the environment. Connect stays on this console.
 2. Deployment: open Advanced and choose Kubespray. Ubuntu is already installed, so this path uses SSH.
-3. Servers: Static IPs / SSH. One row, the second guest. Check control plane, etcd, control, worker, network, and storage. That is one machine doing every job. On Platform, then Hosts, the same set is the preset **All-in-One (single node)**.
+3. Servers: Static IPs / SSH. One row, the cloud machine. Check control plane, etcd, control, worker, network, and storage. That is one machine doing every job. On Platform, then Hosts, the same set is the preset **All-in-One (single node)**.
 4. **Apply on this environment.**
 5. Platform, then Hosts. Select the row. **Already have an OS.** That records the machine. It does not reboot it.
 6. Settings, then Config, then Deploy. Deploy installs Kubernetes and OpenStack over SSH.
@@ -93,33 +93,33 @@ The server is the console, and it can run a virtual machine. Linux with KVM, whi
 curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --with-aio-vm
 ```
 
-The console is the published binary on that server. The installer creates one local Ubuntu virtual machine and an environment named `genestack-aio`. The default size is 4 vCPU, 8 GiB of memory, and a 60 GB disk. SSH is `ssh -i /opt/genestack-console/ssh/genestack-aio_key -p 2222 ubuntu@127.0.0.1`. Open that environment, apply it when you mean the jobs to run, and open `#/hosts` for the virtual machine. On the virtual machine, `sudo /usr/local/sbin/genestack-aio-setup.sh` clones Genestack and runs `bootstrap.sh`. A guest that cannot see `/dev/kvm` uses the two-guest ESXi shape instead of this command.
+The console is the published binary on that server. The installer creates one local Ubuntu virtual machine and an environment named `genestack-aio`. The default size is 4 vCPU, 8 GiB of memory, and a 60 GB disk. SSH is `ssh -i /opt/genestack-console/ssh/genestack-aio_key -p 2222 ubuntu@127.0.0.1`. Open that environment, apply it when you mean the jobs to run, and open `#/hosts` for the virtual machine. On the virtual machine, `sudo /usr/local/sbin/genestack-aio-setup.sh` clones Genestack and runs `bootstrap.sh`. A computer that cannot run a local virtual machine uses the one Ubuntu machine above: the console on one computer, the cloud on the other.
 
-The server is the one cloud machine. Install Ubuntu on it. Install the console on a different computer: the Mac command above, or a small Ubuntu virtual machine with the plain install command. In that console, add this server as the one host, preset **All-in-One (single node)**, then **Already have an OS**, **Apply on this environment**, and Deploy. The console stays on the other computer.
+The server is the one cloud machine. Install Ubuntu on it. Install the console on a different computer: the Mac command above, or any other Ubuntu computer with the plain install command. In that console, add this server as the one host, preset **All-in-One (single node)**, then **Already have an OS**, **Apply on this environment**, and Deploy. The console stays on the other computer.
 
 ## Three machines in one environment
 
-Use this when you want a control plane and two workers. The machines can be three guests on one ESXi server, or three dedicated servers. The console is one more computer. On ESXi that is a fourth guest. It is not one of the three.
+Use this when you want a control plane and two workers. The three machines can be physical servers or virtual machines. The console is one more computer. It is not one of the three.
 
-A starting lab is 4 vCPU, 16 GiB of memory, and an 80 GB disk on each of the three. Talos can boot on less. Deploy is where a small guest runs out of room. The console does not refuse a small guest.
+A starting lab is 4 vCPU, 16 GiB of memory, and an 80 GB disk on each of the three. Talos can boot on less. Deploy is where a small machine runs out of room. The console does not refuse a small machine.
 
-Talos is the operating system this console prefers. Boot the three guests from this ISO. It is the same image the console applies. Leave the image field in Guided setup blank. Guided setup shows this same address.
+Talos is the operating system this console prefers. Boot the three machines from this ISO. It is the same image the console applies. Leave the image field in Guided setup blank. Guided setup shows this same address.
 
 ```text
 https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64.iso
 ```
 
-On VMware SCSI the install disk is usually `/dev/sda`. Confirm the name on the guest. The one step outside the console is attaching that ISO, because a guest has no management port for the console to insert it. Then follow Talos is already installed, below. One machine is the control plane. The other two are workers.
+A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc and does not power the machine. Then follow Talos is already installed, below. One machine is the control plane. The other two are workers.
 
 Ubuntu that is already installed follows Ubuntu is already installed, below. On Platform, then Hosts, one machine uses the preset **Control Plane**. The other two use **Worker (compute + storage)**.
 
-The console guest, when you are on ESXi, is Ubuntu and the plain install command:
+The console computer is Ubuntu and the plain install command:
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
-Network boot from the console is optional, and it is easy to get wrong. The guests and the console have to be on a network where this console is the only DHCP server. Set each guest to boot from the network, and power it yourself. If something else is also answering DHCP, the guest will not boot from the console.
+Network boot from the console is optional, and it is easy to get wrong. The machines and the console have to be on a network where this console is the only DHCP server. Set each machine to boot from the network, and power it yourself. If something else is also answering DHCP, the machine will not boot from the console.
 
 ## You already have a Genestack cluster
 
@@ -140,7 +140,7 @@ The Genestack checkout at `/opt/genestack` is what the install scripts run from.
 
 ### Talos is already installed
 
-Use this when Talos is already running and waiting for a config. A Talos ISO does that. A VMware ESXi guest, a KVM guest, or any machine with no management port starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
+Use this when Talos is already running and waiting for a config. A Talos ISO does that. A virtual machine, or any machine with no management port, starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
 
 1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
 2. Servers: Static IPs / SSH. Enter each hostname, IP, and roles. One machine needs the control plane role. Every other saved machine is a worker.

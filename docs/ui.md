@@ -21,7 +21,7 @@ The sidebar is:
 | Catalog | `#/operations` | `app/static/js/pages/operations.js` | Every operation the console can run. The same list as `GET /api/v1/operations`. |
 | Admin | `#/admin` | `app/static/js/pages/admin.js` | People, tenants, memberships, and, on `main`, Reach and Database. Hidden unless you are a platform admin. |
 
-A new install opens on a welcome. It says this machine stays outside the cluster, the other machines are a hostname and an IP, and Deploy is how OpenStack gets installed. Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. It creates the environment and points it at `/opt/genestack` and `/etc/genestack`. The server step starts on a hostname and an IP. The Talos image field stays blank, and the page shows the ISO to boot in VMware. The summary has Apply on this environment. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
+A new install opens on a welcome. It says this machine stays outside the cluster, the other machines are a hostname and an IP, and Deploy is how OpenStack gets installed. Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. It creates the environment and points it at `/opt/genestack` and `/etc/genestack`. The server step starts on a hostname and an IP. The Talos image field stays blank, and the page shows the ISO to boot yourself. The summary has Apply on this environment. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
 
 The API docs link in the sidebar is `/docs` on the console. That is a catalog of the routes, with a curl for each one. The curls point at the console you are signed in to.
 
