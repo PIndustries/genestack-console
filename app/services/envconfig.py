@@ -316,6 +316,8 @@ _SERVICE_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _HOSTNAME_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 VALID_SERVER_SOURCES = frozenset({"maas", "static", "baremetal", "ovh", "terraform"})
+# Hosts that already have an OS. The mark is a record. It does not install.
+ADOPT_MARK = "kubespray"
 
 # provider: deployment provider for the env (doc "provider" key)
 VALID_PROVIDERS = frozenset({"kubespray", "talos"})
@@ -1213,6 +1215,65 @@ def clear_server_roles(
         roles = list(entry.get("roles") or [])
         if roles:
             entry["roles"] = []
+            changed = True
+        servers[name] = entry
+    if not changed:
+        return current[1], warnings
+    doc["servers"] = servers
+    row, parse_warnings = put_version(db, env, _dump(doc), actor)
+    return row, warnings + parse_warnings
+
+
+def set_server_adopt(
+    db: Session,
+    env: Environment,
+    actor: str | None,
+    *,
+    hostnames: list[str],
+    adopt: str,
+) -> tuple[EnvConfigVersion, list[str]]:
+    """Record that these hosts already have an OS, or clear that record.
+
+    ``adopt`` is ``kubespray`` or empty. Empty removes the key. This does not
+    reboot, install, or start a playbook. A later static upsert keeps the key
+    because it copies the existing entry first. Does not commit.
+    """
+    mark = str(adopt or "").strip()
+    if mark and mark != ADOPT_MARK:
+        raise ConfigValidationError("adopt must be kubespray or empty")
+    wanted: list[str] = []
+    seen: set[str] = set()
+    for raw in hostnames or []:
+        name = str(raw or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        wanted.append(name)
+    if not wanted:
+        raise ConfigValidationError("hostnames is required")
+    current = get_current(db, env)
+    if current is None:
+        raise ConfigValidationError("No saved inventory for this environment")
+    doc: dict[str, Any] = dict(current[0])
+    servers = dict(doc.get("servers") or {})
+    present = [name for name in wanted if isinstance(servers.get(name), dict)]
+    missing = [name for name in wanted if name not in present]
+    if not present:
+        raise ConfigValidationError(
+            "None of those hostnames are in this environment's inventory"
+        )
+    warnings = (
+        [f"left alone, not in inventory: {', '.join(missing)}"] if missing else []
+    )
+    changed = False
+    for name in present:
+        entry = dict(servers[name])
+        if mark:
+            if entry.get("adopt") != mark:
+                entry["adopt"] = mark
+                changed = True
+        elif "adopt" in entry:
+            entry.pop("adopt", None)
             changed = True
         servers[name] = entry
     if not changed:

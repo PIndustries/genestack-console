@@ -36,6 +36,8 @@ An environment is one cloud: a lab, one rack, or one site. You create it in the 
 
 ## How a physical server gets an operating system
 
+This is the path when the console installs the operating system. A management port is how that path powers the machine. It is optional. [Your first cluster](docs/first-cluster.md) covers Talos you installed from an ISO, and Ubuntu that is already on the machines. A hostname and an IP are enough for those two starts.
+
 Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. DHCP is how a machine asks for an IP address. The boot file is the small program the network card downloads when the server is told to start from the network instead of from its disk. Both of those services run inside the console process. This is how a server gets Talos. Talos is installed from the network, and the console is the program that does it. You do not set up a separate DHCP server, or another program, to boot the machines.
 
 Each server has two addresses you enter:
@@ -80,7 +82,7 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 
 ## Where to read next
 
-- [docs/first-cluster.md](docs/first-cluster.md) — the console is up. Attach a cluster you already have, or install one.
+- [docs/first-cluster.md](docs/first-cluster.md) — the console is up. Attach a cluster you already have, point at Talos from an ISO, or record Ubuntu that is already installed. A management port is optional.
 - [docs/install.md](docs/install.md) — the install on Linux, and the laptop lab on a Mac or Windows.
 - [docs/architecture.md](docs/architecture.md) — the processes on the deploy host, the boot sequence, and the job runner.
 - [docs/modules.md](docs/modules.md) — where each operation lives, and how to add a module of your own.
@@ -96,6 +98,7 @@ Key endpoints:
 - `POST /api/v1/environments` — Create environment
 - `GET /api/v1/environments/{id}/workflow` — Current step state
 - `POST /api/v1/environments/{id}/servers/static` — Add server
+- `POST /api/v1/environments/{id}/servers/adopt` — Record that hosts already have an OS
 - `PUT /api/v1/environments/{id}/config` — Save config
 - `POST /api/v1/environments/{id}/jobs` — Run operations (push, deploy, etc.)
 

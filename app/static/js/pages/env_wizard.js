@@ -70,12 +70,12 @@ const METAL_SOURCES = [
   {
     id: "static",
     title: "Static IPs / SSH",
-    hint: "Enter hostname, IP, and roles for machines you already reach.",
+    hint: "Hostname and IP. Talos from an ISO, or Ubuntu that is already installed. A BMC is not required.",
   },
   {
     id: "bmc",
     title: "BMC / Redfish",
-    hint: "Register BMCs on Hardware → Bare metal, or claim them from Inventory.",
+    hint: "Optional. Powers the machine, network-boots it, and opens the console wall.",
   },
 ];
 const TF_KIND_ORDER = ["aws", "azure", "gcp", "rackspace"];
@@ -380,7 +380,7 @@ function step3Html() {
     </label>`;
   }).join("");
   return `
-  <p class="wz-lead muted">How does metal arrive? Terraform, OVH, PXE, SSH, and BMC are all valid — pick one.</p>
+  <p class="wz-lead muted">A hostname and IP are enough. A BMC is optional. Terraform, OVH, PXE, SSH, and BMC are all valid.</p>
   <div class="wz-choice wz-source-grid">${radios}</div>
   <div id="wz-src-panel" class="wz-src-panel">${metalPanelHtml()}</div>`;
 }
@@ -421,7 +421,7 @@ function pxePanelHtml() {
 
 function bmcPanelHtml() {
   return `
-  <p class="wz-lead muted">Register BMCs (Redfish) on Hardware → Bare metal, or claim them from Inventory, after this environment exists.</p>
+  <p class="wz-lead muted">A management port is optional. Register one on Hardware → Bare metal when you want the console to power the machine, or claim one from Inventory, after this environment exists.</p>
   <p style="margin:0"><a href="#/hardware?tab=baremetal">Hardware → Bare metal</a>
     · <a href="#/hardware">Inventory</a>
     · <a href="#/hardware?tab=discovery">Discovery</a></p>`;
@@ -436,7 +436,7 @@ function staticPanelHtml() {
   const atCap = servers.length >= MAX_SERVER_ROWS;
   const canRemove = servers.length > 1;
   return `
-  <p class="hint muted" style="margin:.2rem 0 .6rem">Mark at least one <strong>control plane</strong> and one <strong>worker</strong>. Required inventory roles: control plane, etcd, and control.</p>
+  <p class="hint muted" style="margin:.2rem 0 .6rem">These machines already have an address. Talos from an ISO is waiting for a config. Ubuntu is already installed. The console does not power them. Mark at least one <strong>control plane</strong> and one <strong>worker</strong>. Required inventory roles: control plane, etcd, and control.</p>
   <div id="wz-servers-list">${serversHtml}</div>
   <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;align-items:center">
     ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">− Remove last</button>` : ""}

@@ -60,6 +60,11 @@ class ServerRemove(BaseModel):
     hostname: str = Field(min_length=1)
 
 
+class ServerAdopt(BaseModel):
+    hostnames: list[str] = Field(min_length=1)
+    adopt: str = ""
+
+
 def _version_payload(row) -> dict[str, Any]:
     return {
         "version": row.version,
@@ -267,6 +272,7 @@ def list_servers(
                 "vrack_vni": assignment.get("vrack_vni"),
                 "public_mac": assignment.get("public_mac"),
                 "nics": assignment.get("nics") or [],
+                "adopt": str(assignment.get("adopt") or ""),
             }
         )
     ovh_doc: dict[str, Any] = {}
@@ -443,3 +449,46 @@ def remove_server(
     )
     db.commit()
     return {"version": row.version, "warnings": warnings, "removed": body.hostname}
+
+
+@router.post("/servers/adopt")
+def adopt_servers(
+    body: ServerAdopt,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_operator),
+    env: Environment = Depends(get_env_scoped("operator")),
+) -> dict[str, Any]:
+    """Record hosts that already have an OS, or clear that record.
+
+    ``adopt`` is ``kubespray`` or empty. This does not reboot, install, or
+    start a playbook. Stored as a new config version when the mark changes.
+    """
+    try:
+        row, warnings = envconfig_service.set_server_adopt(
+            db,
+            env,
+            principal.username,
+            hostnames=body.hostnames,
+            adopt=body.adopt,
+        )
+    except envconfig_service.ConfigValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    JobRunner(db).write_audit(
+        actor=principal.username,
+        action="env.servers.adopt",
+        resource_type="environment",
+        resource_id=env.id,
+        environment_id=env.id,
+        details={
+            "hostnames": body.hostnames,
+            "adopt": body.adopt or "",
+            "version": row.version,
+            "warnings": warnings,
+        },
+    )
+    db.commit()
+    return {
+        "version": row.version,
+        "warnings": warnings,
+        "adopt": (body.adopt or "").strip(),
+    }

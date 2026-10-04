@@ -803,7 +803,7 @@ Preview rendered config-dir-relative files for the current document (secrets mas
 
 ## Servers
 
-Server management for an environment. These routes are for hosts you already have an address for. Installing Talos is the bare-metal path: the console answers DHCP and serves the boot file.
+Server management for an environment. These routes are for hosts you already have an address for. A hostname and an IP are enough. A management port is optional. Talos that is already installed, such as from an ISO, is the job `genestack.talos.bootstrap`. Recording an operating system that is already there is `POST /servers/adopt`. Installing Talos from the network is the bare-metal path: the console answers DHCP and serves the boot file.
 
 ### GET `/api/v1/environments/{environment_id}/servers`
 
@@ -821,7 +821,8 @@ List the servers saved for this environment.
       "ip": "10.0.0.1",
       "roles": ["controller"],
       "assigned": true,
-      "source": "static"
+      "source": "static",
+      "adopt": ""
     }
   ]
 }
@@ -868,6 +869,31 @@ curl -X POST http://localhost:8000/api/v1/environments/env-1/servers/static \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"hostname": "worker1", "ip": "10.0.0.10", "roles": ["worker"]}'
+```
+
+---
+
+### POST `/api/v1/environments/{environment_id}/servers/adopt`
+
+Record that the named hosts already have an operating system, or clear that record. Creates a new config version when the mark changes. Requires operator. This does not reboot, install, or start a playbook.
+
+`adopt` is `kubespray` or an empty string. Empty removes the mark. A later `POST /servers/static` for the same hostname keeps it.
+
+**Request body:**
+```json
+{
+  "hostnames": ["worker1", "worker2"],
+  "adopt": "kubespray"
+}
+```
+
+**Response:**
+```json
+{
+  "version": 6,
+  "warnings": [],
+  "adopt": "kubespray"
+}
 ```
 
 ---

@@ -46,48 +46,65 @@ Day to day you stay on this environment. Settings, then Config, is the settings 
 
 ## You want the console to install the cluster
 
-Talos is the operating system to use when the console is installing machines itself. Talos boots a machine straight into Kubernetes. The console answers DHCP and serves the boot file, wipes the disks, boots Talos, then runs the Genestack scripts. DHCP is how a machine asks for an address. The boot file is the small program the network card downloads when the machine starts from the network instead of from its disk.
+A management port is optional. Vendors call it the BMC, iLO, or iDRAC. When a server has one, the console can power it, ask for one network boot, and open its console. That is deeper control. You can start with a hostname and an IP.
 
-That path needs three things.
+The Genestack checkout at `/opt/genestack` is what the install scripts run from.
 
-- The deploy host is on the same local network as the machines. That is L2. L2 is recommended. It is how the console hands out addresses and the boot file itself. When the deploy host cannot be on that network, an agent on a computer that is does that job, and you still start the work from the console.
-- A management port on each server. Vendors call it the BMC, iLO, or iDRAC. The console uses it to power the server and to ask for one network boot.
-- The Genestack checkout at `/opt/genestack`.
+### Talos is already installed
 
-In Guided setup:
+Use this when Talos is already running and waiting for a config. A Talos ISO does that. A VMware ESXi guest, a KVM guest, or any machine with no management port starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
 
-1. Basics names the environment.
-2. Connect stays on this console unless a site is somewhere this machine cannot reach.
-3. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
-4. Servers is where the machines come from. BMC / Redfish is a management port you type in. PXE is a machine the console already saw asking for an address. Static IPs / SSH is a machine that already has an address you can reach.
+1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
+2. Servers: Static IPs / SSH. Enter each hostname, IP, and roles. One machine needs the control plane role. Every other saved machine is a worker.
+3. On the environment, Platform, then Hosts. The path above the table stays Talos. Choosing the path does not install an operating system.
+4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
+5. Set `dry_run: false` and restart the two units before you mean that job to apply. A dry run logs the commands and does not send them.
 
-Then, on the environment:
+Kubernetes is up after that job succeeds. OpenStack is Deploy, on Settings, then Config. Open Start stage and choose `infrastructure`, so Deploy does not run the Talos bootstrap a second time. A second bootstrap stops when the talos directory under the inventory path, usually `/etc/genestack/talos`, already holds `secrets.yaml` or `talosconfig`. Remove those files only when you mean to create a new cluster identity.
 
-1. Platform, then Hosts, is the server list. Add each machine. Record the management port and the MAC address of the port on the install network. A MAC address is the hardware address of that network card.
-2. The path above the table stays Talos. Talos is the preferred direct boot. Choosing the path does not install an operating system by itself.
-3. Settings, then Config. Change what you need. Save. Each save is a version.
-4. Set `dry_run: false` and restart the two units only when you are ready for the wipe.
-5. Deploy cluster asks you to confirm the wipe. It pushes the settings, network-boots Talos, then runs the Genestack pipeline: Kubernetes, then OpenStack. A server you did not select stays on its own disk. The log is Activity, then Jobs.
+### Ubuntu is already installed
 
-Ubuntu is the other operating system the console installs. On a Hosts row, Install Ubuntu puts Ubuntu on that one machine and waits until it answers. It does not install Kubernetes or OpenStack. A machine may stay a plain Ubuntu server.
+Use this for a group of servers that already have Ubuntu, including guests you installed yourself. Kubespray adopts machines that already have an operating system and SSH.
 
-Kubespray is the other way onto Kubernetes. It adopts machines that already have an operating system. Guided setup hides it under Advanced: Kubespray (Ansible). Those machines need SSH from the deploy host. The Genestack scripts then install Kubernetes and OpenStack. This does not wipe disks the way the Talos path does. It does change the machines you named.
+1. Guided setup. Open Advanced: Kubespray (Ansible). On Servers choose Static IPs / SSH. Enter each hostname, IP, and roles. The deploy host has to reach those machines over SSH.
+2. On Hosts, the path above the table is Kubespray. Choosing the path does not reboot anything.
+3. Select the rows. Already have an OS. That records them. The row shows Kubespray recorded. It does not reboot them, install anything, or start a playbook. Clear that record removes the mark. Roles stay.
+4. Across the group you still want a Kubernetes control plane, etcd, OpenStack control, a worker, and storage. The add-host presets are those roles.
+5. Set `dry_run: false` and restart the two units when you want Deploy to run. Deploy uses SSH. It does not network-boot those machines.
+
+A machine may stay a plain Ubuntu server. Install Ubuntu on a Hosts row is a different action. It puts Ubuntu on that one machine and waits until it answers. It does not install Kubernetes or OpenStack. A host that already answers stays on disk. A host that does not answer is network-booted, and that boot uses a management port when the machine has one.
+
+Settings, then Access, then Hosts, then Adopt Kubespray is the record for a cluster that is already up. Paste the kubeconfig there. It does not clone Kubespray and it does not run Ansible. Dry run must be off or the file is not stored.
+
+### The console installs the operating system
+
+Use this when the machines are empty and they have a management port. Talos is the operating system the console installs. It boots a machine straight into Kubernetes. The console answers DHCP and serves the boot file, wipes the disks, boots Talos, then runs the Genestack scripts. DHCP is how a machine asks for an address. The boot file is the small program the network card downloads when the machine starts from the network instead of from its disk.
+
+L2 is recommended. L2 means the deploy host is on the same local network as the machines, so the console can hand out addresses and the boot file itself. When the deploy host cannot be on that network, an agent on a computer that is does that job, and you still start the work from the console.
+
+In Guided setup, Servers can be BMC / Redfish or PXE. On Hosts, record the management port and the MAC address of the port on the install network. A MAC address is the hardware address of that network card.
+
+Settings, then Config. Change what you need. Save. Each save is a version. Set `dry_run: false` and restart the two units only when you are ready for the wipe. Deploy cluster asks you to confirm the wipe. It pushes the settings, network-boots Talos, then runs the Genestack pipeline: Kubernetes, then OpenStack. A server you did not select stays on its own disk. The log is Activity, then Jobs.
+
+Do not put the console's DHCP on a network other machines depend on.
+
+An ISO is rejected on this wipe path because an ISO does not wipe the disks. `baremetal.node.iso_boot` puts an ISO in the management-port virtual CD when the network card cannot PXE. That needs a management port. It is separate from booting a Talos ISO yourself and then choosing Talos is already installed.
 
 ## A lab of virtual machines
 
-Use this when you have no physical servers. VMware is fine.
+Use this when you have no physical servers. VMware ESXi is a supported start. Those guests do not have an iLO, and they do not need one.
 
-The console is one Ubuntu virtual machine and the install command:
+The console is one Ubuntu virtual machine:
 
 ```bash
 curl -fsSL https://get.genestack.dev/console.sh | bash
 ```
 
-Give it more virtual machines if you want a cloud to install. A normal guest has no management port, so the console cannot power it.
+The console VM is not the cluster. Add more guests for the cloud.
 
-The straightforward lab is Ubuntu guests you install yourself. Put them on a network the console can SSH to. In Guided setup choose Kubespray, and on Servers choose Static IPs / SSH. Enter each guest. Save the config. Turn dry run off when you want Deploy to run. Deploy uses SSH. It does not PXE those guests.
+Boot those guests from a Talos ISO, then follow Talos is already installed. Or install Ubuntu on them and follow Ubuntu is already installed. Both start from a hostname and an IP.
 
-Talos from the network is the other lab, and it is easier to get wrong. The guests and the console have to be on a network where this console is the only DHCP server. Set each guest to boot from the network, and power it yourself from VMware. If the hypervisor is also answering DHCP, the guest will not boot from the console. Do not put the console's DHCP on a network other machines depend on.
+Network boot from the console is optional in a lab, and it is easy to get wrong. The guests and the console have to be on a network where this console is the only DHCP server. Set each guest to boot from the network, and power it yourself from VMware. If the hypervisor is also answering DHCP, the guest will not boot from the console.
 
 ## Change the settings later
 

@@ -89,6 +89,124 @@ def test_servers_list_returns_saved_hosts(client, admin_headers):
     assert "mock" not in body
     assert body["ovh_bound"] is False
     assert [s["hostname"] for s in body["servers"]] == ["bare-01"]
+    assert body["servers"][0]["adopt"] == ""
+
+
+def test_adopt_records_existing_os_and_survives_static_edit(client, admin_headers):
+    env = _create_env(client, admin_headers)
+    env_id = env["id"]
+    assert (
+        _static(
+            client,
+            admin_headers,
+            env_id,
+            hostname="cp-1",
+            ip="10.30.0.11",
+            roles=["k8s_control_plane"],
+        ).status_code
+        == 201
+    )
+    assert (
+        _static(
+            client, admin_headers, env_id, hostname="wk-1", ip="10.30.0.12"
+        ).status_code
+        == 201
+    )
+
+    marked = client.post(
+        f"/api/v1/environments/{env_id}/servers/adopt",
+        headers=admin_headers,
+        json={"hostnames": ["cp-1", "wk-1", "missing-1"], "adopt": "kubespray"},
+    )
+    assert marked.status_code == 200, marked.text
+    body = marked.json()
+    assert body["adopt"] == "kubespray"
+    assert body["warnings"] == ["left alone, not in inventory: missing-1"]
+    version = body["version"]
+
+    listed = client.get(
+        f"/api/v1/environments/{env_id}/servers", headers=admin_headers
+    ).json()
+    by_name = {row["hostname"]: row for row in listed["servers"]}
+    assert by_name["cp-1"]["adopt"] == "kubespray"
+    assert by_name["wk-1"]["adopt"] == "kubespray"
+
+    again = client.post(
+        f"/api/v1/environments/{env_id}/servers/adopt",
+        headers=admin_headers,
+        json={"hostnames": ["cp-1"], "adopt": "kubespray"},
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["version"] == version
+
+    edited = _static(
+        client,
+        admin_headers,
+        env_id,
+        hostname="cp-1",
+        ip="10.30.0.21",
+        roles=["k8s_control_plane", "etcd"],
+    )
+    assert edited.status_code == 201, edited.text
+    listed = client.get(
+        f"/api/v1/environments/{env_id}/servers", headers=admin_headers
+    ).json()
+    cp = next(row for row in listed["servers"] if row["hostname"] == "cp-1")
+    assert cp["adopt"] == "kubespray"
+    assert cp["ip"] == "10.30.0.21"
+    assert cp["roles"] == ["k8s_control_plane", "etcd"]
+
+    config = client.get(
+        f"/api/v1/environments/{env_id}/config", headers=admin_headers
+    )
+    doc = yaml.safe_load(config.json()["yaml"])
+    assert doc["servers"]["cp-1"]["adopt"] == "kubespray"
+    assert doc["servers"]["wk-1"]["adopt"] == "kubespray"
+
+    cleared = client.post(
+        f"/api/v1/environments/{env_id}/servers/adopt",
+        headers=admin_headers,
+        json={"hostnames": ["cp-1", "wk-1"], "adopt": ""},
+    )
+    assert cleared.status_code == 200, cleared.text
+    listed = client.get(
+        f"/api/v1/environments/{env_id}/servers", headers=admin_headers
+    ).json()
+    assert all(row["adopt"] == "" for row in listed["servers"])
+    doc = yaml.safe_load(
+        client.get(
+            f"/api/v1/environments/{env_id}/config", headers=admin_headers
+        ).json()["yaml"]
+    )
+    assert "adopt" not in doc["servers"]["cp-1"]
+    assert "adopt" not in doc["servers"]["wk-1"]
+
+
+def test_adopt_rejects_unknown_mark_and_missing_hosts(client, admin_headers, viewer_headers):
+    env = _create_env(client, admin_headers)
+    env_id = env["id"]
+    assert (
+        _static(client, admin_headers, env_id, hostname="cp-1", ip="10.30.0.11").status_code
+        == 201
+    )
+    bad = client.post(
+        f"/api/v1/environments/{env_id}/servers/adopt",
+        headers=admin_headers,
+        json={"hostnames": ["cp-1"], "adopt": "talos"},
+    )
+    assert bad.status_code == 422
+    missing = client.post(
+        f"/api/v1/environments/{env_id}/servers/adopt",
+        headers=admin_headers,
+        json={"hostnames": ["no-such-host"], "adopt": "kubespray"},
+    )
+    assert missing.status_code == 422
+    denied = client.post(
+        f"/api/v1/environments/{env_id}/servers/adopt",
+        headers=viewer_headers,
+        json={"hostnames": ["cp-1"], "adopt": "kubespray"},
+    )
+    assert denied.status_code == 403
 
 
 # ---------------------------------------------------------------------------

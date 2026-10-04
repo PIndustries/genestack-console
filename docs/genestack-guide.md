@@ -73,9 +73,11 @@ People who sign in have one of three roles: viewer, operator, or admin. An API k
 
 ## How a server gets an operating system
 
-Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. DHCP is how a machine asks for an IP address. The boot file is the small program the network card downloads when the server is told to start from the network instead of from its disk. Both services run inside the console. This is how a server gets an operating system. Talos and Ubuntu are the two the console installs from the network. You do not install a separate DHCP server, or another program, to boot the machines.
+Where the deploy host is L2 with the servers, the console answers DHCP and serves the boot file on that network. DHCP is how a machine asks for an IP address. The boot file is the small program the network card downloads when the server is told to start from the network instead of from its disk. Both services run inside the console. This is how the console installs an operating system. Talos and Ubuntu are the two it installs from the network. You do not install a separate DHCP server, or another program, to boot the machines.
 
-Each server has two addresses you type in.
+A management port is part of that install. You can start without one. If Talos is already running from an ISO, including a virtual machine, add the host by name and address and choose Talos is already installed. The console applies the config to every saved address. It does not power the machine. If Ubuntu is already installed on a group of servers, add those hosts and choose Already have an OS. That records them for Kubespray. It does not reboot them. [Your first cluster](first-cluster.md) is the walkthrough. The management port is still how you power a machine, network-boot it, and open its console when the hardware has one.
+
+Each server has two addresses you type in on the network-boot path.
 
 - The management port. Vendors call it the BMC, iLO, or iDRAC. It is a small controller inside the server that stays on when the main computer is off. The console uses it to power the server, and to ask the server to boot from the network one time.
 - The port on the L2 network. The console, or the agent at a remote site, matches that port by its MAC address. A MAC address is the hardware address of the network card.
@@ -98,7 +100,7 @@ For a server you did select:
 
 Those four steps are the Talos path. Install Ubuntu is a separate next boot. It writes that machine's seed and can power the machine from the network. It does not run the wipe, and it does not continue into OpenStack. The Hosts page queues that boot and waits until the machine answers. The `v2026.10.03` binary stops at the next-boot menu.
 
-An ISO image cannot be the first boot of a reinstall. An ISO does not wipe the disks, so the console rejects that choice on this path.
+An ISO image cannot be the first boot of a reinstall. An ISO does not wipe the disks, so the console rejects that choice on this path. An ISO you boot yourself, on a guest that has no management port, is a different start. The console does not insert that ISO. You boot it, then point the console at the machine.
 
 Where the deploy host cannot be L2 with the servers, the console agent does this job. Install it on a computer that is L2 with those servers. DHCP and the boot files for that site run on the agent. The agent connects out to the console, and you still start the job from the console. The agent install is in the console install guide linked below.
 

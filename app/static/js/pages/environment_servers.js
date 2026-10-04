@@ -2,8 +2,10 @@
 // Saved servers render in an Inventory table with role chips, Save, and Remove.
 // OVH import is only for an environment bound to an OVH account. A role is a
 // saved cluster plan. It does not install an operating system.
-// Checked inventory rows can queue one next-boot job each. Apply names the
-// servers first. Nothing is queued until that confirm.
+// Checked inventory rows can queue one next-boot job each when they have a
+// management port. Apply names the servers first. Nothing is queued until
+// that confirm. Talos is already installed applies a config to every saved
+// address and does not power the machines. Already have an OS only records.
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { ROLES, ROLE_LABELS } from "../roles.js";
@@ -121,16 +123,17 @@ export function serversCardHtml() {
 <div class="card span-12" id="srv-card">
   <div class="toolbar">
     <h2 id="srv-title">Metal hosts</h2>
-    <span class="muted" id="srv-kicker">BMC, NICs, and the boxes in this environment</span>
+    <span class="muted" id="srv-kicker">Hostname and IP are enough. A management port is optional.</span>
     <button class="secondary btn-sm" id="srv-refresh" type="button">Refresh</button>
     <span id="srv-msg" class="muted"></span>
   </div>
-  <div class="hint-row" id="srv-hint">Reinstall keeps the OS already on that row. Choose Ubuntu or Talos beside it to install the other one. A role only saves the cluster plan.</div>
+  <div class="hint-row" id="srv-hint">Add a host by hostname and IP. Talos is already installed applies a config to every saved address and does not power the machines. Already have an OS records Ubuntu that is already there. A role only saves the cluster plan.</div>
   <div class="hint-row" id="srv-path">Reading the metal path for this environment…</div>
   <div class="srv-path-switch" id="srv-path-switch">
     <label><input type="radio" name="srv-path-choice" value="talos"> ${osNameHtml("talos", "Talos, preferred")}</label>
     <label><input type="radio" name="srv-path-choice" value="kubespray"> Kubespray, adopt an existing OS</label>
     <button class="btn-sm" id="srv-path-save" type="button" disabled>Save path</button>
+    <button class="btn-sm" id="srv-talos-installed" type="button">Talos is already installed</button>
     <span id="srv-path-msg" class="muted"></span>
   </div>
   <div id="srv-ovh-banner"></div>
@@ -144,10 +147,10 @@ export function serversCardHtml() {
     <label><input type="radio" name="srv-become" value="talos"> ${osNameHtml("talos", "Talos cluster")}</label>
     <label><input type="radio" name="srv-become" value="kubespray"> Kubespray</label>
     <button class="btn-sm" id="srv-become-apply" type="button">Apply</button>
-    <button class="secondary btn-sm" id="srv-adapt" type="button">Adapt</button>
-    <button class="secondary btn-sm" id="srv-adapt-clear" type="button">Clear adapt</button>
+    <button class="secondary btn-sm" id="srv-adapt" type="button">Already have an OS</button>
+    <button class="secondary btn-sm" id="srv-adapt-clear" type="button">Clear that record</button>
     <span id="srv-become-msg" class="muted"></span>
-    <p class="srv-become-note">Ubuntu brings the selected hosts up by itself. A host that already answers stays on disk and leaves the Talos plan. A host that does not answer is installed, and the job waits until it answers. Talos cluster and Kubespray still reboot. Adapt only records an existing OS.</p>
+    <p class="srv-become-note">Ubuntu brings the selected hosts up by itself. A host that already answers stays on disk and leaves the Talos plan. A host that does not answer is installed, and the job waits until it answers. Talos cluster and Kubespray reboot through a management port. Already have an OS only records machines that already have one.</p>
   </div>
   <table>
     <thead><tr>
@@ -234,8 +237,14 @@ export function wireServersCard(getEnvId) {
       return;
     }
     const clear = e.target.closest("#srv-adapt-clear");
-    if (clear && !clear.disabled) applyAdapt(getEnvId(), "");
+    if (clear && !clear.disabled) {
+      applyAdapt(getEnvId(), "");
+      return;
+    }
+    const installed = e.target.closest("#srv-talos-installed");
+    if (installed && !installed.disabled) pointAtInstalledTalos(getEnvId());
   });
+  gateInstalled();
 }
 
 function assignedRoleChips(roles) {
@@ -475,7 +484,7 @@ function renderBmcWall(envId, nodes, note) {
   const list = sortedBmcNodes(nodes);
   if (!list.length) {
     closeBmcWall();
-    root.innerHTML = `<div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted" style="font-size:.78rem">No BMCs are registered for this environment.</p>`;
+    root.innerHTML = `<div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted" style="font-size:.78rem">No management ports are registered. A BMC is optional. Hostname and IP are enough to start.</p>`;
     return;
   }
   root.innerHTML = `
@@ -1182,6 +1191,15 @@ function gateBecome() {
     btn.disabled = !allowed;
     if (!allowed) btn.title = "Requires operator role";
   }
+  gateInstalled();
+}
+
+function gateInstalled() {
+  const btn = document.getElementById("srv-talos-installed");
+  if (!btn) return;
+  btn.disabled = !canAdmin();
+  if (!canAdmin()) btn.title = "Requires admin role";
+  else btn.title = "Talos is already running, for example from an ISO. Does not power the machines.";
 }
 
 function syncPathSwitch() {
@@ -1231,10 +1249,10 @@ async function saveMetalPath(envId) {
 function becomeConfirmText(choice, ready, skipped) {
   const names = ready.map((row) => row.hostname).join("\n");
   const skipLine = skipped.length
-    ? `\n\nNo bare-metal record, left alone:\n${skipped.map((row) => row.hostname).join("\n")}`
+    ? `\n\nNo management port, left alone:\n${skipped.map((row) => row.hostname).join("\n")}`
     : "";
   if (!ready.length) {
-    return `None of these servers have a bare-metal record, so nothing will boot:\n${skipped.map((row) => row.hostname).join("\n")}`;
+    return `None of these servers have a management port, so nothing will reboot:\n${skipped.map((row) => row.hostname).join("\n")}\n\nTalos is already installed does not power them. Already have an OS only records them.`;
   }
   if (choice === "talos") {
     return (
@@ -1272,8 +1290,8 @@ async function applyAdapt(envId, adopt) {
   const text = !ready.length
     ? `Every selected machine is already in the cluster, so nothing will be recorded:\n${skipped.map((row) => row.hostname).join("\n")}`
     : adopt
-      ? `Record these machines for Kubespray? They already have an OS.\n\n${names}\n\nThis does not reboot them, install anything, or start a playbook. Roles stay.${skipLine}`
-      : `Clear the Kubespray record on these machines?\n\n${names}\n\nThis does not reboot them or change their roles.${skipLine}`;
+      ? `Record that these machines already have an OS?\n\n${names}\n\nThis does not reboot them, install anything, or start a playbook. The row shows Kubespray recorded. Roles stay.${skipLine}`
+      : `Clear that record on these machines?\n\n${names}\n\nThis does not reboot them or change their roles.${skipLine}`;
   if (!window.confirm(text)) return;
   if (!ready.length) {
     if (msg) msg.textContent = "Nothing recorded. Those machines are already in the cluster.";
@@ -1292,8 +1310,8 @@ async function applyAdapt(envId, adopt) {
       }),
     });
     const warn = res && Array.isArray(res.warnings) && res.warnings.length ? ` ${res.warnings.join(" ")}` : "";
-    if (msg) msg.textContent = (adopt ? "Recorded for Kubespray." : "Kubespray record cleared.") + warn;
-    toast(adopt ? "Recorded for Kubespray" : "Kubespray record cleared", "ok");
+    if (msg) msg.textContent = (adopt ? "Recorded. They already have an OS." : "Cleared that record.") + warn;
+    toast(adopt ? "Recorded. They already have an OS" : "Cleared that record", "ok");
     await loadServersCard(envId);
   } catch (e) {
     if (msg) msg.textContent = e.message;
@@ -1336,6 +1354,16 @@ function osVerb(choice, installed) {
 function paintOsButton(btn, choice) {
   const installed = btn.dataset.installed || "";
   const inCluster = btn.dataset.inCluster === "1";
+  const hasNode = btn.dataset.node === "1";
+  if (choice === "talos" && !hasNode) {
+    btn.textContent = "Already installed";
+    btn.className = `${inCluster ? "secondary " : ""}btn-sm`;
+    btn.disabled = !canAdmin();
+    btn.title = canAdmin()
+      ? "Talos is already running. Apply a config to every saved host. Does not power this machine."
+      : "Requires admin role";
+    return;
+  }
   const verb = choice ? osVerb(choice, installed) : "Install";
   btn.textContent = verb;
   const quiet = !choice || inCluster || verb === "Reinstall";
@@ -1349,14 +1377,18 @@ function paintOsButton(btn, choice) {
 
 function osControlHtml(i, server, bootByName, row, metalPath) {
   const inCluster = !!(row && row.inCluster);
+  const hasNode = !!(row && row.nodeId);
   const installed = installedOs(server, bootByName, inCluster, metalPath);
   const selected = installed === "ubuntu" || installed === "talos" ? installed : "";
-  const verb = selected ? "Reinstall" : "Install";
+  const pointAtTalos = selected === "talos" && !hasNode;
+  const verb = pointAtTalos ? "Already installed" : selected ? "Reinstall" : "Install";
   const quiet = inCluster || verb === "Reinstall";
   const host = String((server && server.hostname) || "host");
   const title = !selected
     ? "Pick Ubuntu or Talos"
-    : selected === "ubuntu" && inCluster
+    : pointAtTalos
+      ? "Talos is already running. Apply a config to every saved host. Does not power this machine."
+      : selected === "ubuntu" && inCluster
       ? "Reinstall Ubuntu and remove this machine from the cluster"
       : selected === "ubuntu"
         ? "Reinstall Ubuntu on this machine and leave it out of the cluster"
@@ -1369,7 +1401,7 @@ function osControlHtml(i, server, bootByName, row, metalPath) {
     `<span class="srv-os-choices" role="radiogroup" aria-label="Operating system for ${esc(host)}">` +
     `${choice("ubuntu", "Ubuntu")}${choice("talos", "Talos")}` +
     `</span> ` +
-    `<button class="${quiet ? "secondary " : ""}btn-sm" type="button" data-reconfigure="${i}" data-installed="${esc(installed)}" data-in-cluster="${inCluster ? "1" : "0"}" title="${esc(title)}" ${gate(canRun(), "operator")}${selected ? "" : " disabled"}>${verb}</button>`
+    `<button class="${quiet ? "secondary " : ""}btn-sm" type="button" data-reconfigure="${i}" data-installed="${esc(installed)}" data-in-cluster="${inCluster ? "1" : "0"}" data-node="${hasNode ? "1" : "0"}" title="${esc(title)}" ${gate(pointAtTalos ? canAdmin() : canRun(), pointAtTalos ? "admin" : "operator")}${selected ? "" : " disabled"}>${verb}</button>`
   );
 }
 
@@ -1409,6 +1441,39 @@ async function bringUpUbuntu(envId, picks) {
   await queueUbuntuBringup(envId, picks);
 }
 
+async function pointAtInstalledTalos(envId) {
+  const msg = document.getElementById("srv-become-msg");
+  if (!canAdmin()) {
+    const text = "An admin points the console at Talos that is already installed.";
+    if (msg) msg.textContent = text;
+    toast(text, "bad");
+    return;
+  }
+  if (!window.confirm(
+    "Point this console at Talos that is already installed?\n\n" +
+    "This uses every saved host, not one row. Each machine must already be running Talos and waiting for a config. That is what an ISO install does, including a VMware guest.\n\n" +
+    "The console does not power the machines and does not use a management port. It applies a Talos config to each address, bootstraps etcd once, and fetches the kubeconfig.\n\n" +
+    "One host needs the control plane role. The install disk defaults to /dev/sda. Confirm that disk. Dry run only logs the commands."
+  )) return;
+  const btn = document.getElementById("srv-talos-installed");
+  if (btn) btn.disabled = true;
+  try {
+    const job = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({ operation: "genestack.talos.bootstrap", params: {} }),
+    });
+    const id = job && job.id != null ? String(job.id) : "";
+    const text = id ? `Talos bootstrap queued ${id.slice(0, 8)}` : "Talos bootstrap queued";
+    if (msg) msg.textContent = text;
+    toast(text, "ok");
+  } catch (e) {
+    if (msg) msg.textContent = e.message;
+    toast(e.message, "bad");
+  } finally {
+    gateInstalled();
+  }
+}
+
 async function reconfigureHost(envId, row, choice, installed) {
   const host = row.hostname || "this machine";
   if (choice === "ubuntu") {
@@ -1423,10 +1488,7 @@ async function reconfigureHost(envId, row, choice, installed) {
   }
   if (choice !== "talos") return;
   if (!row.nodeId) {
-    const msg = document.getElementById("srv-become-msg");
-    const text = `${host} has no bare-metal record, so nothing will boot.`;
-    if (msg) msg.textContent = text;
-    toast(text, "bad");
+    await pointAtInstalledTalos(envId);
     return;
   }
   const verb = osVerb(choice, installed);
@@ -1476,7 +1538,7 @@ async function applyBecome(envId) {
   const skipped = picks.filter((row) => !row.nodeId);
   if (!window.confirm(becomeConfirmText(choiceEl.value, ready, skipped))) return;
   if (!ready.length) {
-    if (msg) msg.textContent = "Nothing queued. Those servers have no bare-metal record.";
+    if (msg) msg.textContent = "Nothing queued. Those servers have no management port. Talos is already installed does not power them.";
     return;
   }
   const nextBoot = choiceEl.value === "talos" ? "talos" : "ubuntu";
@@ -1579,12 +1641,12 @@ export async function loadServersCard(envId) {
   if (kicker) {
     kicker.textContent = ovhBound
       ? "Dedicated · vRack · private fabric"
-      : "BMC, NICs, and the boxes in this environment";
+      : "Hostname and IP are enough. A management port is optional.";
   }
   if (hint) {
     hint.textContent = ovhBound
       ? "Dedicated servers use a public NIC for management and a private NIC on the vRack. Roles here are the saved cluster plan."
-      : "Reinstall keeps the OS already on that row. Choose Ubuntu or Talos beside it to install the other one. A role only saves the cluster plan.";
+      : "Add a host by hostname and IP. Talos is already installed applies a config to every saved address and does not power the machines. Already have an OS records Ubuntu that is already there. A role only saves the cluster plan.";
   }
   const pathLine = document.getElementById("srv-path");
   if (pathLine) pathLine.textContent = metalPathSentence(metalPath);
@@ -1877,7 +1939,7 @@ export async function loadServersCard(envId) {
 
   discovered.innerHTML = ovhBound
     ? `<p class="muted" style="margin:.3rem 0">Import dedicated servers from the bound OVH account, or add a host by hostname and IP.</p>`
-    : `<p class="muted" style="margin:.3rem 0">Add a host by hostname and IP. This only saves the host. It does not boot it.</p>`;
+    : `<p class="muted" style="margin:.3rem 0">Add a host by hostname and IP. This only saves the host. It does not boot it. Use this for a Talos ISO, or for Ubuntu that is already installed.</p>`;
 }
 
 async function saveInventoryRow(envId, server, rowIdx) {
