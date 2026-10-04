@@ -72,7 +72,12 @@ button.danger { background: #da3633; color: #fff; }
 .shell,
 .login-wrap,
 #toast-root { position: relative; z-index: 1; }
-.sidebar { background: rgba(7, 14, 9, 0.94); }
+.sidebar {
+  background: rgba(7, 14, 9, 0.55);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(125, 255, 176, 0.22);
+}
 
 .brand-lockup {
   position: relative;
@@ -148,62 +153,35 @@ button.danger { background: #da3633; color: #fff; }
   align-items: center;
   padding: 0.85rem 0.35rem 0.15rem;
 }
-/* One bright spot travels the frame. The rest of the line stays dim.
-   The two frames run at different speeds, so they do not light together. */
-@property --gsc-tron {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+.card {
+  background: linear-gradient(180deg, rgba(14, 30, 18, 0.62), rgba(7, 14, 9, 0.5));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: gsc-glass-edge 8.5s ease-in-out infinite;
 }
-@keyframes gsc-tron-run { to { --gsc-tron: 360deg; } }
-.sidebar {
-  border: 1.5px solid transparent;
-  background:
-    linear-gradient(rgba(7, 14, 9, 0.94), rgba(7, 14, 9, 0.94)) padding-box,
-    conic-gradient(
-      from var(--gsc-tron),
-      rgba(52, 199, 89, 0.22) 0deg,
-      rgba(52, 199, 89, 0.22) 286deg,
-      rgba(120, 255, 180, 0.55) 322deg,
-      #f4fff8 340deg,
-      rgba(74, 222, 128, 0.8) 352deg,
-      rgba(52, 199, 89, 0.22) 360deg
-    ) border-box;
-  animation: gsc-tron-run 7.5s linear infinite;
-}
-.main {
-  margin: 0.4rem 0.45rem 0.45rem 0;
-  border: 1.5px solid transparent;
-  border-radius: 0.75rem;
-  background:
-    linear-gradient(transparent, transparent) padding-box,
-    conic-gradient(
-      from var(--gsc-tron),
-      rgba(52, 199, 89, 0.18) 0deg,
-      rgba(52, 199, 89, 0.18) 292deg,
-      rgba(120, 255, 180, 0.5) 326deg,
-      #f4fff8 342deg,
-      rgba(74, 222, 128, 0.75) 354deg,
-      rgba(52, 199, 89, 0.18) 360deg
-    ) border-box;
-  animation: gsc-tron-run 11s linear infinite reverse;
-}
+.card:nth-child(2n) { animation-delay: -2.8s; }
+.card:nth-child(3n) { animation-delay: -5.6s; }
 @keyframes gsc-breathe {
   0%, 100% { transform: scale(0.992); opacity: 0.92; }
   50% { transform: scale(1.012); opacity: 1; }
 }
+@keyframes gsc-glass-edge {
+  0%, 100% {
+    border-color: rgba(26, 61, 40, 0.85);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  }
+  50% {
+    border-color: rgba(141, 240, 106, 0.4);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), inset 0 0 0 1px rgba(52, 199, 89, 0.08);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .gsc-mark,
-  .sidebar,
-  .main { animation: none; }
+  .card { animation: none; }
   .gsc-mark { opacity: 0.92; transform: none; }
-  .sidebar {
-    border-color: rgba(125, 255, 176, 0.42);
-    background: rgba(7, 14, 9, 0.94);
-  }
-  .main {
-    border-color: rgba(125, 255, 176, 0.42);
-    background: none;
+  .card {
+    border-color: var(--border);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   }
   #gsc-breath, .brand-breath { display: none; }
 }
