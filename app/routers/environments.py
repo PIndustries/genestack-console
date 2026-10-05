@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.deps import (
     check_tenant_access,
     get_db,
@@ -19,7 +21,6 @@ from app.deps import (
     require_viewer,
 )
 from app.models import Environment, Job, Membership, Tenant
-from app.config import get_settings
 from app.schemas import (
     MASKED_KUBECONFIG_DATA,
     EnvironmentCreate,
@@ -27,17 +28,42 @@ from app.schemas import (
     EnvironmentUpdate,
     Principal,
 )
-from app.services.crypto import encrypt_secret
 from app.services import envconfig as envconfig_service
+from app.services.crypto import encrypt_secret
+from app.services.events import publish_sync
 from app.services.inventory import build_inventory_from_environment
 from app.services.job_runner import JobRunner
 from app.services.ssh_keys import store_key_pair
 
 router = APIRouter(prefix="/api/v1/environments", tags=["environments"])
+log = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _publish_environment(
+    action: str, environment_id: str, name: str, tenant_id: str | None
+) -> None:
+    """Publish one lifecycle event after the row is committed.
+
+    The fleet board, the sidebar, and the environment selectors all read
+    this event. A closed event loop must not fail the request.
+    """
+    try:
+        publish_sync(
+            "environments",
+            {
+                "type": "environment",
+                "action": action,
+                "environment_id": environment_id,
+                "name": name,
+                "tenant_id": tenant_id,
+            },
+        )
+    except RuntimeError:
+        log.warning("environment lifecycle event was not published", exc_info=True)
 
 
 def _default_genestack_config_dir(data_dir: Path, name: str) -> str:
@@ -137,6 +163,7 @@ def create_environment(
     )
     db.commit()
     db.refresh(env)
+    _publish_environment("created", env.id, env.name, env.tenant_id)
     return EnvironmentRead.from_orm_env(env)
 
 
@@ -212,6 +239,7 @@ def update_environment(
     )
     db.commit()
     db.refresh(env)
+    _publish_environment("updated", env.id, env.name, env.tenant_id)
     return EnvironmentRead.from_orm_env(env)
 
 
@@ -239,8 +267,10 @@ def delete_environment(
         details={"name": env.name, "jobs_deleted": len(jobs)},
         success=True,
     )
+    deleted_id, deleted_name, deleted_tenant = env.id, env.name, env.tenant_id
     db.delete(env)
     db.commit()
+    _publish_environment("deleted", deleted_id, deleted_name, deleted_tenant)
 
 
 @router.get("/{environment_id}/registry")

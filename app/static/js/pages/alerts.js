@@ -35,7 +35,7 @@ export async function render(root) {
   <div class="card">
     <div class="toolbar">
       <h2>Firing alerts</h2>
-      <select id="f-env">${envOptionsHtml(null, { includeNone: true, noneLabel: "all environments" })}</select>
+      <select id="f-env" data-gsc-env-select data-gsc-env-none="all environments">${envOptionsHtml(null, { includeNone: true, noneLabel: "all environments" })}</select>
       <button class="secondary btn-sm" id="btn-al-refresh" type="button">Refresh</button>
       <span id="al-msg" class="muted"></span>
     </div>
@@ -70,7 +70,7 @@ export async function render(root) {
           (s) => `<option value="${s}">${s}</option>`
         ).join("")}</select></label>
         <label class="field span-2"><span>Threshold</span><input id="rf-threshold" type="number" min="1" step="1" value="1" /></label>
-        <label class="field span-4"><span>Environment</span><select id="rf-env">${envOptionsHtml(null, {
+        <label class="field span-4"><span>Environment</span><select id="rf-env" data-gsc-env-select data-gsc-env-none="(all environments)">${envOptionsHtml(null, {
           includeNone: true,
           noneLabel: "(all environments)",
         })}</select></label>

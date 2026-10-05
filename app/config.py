@@ -215,6 +215,9 @@ class Settings(BaseModel):
     oidc_label: str = "SSO"
     update_url: str = "https://github.com/PIndustries/genestack-console/releases/latest/download/version.json"
     update_auto: bool = False
+    # The running console installs a newer published build when this is on
+    # and no job is queued or running. False leaves that to the update button.
+    update_watch: bool = True
     # Pull GitHub releases when the channel has no stack pin (open-source
     # installs cannot be pushed). Empty disables the GitHub fallback.
     update_github_repo: str = "rackerlabs/genestack"
@@ -523,6 +526,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
     update_auto = upd.get("auto", False)
     if isinstance(update_auto, str):
         update_auto = update_auto.strip().lower() in {"1", "true", "yes", "on"}
+    update_watch = _as_bool(upd.get("watch", True))
     update_github_repo = (
         str(upd.get("github_repo") or "rackerlabs/genestack").strip()
         or "rackerlabs/genestack"
@@ -619,6 +623,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         oidc_label=str(oidc.get("label") or "SSO").strip() or "SSO",
         update_url=update_url,
         update_auto=bool(update_auto),
+        update_watch=bool(update_watch),
         update_github_repo=update_github_repo,
         update_eol_force=bool(update_eol_force),
         update_refusal_limit=update_refusal_limit,

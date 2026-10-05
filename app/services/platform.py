@@ -22,8 +22,10 @@ from app.services.livestate import _mem_to_gi, _run
 from app.services.osclient import OpenStackClient
 from app.services.talos import (
     DEFAULT_TALOS_INSTALL_IMAGE,
+    apply_config_cli_mode,
     node_apply_ip,
     node_cluster_ip,
+    talosctl_bin,
     valid_install_image,
     valid_node_endpoint,
 )
@@ -136,7 +138,7 @@ def _k8s_nodes(ctx) -> list[dict[str, Any]]:
 
 
 def _talos_version(talosconfig: str, node_ip: str) -> dict[str, Any]:
-    talosctl = shutil.which("talosctl")
+    talosctl = talosctl_bin()
     if not talosctl or not node_ip:
         return {
             "reachable": False,
@@ -435,7 +437,7 @@ def talos_dmesg(
     talosconfig, node_ip = _node_public_ip(env, settings, db, name)
     if not talosconfig or not node_ip:
         return {"ok": False, "error": "talosconfig or node IP missing", "text": ""}
-    talosctl = shutil.which("talosctl")
+    talosctl = talosctl_bin()
     if not talosctl:
         return {"ok": False, "error": "talosctl not found", "text": ""}
     try:
@@ -505,7 +507,7 @@ def talos_services(
             "node": name,
             "ip": node_ip,
         }
-    talosctl = shutil.which("talosctl")
+    talosctl = talosctl_bin()
     if not talosctl:
         return {
             "ok": False,
@@ -573,7 +575,7 @@ def talos_reboot(
             "node": name,
             "ip": node_ip,
         }
-    talosctl = shutil.which("talosctl")
+    talosctl = talosctl_bin()
     if not talosctl:
         return {"ok": False, "dry_run": False, "error": "talosctl not found"}
     try:
@@ -666,7 +668,7 @@ def talos_upgrade(
             "node": name,
             "ip": node_ip,
         }
-    talosctl = shutil.which("talosctl")
+    talosctl = talosctl_bin()
     if not talosctl:
         return {
             "ok": False,
@@ -872,7 +874,7 @@ def _prepare_talos(
             "node": name,
             "ip": node_ip,
         }
-    talosctl = shutil.which("talosctl")
+    talosctl = talosctl_bin()
     if not talosctl:
         return {
             "ok": False,
@@ -1435,14 +1437,16 @@ def talos_apply_config(
             "ip": ctx.get("ip"),
             "mode": mode_norm,
         }
+    cli_mode, reboot_after = apply_config_cli_mode(mode_norm)
     if dry_run:
+        reboot_note = " then reboot" if reboot_after else ""
         return {
             "ok": True,
             "dry_run": True,
             "error": None,
             "message": (
                 f"[dry-run] would apply-config on {name} ({ctx.get('ip')}) "
-                f"mode={mode_norm} ({len(raw)} bytes)"
+                f"mode={mode_norm}{reboot_note} ({len(raw)} bytes)"
             ),
             "node": name,
             "ip": ctx.get("ip"),
@@ -1457,7 +1461,7 @@ def talos_apply_config(
             ctx["talosctl"],
             ctx["talosconfig"],
             ctx["ip"],
-            ["apply-config", "--file", path, "--mode", mode_norm],
+            ["apply-config", "--file", path, "--mode", cli_mode],
             timeout=APPLY_TIMEOUT,
             strict=True,
         )
@@ -1484,11 +1488,33 @@ def talos_apply_config(
             "ip": ctx.get("ip"),
             "mode": mode_norm,
         }
+    if reboot_after:
+        reboot = _run_talosctl(
+            ctx["talosctl"],
+            ctx["talosconfig"],
+            ctx["ip"],
+            ["reboot", "--wait=false"],
+            timeout=30,
+            strict=True,
+        )
+        if not reboot.get("ok"):
+            return {
+                "ok": False,
+                "dry_run": False,
+                "error": reboot.get("error") or "reboot failed",
+                "message": f"config applied on {name} ({ctx.get('ip')}); reboot failed",
+                "node": name,
+                "ip": ctx.get("ip"),
+                "mode": mode_norm,
+            }
+    reboot_note = " then reboot" if reboot_after else ""
     return {
         "ok": True,
         "dry_run": False,
         "error": None,
-        "message": f"config applied on {name} ({ctx.get('ip')}) mode={mode_norm}",
+        "message": (
+            f"config applied on {name} ({ctx.get('ip')}) mode={mode_norm}{reboot_note}"
+        ),
         "node": name,
         "ip": ctx.get("ip"),
         "mode": mode_norm,

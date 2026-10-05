@@ -70,8 +70,8 @@ button.danger { background: #da3633; color: #fff; }
   pointer-events: none;
 }
 .shell,
-.login-wrap,
-#toast-root { position: relative; z-index: 1; }
+.login-wrap { position: relative; z-index: 1; }
+#toast-root { position: fixed; z-index: 4000; }
 .sidebar {
   background: rgba(7, 14, 9, 0.55);
   backdrop-filter: blur(18px);

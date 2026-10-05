@@ -1,16 +1,16 @@
 // app.js — portal shell: login, whoami, hash router, topbar.
-import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clearRefresh, esc, toast } from "./api.js";
-import { store, loadEnvs } from "./store.js";
+import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clearRefresh, esc, toast, fmtAge } from "./api.js";
+import { store, loadEnvs, applyEnvLifecycle, refreshEnvSelects } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
-import * as fleet from "./pages/fleet.js?v=ls27";
+import * as fleet from "./pages/fleet.js?v=ls30";
 import * as hosts from "./pages/hosts.js";
-import * as environments from "./pages/environments.js";
+import * as environments from "./pages/environments.js?v=ls30";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls28";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls33";
 import * as envWizard from "./pages/env_wizard.js?v=ls27";
 import * as admin from "./pages/admin.js";
 
@@ -31,6 +31,7 @@ const ROUTE_REDIRECTS = {
 let current = null;
 let authed = false;
 let alertsStream = null;
+let envStream = null;
 
 // ---------- firing-alerts nav badge ----------
 
@@ -62,6 +63,28 @@ function stopAlertsBadge() {
   }
   const badge = $("alerts-badge");
   if (badge) badge.classList.add("hidden");
+}
+
+// One subscription for the life of the session. Create, update, and delete
+// all arrive on "environments", and every surface that lists environments
+// reads that event.
+function startEnvLifecycle() {
+  if (envStream) envStream.close();
+  envStream = connect(["environments"], {
+    environments: async (payload) => {
+      if (!payload || payload.action !== "deleted") {
+        try { await loadEnvs(); } catch { /* keep the list we have */ }
+      }
+      applyEnvLifecycle(payload || { action: "updated" });
+    },
+  });
+}
+
+function stopEnvLifecycle() {
+  if (envStream) {
+    envStream.close();
+    envStream = null;
+  }
 }
 
 function $(id) {
@@ -183,6 +206,263 @@ async function checkUpdateBanner() {
   } catch { /* channel optional */ }
 }
 
+// The page remembers the build it loaded. A newer process reloads the page
+// so the new script runs, then the release notes stay up until acknowledged.
+const ACK_KEY = "gsc-ack-version";
+let bootedVersion = "";
+let versionTimer = null;
+
+function stopVersionWatch() {
+  if (versionTimer) {
+    clearInterval(versionTimer);
+    versionTimer = null;
+  }
+}
+
+function startVersionWatch() {
+  stopVersionWatch();
+  versionTimer = setInterval(() => {
+    watchRunningVersion();
+  }, 20000);
+}
+
+async function rememberBootVersion() {
+  try {
+    const h = await api("/health");
+    bootedVersion = h && h.version ? String(h.version) : "";
+  } catch {
+    bootedVersion = "";
+  }
+}
+
+async function watchRunningVersion() {
+  let version = "";
+  try {
+    const h = await api("/health");
+    version = h && h.version ? String(h.version) : "";
+  } catch {
+    return;
+  }
+  if (!version) return;
+  if (!bootedVersion) {
+    bootedVersion = version;
+    if (!document.getElementById("gsc-notes")) maybeAnnounceUpdate();
+    return;
+  }
+  if (version !== bootedVersion) location.reload();
+}
+
+function githubHref(url) {
+  const text = String(url || "");
+  const prefix = "https://github.com/PIndustries/genestack-console/";
+  return text.startsWith(prefix) ? text : "";
+}
+
+function pipeLabel(row) {
+  const conclusion = row && row.conclusion ? String(row.conclusion) : "";
+  const status = row && row.status ? String(row.status) : "";
+  const key = conclusion || status;
+  if (key === "success") return "Succeeded";
+  if (key === "failure") return "Failed";
+  if (key === "cancelled") return "Cancelled";
+  if (key === "skipped") return "Skipped";
+  if (status === "in_progress" || key === "in_progress") return "Running";
+  if (status === "queued" || key === "queued") return "Queued";
+  return key || "Unknown";
+}
+
+function pipeKind(row) {
+  const conclusion = row && row.conclusion ? String(row.conclusion) : "";
+  const status = row && row.status ? String(row.status) : "";
+  if (conclusion === "success") return "ok";
+  if (conclusion === "failure" || conclusion === "cancelled") return "bad";
+  if (status === "in_progress" || status === "queued") return "warn";
+  return "";
+}
+
+function notesHtml(release) {
+  if (!release) {
+    return '<p class="muted">Release notes for this build are not listed yet.</p>';
+  }
+  const parts = [];
+  if (release.summary) parts.push(`<p>${esc(release.summary)}</p>`);
+  const items = Array.isArray(release.items) ? release.items : [];
+  if (items.length) {
+    const lines = items.map((item) => `<li>${esc(item)}</li>`).join("");
+    parts.push(`<ul class="gsc-notes-list">${lines}</ul>`);
+  }
+  if (!parts.length) {
+    return '<p class="muted">Release notes for this build are not listed yet.</p>';
+  }
+  return parts.join("");
+}
+
+function closeNotes(overlay) {
+  if (overlay && overlay.parentNode) overlay.remove();
+}
+
+function showUpdated(version, release) {
+  const open = document.getElementById("gsc-notes");
+  if (open) open.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "gsc-notes";
+  overlay.className = "gsc-notes";
+  overlay.innerHTML = `
+    <div class="gsc-notes-card" role="dialog" aria-modal="true" aria-label="Console updated">
+      <h2>Updated to ${esc(version)}</h2>
+      <p class="muted">This console is on that build.</p>
+      ${notesHtml(release)}
+      <div class="gsc-notes-actions">
+        <button type="button" class="btn-sm" data-gsc-ack>Acknowledge</button>
+      </div>
+    </div>`;
+  overlay.addEventListener("click", (e) => {
+    if (!e.target.closest("[data-gsc-ack]")) return;
+    try {
+      localStorage.setItem(ACK_KEY, version);
+    } catch { /* the note returns next time */ }
+    closeNotes(overlay);
+  });
+  document.body.appendChild(overlay);
+  const ack = overlay.querySelector("[data-gsc-ack]");
+  if (ack) ack.focus();
+}
+
+async function maybeAnnounceUpdate() {
+  const current = bootedVersion;
+  if (!current || document.getElementById("gsc-notes")) return false;
+  let known = "";
+  try {
+    known = localStorage.getItem(ACK_KEY) || "";
+  } catch {
+    return false;
+  }
+  if (!known) {
+    try {
+      localStorage.setItem(ACK_KEY, current);
+    } catch { /* never nag when storage is blocked */ }
+    return false;
+  }
+  if (known === current) return false;
+  let release = null;
+  try {
+    const feed = await api("/api/v1/update/feed");
+    const rows = Array.isArray(feed.releases) ? feed.releases : [];
+    release = rows.find((row) => row && row.version === current) || null;
+  } catch { /* the note still says the version */ }
+  if (document.getElementById("gsc-notes")) return true;
+  showUpdated(current, release);
+  return true;
+}
+
+function renderPipeline(runs) {
+  const rows = Array.isArray(runs) ? runs.slice(0, 12) : [];
+  if (!rows.length) {
+    return '<p class="muted">No pipeline runs are visible from this console.</p>';
+  }
+  return `<div class="gsc-pipe">${rows.map((run) => {
+    const href = githubHref(run.html_url);
+    const link = href ? `<a href="${esc(href)}" target="_blank" rel="noopener">View</a>` : "";
+    const jobs = Array.isArray(run.jobs) ? run.jobs : [];
+    const jobHtml = jobs.length
+      ? `<ul class="gsc-notes-list">${jobs.map((job) => `<li>${esc(job.name)} — ${esc(pipeLabel(job))}</li>`).join("")}</ul>`
+      : "";
+    const when = fmtAge(run.started_at);
+    const meta = [run.title, run.sha, when].filter(Boolean).map((bit) => esc(bit)).join(" · ");
+    return `<div class="gsc-pipe-row">
+      <div class="gsc-pipe-top">
+        <strong>${esc(run.name || "workflow")}</strong>
+        <span class="pill ${pipeKind(run)}">${esc(pipeLabel(run))}</span>
+      </div>
+      <div class="muted">${meta}</div>
+      ${jobHtml}
+      ${link}
+    </div>`;
+  }).join("")}</div>`;
+}
+
+function renderReleases(releases) {
+  const rows = Array.isArray(releases) ? releases.slice(0, 12) : [];
+  if (!rows.length) {
+    return '<p class="muted">No release notes are visible from this console.</p>';
+  }
+  return rows.map((rel) => {
+    const href = githubHref(rel.html_url);
+    const link = href ? `<a href="${esc(href)}" target="_blank" rel="noopener">Release</a>` : "";
+    const when = fmtAge(rel.published_at);
+    const flag = rel.prerelease ? '<span class="muted">prerelease</span>' : "";
+    return `<section class="gsc-rel">
+      <div class="gsc-pipe-top">
+        <h3>${esc(rel.version || "")}</h3>
+        <span class="muted">${esc(when)} ${flag}</span>
+      </div>
+      ${notesHtml(rel)}
+      ${link}
+    </section>`;
+  }).join("");
+}
+
+async function openChangelog() {
+  const open = document.getElementById("gsc-notes");
+  if (open && open.querySelector("[data-gsc-ack]")) return;
+  if (open) open.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "gsc-notes";
+  overlay.className = "gsc-notes";
+  overlay.innerHTML = `
+    <div class="gsc-notes-card" role="dialog" aria-modal="true" aria-label="Changelog">
+      <h2>Changelog</h2>
+      <p class="muted">Loading the published builds.</p>
+    </div>`;
+  function onKey(e) {
+    if (e.key !== "Escape") return;
+    document.removeEventListener("keydown", onKey);
+    closeNotes(overlay);
+  }
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.closest("[data-gsc-notes-close]")) {
+      document.removeEventListener("keydown", onKey);
+      closeNotes(overlay);
+    }
+  });
+  document.body.appendChild(overlay);
+  let feed = null;
+  try {
+    feed = await api("/api/v1/update/feed");
+  } catch (err) {
+    const card = overlay.querySelector(".gsc-notes-card");
+    if (!card || !overlay.isConnected) return;
+    card.innerHTML = `
+      <h2>Changelog</h2>
+      <p class="muted">${esc(err.message || "The changelog is not reachable.")}</p>
+      <div class="gsc-notes-actions">
+        <button type="button" class="secondary btn-sm" data-gsc-notes-close>Close</button>
+      </div>`;
+    return;
+  }
+  if (!overlay.isConnected) return;
+  const card = overlay.querySelector(".gsc-notes-card");
+  if (!card) return;
+  const watchLine = feed && feed.watch
+    ? "A newer build installs on its own after queued and running jobs finish."
+    : "Automatic install is off. The update button installs a newer build.";
+  const missing = feed && feed.github_reachable === false
+    ? '<p class="muted">GitHub is not reachable from this console.</p>'
+    : "";
+  card.innerHTML = `
+    <h2>Changelog</h2>
+    <p class="muted">${esc(watchLine)}</p>
+    ${missing}
+    <h3>Pipeline</h3>
+    ${renderPipeline(feed && feed.pipeline)}
+    <h3>Releases</h3>
+    ${renderReleases(feed && feed.releases)}
+    <div class="gsc-notes-actions">
+      <button type="button" class="secondary btn-sm" data-gsc-notes-close>Close</button>
+    </div>`;
+}
+
 async function enterApp() {
   authed = true;
   show($("login-view"), false);
@@ -191,11 +471,15 @@ async function enterApp() {
   startAlertsBadge();
   updateAdminNav();
   await setupTenantSwitcher();
+  startEnvLifecycle();
   const envsPromise = loadEnvs();
   envsPromise.catch(() => {});
   route();
-  maybeShowWelcome();
   checkUpdateBanner();
+  await rememberBootVersion();
+  startVersionWatch();
+  const announced = await maybeAnnounceUpdate();
+  if (!announced) maybeShowWelcome();
   // First-run: zero environments and no explicit destination — take the
   // operator straight to the guided setup instead of an empty board.
   // Empty hash and #/fleet both count (OIDC lands on #/fleet). Leave
@@ -314,6 +598,9 @@ function logout(msg) {
     current = null;
   }
   stopAlertsBadge();
+  stopEnvLifecycle();
+  stopVersionWatch();
+  bootedVersion = "";
   closeAll(); // no stream may outlive the session that authorized it
   serverLogout();
   clearKey();
@@ -527,9 +814,14 @@ function syncNav(name, param, query) {
   });
   const titleLink = $("nav-env-title");
   if (titleLink && inEnv) {
-    const env = (store.envs || []).find((e) => e.id === param);
+    let id = param;
+    try { id = decodeURIComponent(param); } catch { /* keep the raw segment */ }
+    const env = (store.envs || []).find((e) => e.id === id);
     titleLink.textContent = (env && env.name) || "Environment";
-    titleLink.href = envHash(param, "workflow");
+    titleLink.href = envHash(id, "workflow");
+  } else if (titleLink) {
+    titleLink.textContent = "Environment";
+    titleLink.href = "#/fleet";
   }
 }
 
@@ -604,6 +896,8 @@ $("api-key").addEventListener("keydown", (e) => {
   if (e.key === "Enter") doKeyLogin();
 });
 $("btn-logout").addEventListener("click", () => logout());
+const changelogBtn = $("btn-changelog");
+if (changelogBtn) changelogBtn.addEventListener("click", () => { openChangelog(); });
 
 (function wireUserMenu() {
   const menu = $("user-menu");
@@ -637,6 +931,23 @@ window.addEventListener("gsc-dry-run", () => {
 window.addEventListener("gsc-nav-sync", () => {
   const { name, param, query } = parseHash();
   syncNav(name, param, query);
+});
+window.addEventListener("gsc-envs", (ev) => {
+  const detail = (ev && ev.detail) || {};
+  const { name, param, query } = parseHash();
+  let openId = param;
+  try { if (param) openId = decodeURIComponent(param); } catch { /* keep the raw segment */ }
+  if (
+    detail.action === "deleted" &&
+    name === "environment_detail" &&
+    openId &&
+    String(detail.environment_id || "") === openId
+  ) {
+    location.hash = "#/fleet";
+    return;
+  }
+  syncNav(name, param, query);
+  refreshEnvSelects();
 });
 
 (async function boot() {

@@ -34,7 +34,7 @@ A route that names an environment checks your membership in that environment's t
 | File | What it serves |
 | --- | --- |
 | `app/routers/health.py` | `GET /health`. No login. |
-| `app/routers/update.py` | Whether a newer console release is published. The check reads `update.url` in `config.yaml`. The default in the program is the `version.json` file on the GitHub Release. |
+| `app/routers/update.py` | Whether a newer console release is published, and `GET /api/v1/update/feed` for the release notes and the public pipeline. The check reads `update.url` in `config.yaml`. The default in the program is the `version.json` file on the GitHub Release. A viewer can read both. The running console installs a newer build when `update.watch` is on and no job is queued or running. |
 | `app/routers/ui.py` | The web page at `/ui`, and `/docs` on the console itself. |
 | `app/routers/agents.py` | The agent install script, unauthenticated, and the agent API. The install script is the curl the remote machine runs. The agent then connects out. |
 | `app/routers/reach.py` | WireGuard, Tailscale, and Cloudflare Tunnel on this deploy host, and the address used for one environment. A platform admin saves the hub. An operator attaches an environment. Private keys, auth keys, and tunnel tokens are not returned. A WireGuard client config is returned once, when the peer is created. On `main`. Not in the `v2026.10.03` binary. |

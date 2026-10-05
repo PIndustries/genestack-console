@@ -829,12 +829,12 @@ def test_deploy_talos_provider_runs_talos_flow_not_setup_hosts(
     assert "$ bash bin/setup-hosts.sh" not in log_text
     # The talos flow commands run in docs/k8s-talos.md order
     expected = [
-        "$ talosctl gen config",
-        "$ talosctl config endpoints 10.0.0.11 --talosconfig=./talosconfig",
-        "$ talosctl apply-config --insecure --nodes 10.0.0.11 --file controlplane.yaml",
-        "$ talosctl apply-config --insecure --nodes 10.0.0.21 --file worker.yaml",
-        "$ talosctl bootstrap --nodes 10.0.0.11 --talosconfig=./talosconfig",
-        "$ talosctl kubeconfig",
+        "talosctl gen config",
+        "talosctl config endpoints 10.0.0.11 --talosconfig=./talosconfig",
+        "talosctl apply-config --insecure --nodes 10.0.0.11 --file controlplane.yaml",
+        "talosctl apply-config --insecure --nodes 10.0.0.21 --file worker.yaml",
+        "talosctl bootstrap --nodes 10.0.0.11 --talosconfig=./talosconfig",
+        "talosctl kubeconfig",
     ]
     positions = []
     for line in expected:
@@ -855,13 +855,17 @@ def _capture_talos_deploy_commands(monkeypatch, fail_worker=False):
         argv = [str(c) for c in cmd]
         captured.append(argv)
         rc = 0
+        head = argv[0]
+        is_talos = head == "talosctl" or head.endswith("/talosctl")
         if (
-            argv[:2] == ["talosctl", "apply-config"]
+            is_talos
+            and len(argv) > 1
+            and argv[1] == "apply-config"
             and "worker.yaml" in argv
             and fail_worker
         ):
             rc = 1
-        elif argv[:2] == ["talosctl", "kubeconfig"]:
+        elif is_talos and len(argv) > 1 and argv[1] == "kubeconfig":
             target = Path(argv[2])
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("talos-kubeconfig\n", encoding="utf-8")
@@ -890,7 +894,9 @@ def test_deploy_talos_skips_kubeconfig_autofetch(
 
     assert ["bash", "bin/setup-hosts.sh"] not in captured
     assert any(
-        argv[:2] == ["talosctl", "gen"] and argv[2] == "config" for argv in captured
+        (argv[0] == "talosctl" or str(argv[0]).endswith("/talosctl"))
+        and argv[1:3] == ["gen", "config"]
+        for argv in captured
     )
     # talosctl wrote the kubeconfig during the job, so the ssh cat never ran.
     # The job then removed that file and kept the text on the environment.

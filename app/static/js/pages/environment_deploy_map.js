@@ -161,6 +161,7 @@ let shownLive = null;
 let liveHist = { cluster: [], nodes: {}, pods: {} };
 let metricsTimer = null;
 let metricsInflight = false;
+let metricsMissing = false;
 let liveRaf = 0;
 let liveRafLast = 0;
 let lastSparkAt = 0;
@@ -2419,7 +2420,10 @@ function livePack() {
 
 function liveForGraphNode(n) {
   const pack = livePack();
-  if (!n || !pack) return null;
+  // A missing live-metrics route stores an error pack with an empty cluster.
+  // Treat that as no series so the inspector shows the quiet sentence
+  // instead of blank CPU / RAM / Disk bars.
+  if (!n || !pack || pack.error) return null;
   if (n.kind === "env" || n.kind === "group") {
     return { kind: "cluster", cluster: pack.cluster, cpus: pack.cpus || [] };
   }
@@ -2550,7 +2554,7 @@ function liveDetailHtml(id) {
   const n = lastGraph.byId.get(id);
   const live = liveForGraphNode(n);
   if (!liveMetrics) return `<p class="muted">Live metrics loading…</p>`;
-  if (liveMetrics.error && !live) return `<p class="muted">Live metrics unavailable — ${esc(liveMetrics.error)}</p>`;
+  if (liveMetrics.error && !live) return `<p class="muted">${esc(liveMetrics.error)}</p>`;
   if (!live) return `<p class="muted">No live series for this node.</p>`;
   const histCluster = liveHist.cluster || [];
   if (live.kind === "cluster") {
@@ -3647,8 +3651,8 @@ function renderInspector() {
     lastInsp = html;
     el.innerHTML = html;
   }
-  renderLiveSlot();
   renderNodePop();
+  renderLiveSlot();
 }
 
 function renderNodePop() {
@@ -4409,7 +4413,7 @@ function rememberLive(data) {
 }
 
 function refreshLiveMetrics() {
-  if (!envId || metricsInflight) return;
+  if (!envId || metricsInflight || metricsMissing) return;
   if (!document.getElementById("dm-card")) return;
   metricsInflight = true;
   const id = envId;
@@ -4422,16 +4426,30 @@ function refreshLiveMetrics() {
       startLiveSmooth();
       paintAllLive({ forceSpark: true });
     })
-    .catch(() => {
-      if (envId !== id || liveMetrics) return;
-      liveMetrics = { error: "live metrics unavailable", cluster: {}, cpus: [], nodes: [], pods: [] };
+    .catch((err) => {
+      if (envId !== id) return;
+      if (err && err.status === 404) {
+        metricsMissing = true;
+        if (metricsTimer) clearTimeout(metricsTimer);
+        metricsTimer = null;
+      }
+      if (liveMetrics) return;
+      liveMetrics = {
+        error: err && err.status === 404 ? "No live metrics yet." : "Live metrics unavailable",
+        cluster: {},
+        cpus: [],
+        nodes: [],
+        pods: [],
+      };
     })
     .finally(() => {
       metricsInflight = false;
+      renderLiveSlot();
     });
 }
 
 function scheduleMetrics() {
+  if (metricsMissing) return;
   if (metricsTimer) clearTimeout(metricsTimer);
   metricsTimer = setTimeout(() => {
     refreshLiveMetrics();
@@ -6599,6 +6617,7 @@ export async function loadDeployMap(id) {
     liveMetrics = null;
     shownLive = null;
     liveHist = { cluster: [], nodes: {}, pods: {} };
+    metricsMissing = false;
   }
   if (metricsTimer) clearTimeout(metricsTimer);
   metricsTimer = null;
@@ -6705,9 +6724,9 @@ export async function loadDeployMap(id) {
     else onJob(payload);
   };
   stream = connect(topics, handlers);
-  await tick();
   refreshLiveMetrics();
   scheduleMetrics();
+  await tick();
 }
 
 export function destroyDeployMap() {
@@ -6723,6 +6742,7 @@ export function destroyDeployMap() {
   stopLiveSmooth();
   liveMetrics = null;
   shownLive = null;
+  metricsMissing = false;
   if (stream) stream.close();
   stream = null;
   applySpace3dView(false);

@@ -117,8 +117,8 @@ def test_plan_command_sequence(tmp_path):
     assert phases[phases.index("gen-config") + 1] == "endpoints"
     assert phases[-3:] == ["wait-controlplane", "bootstrap", "kubeconfig"]
     gen = next(c["argv"] for c in plan["commands"] if c["phase"] == "gen-config")
-    assert gen[:6] == [
-        "talosctl",
+    assert gen[0] == "talosctl" or gen[0].endswith("/talosctl")
+    assert gen[1:6] == [
         "gen",
         "config",
         "stagefurious",
@@ -154,7 +154,8 @@ def test_gen_config_greenfield_omits_force(tmp_path):
     plan = build_talos_plan(_doc(DOC_TALOS), env)
     assert plan["workdir"] == workdir
     gen = next(c["argv"] for c in plan["commands"] if c["phase"] == "gen-config")
-    assert gen[0:3] == ["talosctl", "gen", "config"]
+    assert gen[0] == "talosctl" or gen[0].endswith("/talosctl")
+    assert gen[1:3] == ["gen", "config"]
     assert "--force" not in gen
 
 
@@ -561,13 +562,13 @@ def test_talos_bootstrap_dry_run_logs_command_sequence_in_order(
     log_text = _job_log(client, admin_headers, job["id"])
     kubeconfig = config_dir / "inventory" / "artifacts" / "admin.conf"
     expected = [
-        "$ talosctl gen config stagefurious https://10.0.0.11:6443 --install-disk /dev/sdb",
-        "$ talosctl config endpoints 10.0.0.11 --talosconfig=./talosconfig",
-        "$ talosctl apply-config --insecure --nodes 10.0.0.11 --file controlplane.yaml",
-        "$ talosctl apply-config --insecure --nodes 10.0.0.21 --file worker.yaml",
-        "$ talosctl apply-config --insecure --nodes 10.0.0.22 --file worker.yaml",
-        "$ talosctl bootstrap --nodes 10.0.0.11 --talosconfig=./talosconfig",
-        f"$ talosctl kubeconfig {kubeconfig} --nodes 10.0.0.11 --talosconfig=./talosconfig",
+        "talosctl gen config stagefurious https://10.0.0.11:6443 --install-disk /dev/sdb",
+        "talosctl config endpoints 10.0.0.11 --talosconfig=./talosconfig",
+        "talosctl apply-config --insecure --nodes 10.0.0.11 --file controlplane.yaml",
+        "talosctl apply-config --insecure --nodes 10.0.0.21 --file worker.yaml",
+        "talosctl apply-config --insecure --nodes 10.0.0.22 --file worker.yaml",
+        "talosctl bootstrap --nodes 10.0.0.11 --talosconfig=./talosconfig",
+        f"talosctl kubeconfig {kubeconfig} --nodes 10.0.0.11 --talosconfig=./talosconfig",
     ]
     positions = []
     for line in expected:

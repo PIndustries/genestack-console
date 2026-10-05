@@ -449,7 +449,9 @@ def reset_node(
     description=(
         "Enqueues ``platform.talos.apply_config`` (audited job + per-env mutex). "
         "Runs ``talosctl apply-config --file … --mode <mode>``. "
-        "``mode`` is one of auto, staged, no-reboot, reboot (default auto)."
+        "``mode`` is one of auto, staged, no-reboot, reboot (default auto). "
+        "Talos 1.14 has no --mode reboot. That choice applies with auto, "
+        "then asks the node to reboot."
     ),
 )
 def apply_node_config(

@@ -1,7 +1,7 @@
 // pages/environment_detail.js — tabbed admin layout.
 // Overview is the live environment tree (internal tab id: workflow).
 import { api, esc, fmtTime, toast } from "../api.js";
-import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv } from "../store.js";
+import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
 import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls27";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
@@ -13,7 +13,7 @@ import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard }
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls28";
+import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls33";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js?v=ls26";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
@@ -67,8 +67,14 @@ async function deleteOpenEnv() {
   try {
     await api(`/api/v1/environments/${encodeURIComponent(envId)}`, { method: "DELETE" });
     toast(`Environment '${name}' deleted`, "ok");
-    store.envs = store.envs.filter((e) => e.id !== envId);
-    location.hash = "#/fleet";
+    applyEnvLifecycle({
+      type: "environment",
+      action: "deleted",
+      environment_id: envId,
+      name,
+      tenant_id: listed && listed.tenant_id,
+    });
+    if (!String(location.hash || "").startsWith("#/fleet")) location.hash = "#/fleet";
   } catch (e) {
     toast(`Delete failed: ${e.message}`, "bad");
   }
@@ -381,7 +387,7 @@ export async function render(root, { param, query } = {}) {
       <button class="tab" data-tab="observe">Observe</button>
       <button class="tab" data-tab="settings">Settings</button>
       <div class="tab-spacer"></div>
-      <select id="desc-env">${envOptionsHtml(envId, { includeNone: true, noneLabel: "Environment" })}</select>
+      <select id="desc-env" data-gsc-env-select data-gsc-env-none="Environment">${envOptionsHtml(envId, { includeNone: true, noneLabel: "Environment" })}</select>
       <button class="secondary btn-sm" id="desc-refresh" type="button">Refresh</button>
       <button class="danger btn-sm" id="desc-delete" type="button" ${gate(canAdmin(), "admin")}>Delete</button>
       <span id="desc-msg" class="muted"></span>

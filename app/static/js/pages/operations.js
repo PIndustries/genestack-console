@@ -118,7 +118,7 @@ function selectOp(id) {
       ${paramHints}
     </div>
     <label class="field" style="margin-bottom:.75rem"><span>Environment</span>
-      <select id="run-env">${envOptionsHtml(null, { includeNone: true, noneLabel: "(no environment)" })}</select>
+      <select id="run-env" data-gsc-env-select data-gsc-env-none="(no environment)">${envOptionsHtml(null, { includeNone: true, noneLabel: "(no environment)" })}</select>
     </label>
     ${typedFormHtml(op)}
     <label class="check"><input type="checkbox" id="run-sync" /> Run synchronously (run_sync)</label>

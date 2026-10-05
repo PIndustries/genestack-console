@@ -59,6 +59,9 @@ GSC_RELEASE_BASE="${GSC_RELEASE_BASE:-https://github.com/PIndustries/genestack-c
 # Compiled Linux binary (Nuitka). Default install never clones source.
 GSC_BINARY_DEFAULT="https://github.com/PIndustries/genestack-console/releases/latest/download/genestack-console-linux-amd64"
 GSC_BINARY_URL="${GSC_BINARY_URL:-$GSC_BINARY_DEFAULT}"
+# Talos client on the deploy host. Not the metal image.
+# Keep the default in lockstep with TALOSCTL_VERSION in app/services/talos.py.
+TALOSCTL_VERSION="${GSC_TALOSCTL_VERSION:-v1.14.2}"
 GSC_IMAGE="${GSC_IMAGE:-genestack-console:stable}"
 GSC_IMAGE_TAR="${GSC_IMAGE_TAR:-https://genestack.dev/releases/genestack-console-linux-amd64-docker.tar.gz}"
 GSC_FROM_SOURCE="${GSC_FROM_SOURCE:-0}"
@@ -786,6 +789,87 @@ install_binary() {
   return 0
 }
 
+talosctl_client_tag() {
+  local bin="$1" line=""
+  [ -x "$bin" ] || return 0
+  line="$("$bin" version --client 2>/dev/null | awk '/Tag:/{print $2; exit}')" || true
+  printf '%s' "$line"
+}
+
+install_talosctl() {
+  # Fail soft. An air-gapped host still gets the console.
+  if [ "$HOST_KIND" != "linux" ] && [ "$HOST_KIND" != "wsl" ]; then
+    return 0
+  fi
+  local ver="$TALOSCTL_VERSION"
+  if ! printf '%s' "$ver" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    warn "GSC_TALOSCTL_VERSION must look like v1.14.2 — using v1.14.2"
+    ver="v1.14.2"
+  fi
+  local arch=""
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+  esac
+  if [ -z "$arch" ]; then
+    warn "talosctl: unsupported architecture $(uname -m) — skipped"
+    return 0
+  fi
+  ensure_prefix
+  mkdir -p "$PREFIX/bin"
+  local dest="$PREFIX/bin/talosctl" current=""
+  current="$(talosctl_client_tag "$dest")"
+  if [ "$current" = "$ver" ]; then
+    ok "talosctl $current at $dest"
+    link_talosctl "$dest"
+    return 0
+  fi
+  local url="https://github.com/siderolabs/talos/releases/download/${ver}/talosctl-linux-${arch}"
+  info "installing talosctl ${ver}"
+  if ! download_binary_file "$url" "$dest"; then
+    warn "talosctl ${ver} was not installed. The console still starts. Jobs use ${dest} when that file is there."
+    return 0
+  fi
+  ok "talosctl ${ver} at $dest"
+  link_talosctl "$dest"
+}
+
+link_talosctl() {
+  local src="$1"
+  local dest="${GSC_TALOSCTL_LINK:-/usr/local/bin/talosctl}"
+  [ -n "$dest" ] || return 0
+  [ -x "$src" ] || return 0
+  if [ -e "$dest" ] && [ ! -L "$dest" ]; then
+    warn "$dest exists and is not a link — leaving it. Jobs use $src."
+    return 0
+  fi
+  local dir
+  dir="$(dirname "$dest")"
+  if [ -d "$dir" ] && [ -w "$dir" ]; then
+    if ln -sfn "$src" "$dest"; then
+      ok "command: $dest"
+    else
+      warn "could not link $dest — jobs still use $src"
+    fi
+    return 0
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    mkdir -p "$dir" || true
+    if ln -sfn "$src" "$dest"; then
+      ok "command: $dest"
+    else
+      warn "could not link $dest — jobs still use $src"
+    fi
+    return 0
+  fi
+  if [ -n "${SUDO:-}" ] && sudo -n mkdir -p "$dir" && sudo -n ln -sfn "$src" "$dest"; then
+    ok "command: $dest"
+    return 0
+  fi
+  warn "could not link $dest — jobs still use $src"
+  return 0
+}
+
 install_docker_image() {
   # Operator container path: load a docker-save of the compiled ELF. No source.
   CONSOLE_BIN=""
@@ -1064,6 +1148,7 @@ data_dir: ${data_dir_cfg}
 update:
   url: https://github.com/PIndustries/genestack-console/releases/latest/download/version.json
   auto: ${AUTO_UPDATE}
+  watch: true
 ${db_url_line}
 # (Postgres form: database_url: postgresql+psycopg://<user>:<pass>@<host>:5432/<db>)
 
@@ -1752,12 +1837,14 @@ do_update() {
     if same_version "$latest" "$current"; then
       ok "already at $current"
       install_cli_link
+      install_talosctl
       return 0
     fi
     info "selected $latest (installed $current)"
   elif ! version_is_newer "$latest" "$current"; then
     ok "already current ($current)"
     install_cli_link
+    install_talosctl
     return 0
   fi
   url="$binary"
@@ -1776,6 +1863,7 @@ do_update() {
   info "downloading $url"
   replace_binary "$bin" "$url"
   install_cli_link
+  install_talosctl
   restart_console_units
 }
 
@@ -1829,6 +1917,7 @@ Wants=network-online.target
 Type=simple
 Environment=GSC_PREFIX=${PREFIX}
 Environment=CONSOLE_CONFIG=${PREFIX}/config.yaml
+Environment=PATH=${PREFIX}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=${PREFIX}
 ExecStart=${bin} serve
 Restart=on-failure
@@ -1848,6 +1937,7 @@ Type=simple
 WorkingDirectory=${PREFIX}
 Environment=GSC_PREFIX=${PREFIX}
 Environment=CONSOLE_CONFIG=${PREFIX}/config.yaml
+Environment=PATH=${PREFIX}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=${bin} worker --daemon --interval 5
 Restart=on-failure
 RestartSec=5
@@ -2682,6 +2772,7 @@ main() {
   render_compose
   install_systemd
   install_cli_link
+  install_talosctl
   install_update_timer
   launch_console
   bootstrap

@@ -47,6 +47,9 @@ _test_config = {
     # Older files may still contain this block. The loader ignores it.
     "maas": {"url": "http://unused.example", "api_key": "unused", "mock": True},
     "server": {"host": "127.0.0.1", "port": 8080},
+    # The session client runs the app lifespan. Leave the update watcher off
+    # so the suite does not call GitHub or try to replace a binary.
+    "update": {"watch": False, "auto": False},
     "jobs": {"timeout_seconds": 600},
     # The session-scoped TestClient runs the app lifespan for the whole suite.
     # Its DB relay tasks would poll the shared test database and republish on

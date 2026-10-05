@@ -92,7 +92,7 @@ export async function render(root, { param }) {
         <option value="success">success</option>
         <option value="failed">failed</option>
       </select>
-      <select id="f-env">${envOptionsHtml(null, { includeNone: true, noneLabel: "all environments" })}</select>
+      <select id="f-env" data-gsc-env-select data-gsc-env-none="all environments">${envOptionsHtml(null, { includeNone: true, noneLabel: "all environments" })}</select>
       <button class="secondary btn-sm" id="btn-jobs-refresh" type="button">Refresh</button>
       <span id="jobs-msg" class="muted"></span>
     </div>

@@ -81,6 +81,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"channel={info.get('channel')}")
             return 0
+        try:
+            busy = updatecheck.active_jobs()
+        except Exception as exc:  # noqa: BLE001 — do not restart if jobs cannot be counted
+            print(f"skipped; could not read jobs: {exc}")
+            return 1
+        if busy:
+            print("skipped; a job is queued or running")
+            return 0
         result = updatecheck.apply_binary(get_settings())
         print(result.get("message") or result)
         return 0 if result.get("ok") else 1

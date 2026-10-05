@@ -136,6 +136,54 @@ def test_delete_environment_admin_only(
     assert again.status_code == 404
 
 
+def test_environment_lifecycle_event_on_create_update_delete(
+    client, admin_headers, monkeypatch
+):
+    """Create, rename, and delete each publish one environments-topic event."""
+    published = []
+    monkeypatch.setattr(
+        "app.routers.environments.publish_sync",
+        lambda topic, payload: published.append((topic, dict(payload))),
+    )
+    name = f"env-life-{uuid.uuid4().hex[:10]}"
+    create = client.post(
+        "/api/v1/environments",
+        headers=admin_headers,
+        json={"name": name, "tenant_id": None},
+    )
+    assert create.status_code == 201, create.text
+    body = create.json()
+    assert published[-1][0] == "environments"
+    assert published[-1][1] == {
+        "type": "environment",
+        "action": "created",
+        "environment_id": body["id"],
+        "name": name,
+        "tenant_id": body["tenant_id"],
+    }
+
+    renamed = name + "-2"
+    patched = client.patch(
+        f"/api/v1/environments/{body['id']}",
+        headers=admin_headers,
+        json={"name": renamed},
+    )
+    assert patched.status_code == 200, patched.text
+    assert published[-1][1]["action"] == "updated"
+    assert published[-1][1]["name"] == renamed
+    assert published[-1][1]["environment_id"] == body["id"]
+
+    deleted = client.delete(
+        f"/api/v1/environments/{body['id']}", headers=admin_headers
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert published[-1][1]["action"] == "deleted"
+    assert published[-1][1]["environment_id"] == body["id"]
+    assert published[-1][1]["name"] == renamed
+    got = client.get(f"/api/v1/environments/{body['id']}", headers=admin_headers)
+    assert got.status_code == 404
+
+
 def test_legacy_maas_fields_are_ignored(client, admin_headers, viewer_headers):
     """A leftover installer field on create is ignored and not returned."""
     name = f"env-mask-{uuid.uuid4().hex[:10]}"

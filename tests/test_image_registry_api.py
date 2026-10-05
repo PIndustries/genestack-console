@@ -19,6 +19,32 @@ def test_helm_charts_marks_oci_ahead_of_http_repos():
     assert by_name["keystone"]["url"].startswith("https://")
 
 
+def test_warm_cache_uses_the_job_route_not_the_missing_ops_path(client, admin_headers):
+    """Warm image cache queues registry.mirror. The old ops URL 404s."""
+    name = f"env-warm-{uuid.uuid4().hex[:10]}"
+    create = client.post("/api/v1/environments", headers=admin_headers, json={"name": name})
+    assert create.status_code in (200, 201), create.text
+    eid = create.json()["id"]
+
+    missing = client.post(
+        f"/api/v1/ops/environments/{eid}/registry/mirror",
+        headers=admin_headers,
+        json={"dry_run": False},
+    )
+    assert missing.status_code == 404
+
+    queued = client.post(
+        f"/api/v1/environments/{eid}/jobs",
+        headers=admin_headers,
+        json={"operation": "registry.mirror", "params": {}},
+    )
+    assert queued.status_code == 201, queued.text
+    body = queued.json()
+    assert body["operation"] == "registry.mirror"
+    assert body["environment_id"] == eid
+    assert body["status"] == "queued"
+
+
 def test_registry_mirror_is_an_admin_job():
     op = get_operation("registry.mirror")
     assert op is not None

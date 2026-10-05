@@ -24,10 +24,12 @@ from app.services import events, tickets
 router = APIRouter(prefix="/api/v1", tags=["stream"])
 
 # Topics any authenticated viewer+ may subscribe to; env:{id} is gated per env.
-_KNOWN_TOPICS = {"fleet", "alerts", "jobs", "metrics"}
+# "environments" is create/update/delete of an environment row. The sidebar,
+# the environment selectors, and the fleet board all read that one topic.
+_KNOWN_TOPICS = {"fleet", "environments", "alerts", "jobs", "metrics"}
 # Shared (non env-scoped) topics whose payloads carry an environment_id and
 # must be filtered per tenant at send time.
-_SHARED_TOPICS = {"fleet", "alerts", "jobs", "metrics"}
+_SHARED_TOPICS = {"fleet", "environments", "alerts", "jobs", "metrics"}
 _HEARTBEAT_SECONDS = 15
 # How often the visible-environment set is reloaded mid-stream so membership
 # changes eventually apply without reconnecting.
@@ -122,16 +124,44 @@ def _visible_env_ids(db: Session, principal: Principal) -> set[str] | None:
     )
 
 
-def _payload_visible(topic: str, payload: dict, visible: set[str] | None) -> bool:
+def _visible_tenant_ids(db: Session, principal: Principal) -> set[str] | None:
+    """Tenant ids the principal belongs to; None means unrestricted."""
+    if principal.platform_admin:
+        return None
+    return set(
+        db.scalars(
+            select(Membership.tenant_id).where(Membership.user_id == principal.user_id)
+        ).all()
+    )
+
+
+def _payload_visible(
+    topic: str,
+    payload: dict,
+    visible: set[str] | None,
+    visible_tenants: set[str] | None = None,
+) -> bool:
     """Per-tenant send-time filter for shared topics.
 
     Payloads without an environment_id pass through; env:{id} topics are
     re-filtered after membership refresh, including revoked memberships.
+
+    Environment create and delete are matched on tenant_id when that set is
+    known. The environment-id snapshot lags a new row and drops a deleted
+    one, so an id check would swallow the lifecycle event.
     """
     if visible is None:
         return True
     if topic.startswith("env:"):
         return topic[4:] in visible
+    if topic == "environments":
+        if not isinstance(payload, dict):
+            return False
+        if visible_tenants is not None:
+            tenant_id = payload.get("tenant_id")
+            return bool(tenant_id) and tenant_id in visible_tenants
+        env_id = payload.get("environment_id")
+        return env_id is None or env_id in visible
     if topic not in _SHARED_TOPICS:
         return True
     env_id = payload.get("environment_id") if isinstance(payload, dict) else None
@@ -144,6 +174,8 @@ async def _event_stream(
     visible_env_ids: set[str] | None = None,
     refresh_visible: Callable[[], set[str] | None] | None = None,
     enhanced: bool = False,
+    visible_tenant_ids: set[str] | None = None,
+    refresh_tenants: Callable[[], set[str] | None] | None = None,
 ) -> AsyncIterator[str]:
     """Yield SSE frames from the subscription queue until the client goes away.
 
@@ -176,6 +208,8 @@ async def _event_stream(
             ):
                 previous = visible_env_ids
                 visible_env_ids = await asyncio.to_thread(refresh_visible)
+                if refresh_tenants is not None:
+                    visible_tenant_ids = await asyncio.to_thread(refresh_tenants)
                 refreshed_at = time.monotonic()
                 if enhanced and previous != visible_env_ids:
                     yield frame(
@@ -201,7 +235,7 @@ async def _event_stream(
                 # Heartbeat comment so proxies don't kill idle connections.
                 yield ": hb\n\n"
                 continue
-            if not _payload_visible(topic, payload, visible_env_ids):
+            if not _payload_visible(topic, payload, visible_env_ids, visible_tenant_ids):
                 continue
             yield frame(topic, payload)
     finally:
@@ -219,10 +253,12 @@ async def stream_events(
     """SSE stream of (topic, payload) events for the requested topics.
 
     env:{id} topics are gated at connect time; shared topics (fleet, jobs,
-    alerts, metrics) are filtered per tenant at send time — non-admin
-    principals only receive payloads whose environment_id is in a tenant they
-    belong to. The visible set is refreshed every
-    ``_VISIBILITY_REFRESH_SECONDS`` so membership changes apply mid-stream.
+    alerts, metrics, environments) are filtered per tenant at send time.
+    Non-admin principals only receive payloads whose environment_id is in a
+    tenant they belong to. Environment create and delete are matched on
+    tenant_id so a new or just-removed row is not dropped. The visible set
+    is refreshed every ``_VISIBILITY_REFRESH_SECONDS`` so membership changes
+    apply mid-stream.
     """
     requested = [t.strip() for t in topics.split(",") if t.strip()]
     if not requested:
@@ -236,15 +272,28 @@ async def stream_events(
         )
 
     visible = _visible_env_ids(db, principal)
+    visible_tenants = _visible_tenant_ids(db, principal)
 
     def _refresh() -> set[str] | None:
         # Runs off the event loop via asyncio.to_thread; use a fresh session.
         with SessionLocal() as fresh:
             return _visible_env_ids(fresh, principal)
 
+    def _refresh_tenants() -> set[str] | None:
+        with SessionLocal() as fresh:
+            return _visible_tenant_ids(fresh, principal)
+
     queue = events.subscribe(requested)
     return StreamingResponse(
-        _event_stream(request, queue, visible, _refresh, enhanced=protocol == 2),
+        _event_stream(
+            request,
+            queue,
+            visible,
+            _refresh,
+            enhanced=protocol == 2,
+            visible_tenant_ids=visible_tenants,
+            refresh_tenants=_refresh_tenants,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

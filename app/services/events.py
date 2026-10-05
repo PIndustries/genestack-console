@@ -1,6 +1,6 @@
 """In-process async event bus.
 
-Topics: 'fleet', 'env:{id}', 'jobs', 'alerts', 'metrics'.
+Topics: 'fleet', 'environments', 'env:{id}', 'jobs', 'alerts', 'metrics'.
 
 Subscribers get (topic, payload) tuples on an asyncio.Queue. Publishing is
 non-blocking: a subscriber whose queue is full simply misses the event rather

@@ -8,7 +8,7 @@ The install chapter is [Genestack Console](genestack-guide.md). The API the page
 
 `app/templates/ui.html` is the frame: the sign-in form, the sidebar, and an empty main area. `app/static/js/app.js` reads the hash in the address (`#/fleet`, `#/hardware`) and loads one screen. Each screen is a file in `app/static/js/pages/`. A screen renders into the main area and calls the API. It does not embed another program.
 
-The sign-in card and the sidebar show the Genestack Console mark, centered, with the name under it. The P.Industries wordmark sits centered at the bottom of the sidebar, under the API docs link. The sidebar and the cards are glass, so the field shows through. Each card eases on a faint edge, out of step with the next. A reduced-motion setting turns that motion off.
+The sign-in card and the sidebar show the Genestack Console mark, centered, with the name under it. The P.Industries wordmark sits centered at the bottom of the sidebar, under the API docs link and Changelog. The sidebar and the cards are glass, so the field shows through. Each card eases on a faint edge, out of step with the next. A reduced-motion setting turns that motion off.
 
 The sidebar is:
 
@@ -24,6 +24,8 @@ The sidebar is:
 A new install opens on a welcome. It says this machine stays outside the cluster, the other machines are a hostname and an IP, and Deploy is how OpenStack gets installed. Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. It creates the environment and points it at `/opt/genestack` and `/etc/genestack`. The server step starts on a hostname and an IP. The Talos image field stays blank, and the page shows the ISO to boot yourself. The summary has Apply on this environment. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
 
 The API docs link in the sidebar is `/docs` on the console. That is a catalog of the routes, with a curl for each one. The curls point at the console you are signed in to.
+
+Changelog is the button under that link. It lists the public pipeline and the release notes. The bullets in a release are the changes in that build. After this console installs a newer build, the page reloads and shows those notes until they are acknowledged.
 
 ## One environment
 

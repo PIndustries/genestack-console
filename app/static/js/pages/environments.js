@@ -1,7 +1,7 @@
 // pages/environments.js — env list + identity card. Empty state is the
 // Metal → Talos → Kubernetes → OpenStack → Prove stand-up board, same as fleet.
 import { api, esc, fmtTime, toast } from "../api.js";
-import { loadEnvs, canRun, canAdmin, gate, isDemoEnv } from "../store.js";
+import { loadEnvs, canRun, canAdmin, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { applyTenantFilter, currentTenantId } from "./tenant.js";
 
 export const title = "Environments";
@@ -142,6 +142,13 @@ async function deleteEnv(env) {
   try {
     await api(`/api/v1/environments/${encodeURIComponent(env.id)}`, { method: "DELETE" });
     toast(`Environment '${env.name}' deleted`, "ok");
+    applyEnvLifecycle({
+      type: "environment",
+      action: "deleted",
+      environment_id: env.id,
+      name: env.name,
+      tenant_id: env.tenant_id,
+    });
     selectedId = null;
     history.replaceState(null, "", "#/environments");
     document.getElementById("env-detail-body").innerHTML =

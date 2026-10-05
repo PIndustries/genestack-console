@@ -147,7 +147,8 @@ code {
 .topbar h1 { font-size: 1rem; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 #page-root {
   padding: 1.15rem 1.35rem 2rem;
-  max-width: 1440px;
+  width: 100%;
+  max-width: none;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -435,16 +436,28 @@ details summary { cursor: pointer; color: var(--link); font-size: 0.8rem; }
 
 /* ---------- toasts ---------- */
 #toast-root {
-  position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 100;
-  display: flex; flex-direction: column; gap: 0.5rem;
-  max-width: min(420px, 90vw);
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  left: auto;
+  z-index: 4000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  width: min(28rem, calc(100vw - 2.5rem));
+  max-width: calc(100vw - 2.5rem);
+  pointer-events: none;
 }
 .toast {
+  pointer-events: auto;
+  max-width: 100%;
   background: var(--panel2);
   border: 1px solid var(--border);
   border-radius: 0.6rem;
   padding: 0.6rem 0.85rem;
   font-size: 0.88rem;
+  overflow-wrap: anywhere;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   opacity: 0;
   transform: translateY(6px);
@@ -913,6 +926,7 @@ a.wf-action.primary:hover { filter: brightness(1.15); color: #fff; }
   }
   .nav { flex-direction: row; flex-wrap: wrap; }
   .sidebar-foot { display: none; }
+  #page-root { padding: 0.75rem 0.75rem 1.25rem; }
 }
 
 /* ---------- fleet board: task-flow alignment (one next action per row) ---------- */
@@ -999,6 +1013,43 @@ a.wf-action.primary:hover { filter: brightness(1.15); color: #fff; }
 @media (max-width: 700px) {
   .gs-welcome-panels { grid-template-columns: 1fr; }
 }
+
+/* Changelog and the post-update note. The bullets are that build's changes. */
+.gsc-notes {
+  position: fixed; inset: 0; z-index: 210;
+  display: grid; place-items: center;
+  background: rgba(4, 8, 16, 0.72);
+  padding: 1rem;
+}
+.gsc-notes-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  max-width: 40rem; width: 100%;
+  max-height: min(80vh, 42rem);
+  overflow: auto;
+  padding: 1.2rem 1.3rem 1rem;
+}
+.gsc-notes-card h2 { margin: 0 0 0.35rem; }
+.gsc-notes-card h3 { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
+.gsc-notes-list { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+.gsc-notes-list li + li { margin-top: 0.25rem; }
+.gsc-pipe { display: flex; flex-direction: column; gap: 0.45rem; }
+.gsc-pipe-row {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--panel2);
+}
+.gsc-pipe-top {
+  display: flex; justify-content: space-between; gap: 0.6rem; align-items: baseline;
+}
+.gsc-rel + .gsc-rel {
+  margin-top: 0.85rem; padding-top: 0.85rem; border-top: 1px solid var(--border);
+}
+.gsc-notes-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+.gsc-notes-card a { font-size: 0.85rem; }
 
 /* ---------- first-run hero + guided setup wizard ---------- */
 .hero { text-align: center; padding: 2.5rem 1rem; }
@@ -1166,9 +1217,13 @@ button.nav-link {
   width: 100%;
   background: none;
   border: none;
+  border-radius: 0.4rem;
   font: inherit;
+  font-weight: 550;
   text-align: left;
   cursor: pointer;
+  padding: 0.42rem 0.75rem;
+  color: var(--muted);
 }
 
 /* ---------- page-level tab bar (Hardware / Activity) ---------- */
@@ -1196,11 +1251,18 @@ button.nav-link {
 .detail-page .tab-bar {
   display: flex;
   align-items: center;
-  gap: 0.1rem;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.35rem;
+  row-gap: 0.35rem;
   padding: 0;
   margin: 0 0 1rem;
   border-bottom: 1px solid var(--border);
   background: transparent;
+}
+.detail-page .tab-bar #desc-env,
+.detail-page .tab-bar #desc-refresh,
+.detail-page .tab-bar #desc-delete {
+  flex: 0 0 auto;
 }
 .detail-page .tab {
   padding: 0.55rem 0.85rem;
@@ -1908,8 +1970,8 @@ body.gsc-term-fs-lock { overflow: hidden; }
 }
 #dm-tool-modal { z-index: 1320; }
 .dm-host-panel {
-  max-width: min(1440px, 96vw);
-  width: 96vw;
+  max-width: 96vw;
+  width: min(96vw, 1920px);
   height: min(88vh, 940px);
   display: flex;
   flex-direction: column;
@@ -2294,12 +2356,12 @@ button.ob-stat:hover { border-color: var(--accent); }
 
 /* ---------- Overview flow canvas (xyflow / Svelte Flow look) ---------- */
 #panel-workflow.tab-panel { padding: 0; }
-/* Overview: canvas fills the remaining viewport. Pan/zoom inside it;
-   the page itself must not scroll to reach the bottom of the graph. */
+/* Overview: the map fills leftover space and pans inside itself.
+   A short window scrolls so the tab actions and the terminal stay reachable. */
 #page-root:has(#panel-workflow.tab-panel.active) {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   padding-bottom: 0.65rem;
 }
 #page-root:has(#panel-workflow.tab-panel.active) .detail-page {
@@ -2318,7 +2380,7 @@ button.ob-stat:hover { border-color: var(--accent); }
 }
 #page-root:has(#panel-workflow.tab-panel.active) #panel-workflow.tab-panel.active {
   flex: 1;
-  min-height: 0;
+  min-height: 18rem;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -2329,7 +2391,7 @@ button.ob-stat:hover { border-color: var(--accent); }
 }
 #page-root:has(#panel-workflow.tab-panel.active) #reg-cache-card {
   flex: 0 1 auto;
-  max-height: min(42vh, 22rem);
+  max-height: min(22vh, 12rem);
   overflow: auto;
   margin: 0 0 0.45rem;
 }

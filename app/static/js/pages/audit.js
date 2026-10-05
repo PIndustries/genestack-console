@@ -10,7 +10,7 @@ export async function render(root) {
   <div class="card">
     <div class="toolbar">
       <h2>Audit entries</h2>
-      <select id="f-env">${envOptionsHtml(null, { includeNone: true, noneLabel: "all environments" })}</select>
+      <select id="f-env" data-gsc-env-select data-gsc-env-none="all environments">${envOptionsHtml(null, { includeNone: true, noneLabel: "all environments" })}</select>
       <input id="f-action" type="text" placeholder="action (e.g. environment.create)" style="min-width:16rem" />
       <button class="secondary btn-sm" id="btn-apply" type="button">Apply</button>
       <span id="audit-msg" class="muted"></span>

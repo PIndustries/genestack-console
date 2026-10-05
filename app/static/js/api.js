@@ -117,6 +117,11 @@ function httpError(res, data, text) {
           return String(d);
         })
         .join("; ");
+    } else if (detail && typeof detail === "object") {
+      // 409 conflict bodies are { message, conflicting_job_id }. Keep the
+      // object on error.detail, and put the sentence in error.message.
+      const msg = detail.message || detail.detail;
+      detail = typeof msg === "string" && msg ? msg : JSON.stringify(detail);
     }
   } else if (text) {
     detail = text;

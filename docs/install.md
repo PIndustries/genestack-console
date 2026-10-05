@@ -58,6 +58,21 @@ Update downloads the Linux binary named in that file, replaces
 `genestack-console` and `genestack-console-worker`. It does not change
 `config.yaml`, the database, or `/opt/genestack`. `genestack-console update --check`
 prints the installed version and the latest version and does not replace the file.
+The running console checks the same file on its own. When a newer build is
+published and no job is queued or running, it installs that build and restarts.
+The page then reloads and shows the release notes until they are acknowledged.
+Changelog, at the bottom of the sidebar, lists those notes and the public
+pipeline. `update.watch: false` in `config.yaml` leaves the install to this
+command. `genestack-console update` also waits while a job is queued or running.
+
+The same install places `talosctl` v1.14.2 on the deploy host, at
+`/opt/genestack-console/bin/talosctl`. The console calls that client. You do
+not install it yourself. Talos 1.14 rejects a config change from an older
+client, including `apply-config --mode reboot`. A reboot request applies with
+mode `auto`, then reboots the node. `GSC_TALOSCTL_VERSION` names another
+stable `vX.Y.Z` client. This is the client, not the metal image. A failed
+download does not stop the install. An update installs the client as well,
+including when the console binary is already current.
 
 | Host | Console | Local AIO VM (`--dev`) | Production metal |
 |---|---|---|---|

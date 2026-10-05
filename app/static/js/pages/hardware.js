@@ -54,7 +54,7 @@ export async function render(root, { query } = {}) {
   <div class="card">
     <div class="toolbar">
       <h2>Hardware</h2>
-      <select id="hw-env" title="Environment for discovery &amp; bare metal">${envOptionsHtml(envId, {
+      <select id="hw-env" data-gsc-env-select data-gsc-env-none="(no environment)" title="Environment for discovery &amp; bare metal">${envOptionsHtml(envId, {
         includeNone: true,
         noneLabel: "(no environment)",
       })}</select>

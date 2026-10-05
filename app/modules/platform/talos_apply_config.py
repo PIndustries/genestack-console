@@ -15,7 +15,8 @@ OPERATION = {
     "name": "Talos Apply Machine Config",
     "description": (
         "Queue ``talosctl apply-config --file … --mode <mode>`` for one node. "
-        "Honors dry_run. Mutating; per-env lock."
+        "reboot applies with mode auto, then reboots. Talos 1.14 rejects "
+        "--mode reboot. Honors dry_run. Mutating; per-env lock."
     ),
     "required_role": "operator",
     "backend": "genestack",

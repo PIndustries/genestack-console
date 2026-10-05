@@ -14,7 +14,7 @@
     /* ── Grid ── */
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
       gap: .75rem;
       margin: 0;
     }
@@ -215,6 +215,7 @@
       </nav>
       <div class="sidebar-foot">
         <a class="nav-link" href="/docs">API docs</a>
+        <button type="button" class="nav-link" id="btn-changelog">Changelog</button>
         <div id="sidebar-version" class="version-line muted"></div>
       </div>
       <div class="sidebar-mark">
@@ -264,6 +265,6 @@
     if(_s){var _h=_s.getAttribute('src');if(_h.indexOf('?')===-1)_s.setAttribute('src',_h+'?v='+_v)}
   </script>
   <script src="/static/js/gsc-breath.js"></script>
-  <script type="module" src="/static/js/app.js?v=ls28"></script>
+  <script type="module" src="/static/js/app.js?v=ls33"></script>
 </body>
 </html>

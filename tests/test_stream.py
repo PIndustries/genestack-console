@@ -169,6 +169,52 @@ def test_stream_unknown_topic_rejected(client, admin_headers):
     assert "Unknown topic" in resp.json()["detail"]
 
 
+def test_environments_topic_is_accepted(client, admin_headers):
+    """The shell subscribes to environment create/update/delete."""
+    ticket = _ticket(client)
+
+    async def run():
+        with SessionLocal() as db:
+            principal = stream._stream_principal(_FakeRequest(), db, ticket=ticket)
+            resp = await stream.stream_events(
+                _FakeRequest(false_count=0), "environments", db, principal
+            )
+            with pytest.raises(StopAsyncIteration):
+                await resp.body_iterator.__anext__()
+            return resp
+
+    resp = asyncio.run(run())
+    assert isinstance(resp, StreamingResponse)
+
+
+def test_environment_lifecycle_follows_tenant_not_stale_env_snapshot():
+    """A create or delete still delivers after the env-id snapshot is stale."""
+    created = {
+        "type": "environment",
+        "action": "created",
+        "environment_id": "new-env",
+        "name": "new",
+        "tenant_id": "tenant-a",
+    }
+    deleted = {
+        "type": "environment",
+        "action": "deleted",
+        "environment_id": "gone-env",
+        "name": "gone",
+        "tenant_id": "tenant-a",
+    }
+    other = dict(deleted, environment_id="other-env", name="other", tenant_id="tenant-b")
+    # Snapshot has neither id: the row is new, or it was just removed.
+    visible: set[str] = set()
+    tenants = {"tenant-a"}
+    assert stream._payload_visible("environments", created, visible, tenants)
+    assert stream._payload_visible("environments", deleted, visible, tenants)
+    assert not stream._payload_visible("environments", other, visible, tenants)
+    # No tenant set: fall back to the environment id snapshot.
+    assert not stream._payload_visible("environments", created, visible, None)
+    assert stream._payload_visible("environments", created, {"new-env"}, None)
+
+
 def test_stream_empty_topics_rejected(client, admin_headers):
     resp = client.get("/api/v1/stream?topics=%20%2C%20", headers=admin_headers)
     assert resp.status_code == 400

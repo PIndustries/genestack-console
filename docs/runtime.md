@@ -190,7 +190,7 @@ One file. `python -m app.cli make-config` prints a new one, with a generated `se
 | `collector.*` | on, every 60 seconds | Snapshots. Set `collector.enabled` false to stop them. |
 | `retention.*` | see the section above | How long rows are kept. |
 | `oidc` | off | Company login. `https://my.genestack.dev` is one issuer you can point this at. People on the deploy host can still use a local user. |
-| `update.url` | the GitHub Release `version.json` | Where the console looks for a newer build. `config.yaml.example` still names `https://genestack.dev/releases/version.json`. The value in the file you installed is the one that is checked. `update.auto` applies a downloaded build only when you turn it on. |
+| `update.url` | the GitHub Release `version.json` | Where the console looks for a newer build. The example and a fresh install both use `https://github.com/PIndustries/genestack-console/releases/latest/download/version.json`. The value in the file you installed is the one that is checked. The running console checks that file on its own. A newer build is installed when no job is queued or running, then the page reloads and shows that release's notes until they are acknowledged. `update.watch: false` leaves the install to the update button. `update.auto` is only the daily timer from the installer `--auto-update` flag. |
 | `hub.advertise_url` | empty | The address agents dial. |
 | `wireguard` | off | This deploy host is the WireGuard server. Default interface `wg-gsc`, network `10.67.67.0/24`, UDP port `51820`. Set `endpoint` to the address peers dial. |
 | `tailscale` | off | `tailscale up` on this deploy host. `hostname` defaults to `genestack-console`. `auth_key` is a bootstrap secret. |

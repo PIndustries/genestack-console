@@ -17,6 +17,12 @@ def update_status(_principal: Principal = Depends(require_viewer)) -> dict:
     return updatecheck.status(get_settings())
 
 
+@router.get("/feed")
+def update_feed(_principal: Principal = Depends(require_viewer)) -> dict:
+    """Release notes and the public pipeline. A viewer can read both."""
+    return updatecheck.feed(get_settings())
+
+
 @router.post("/apply")
 def update_apply(_principal: Principal = Depends(require_admin)) -> dict:
     return updatecheck.apply_binary(get_settings())

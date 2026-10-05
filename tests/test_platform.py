@@ -392,6 +392,7 @@ def _patch_talos(
         platform, "_node_public_ip", lambda *a, **k: ("/tmp/talosconfig", "10.10.0.11")
     )
     monkeypatch.setattr(platform.shutil, "which", lambda _n: which)
+    monkeypatch.setattr(platform, "talosctl_bin", lambda: which)
 
     def fake_run(argv, **kwargs):
         captured["calls"].append(list(argv))
@@ -797,6 +798,30 @@ def test_talos_apply_config(monkeypatch):
     file_arg = argv[argv.index("--file") + 1]
     assert file_arg.endswith(".yaml")
     assert not Path(file_arg).exists()
+    assert captured["calls"] == [argv]
+
+
+def test_talos_apply_config_reboot_is_a_followup(monkeypatch):
+    """Talos 1.14 removed --mode reboot. Apply with auto, then reboot."""
+    captured = _patch_talos(monkeypatch, stdout="applied")
+    result = platform.talos_apply_config(
+        object(),
+        "ns1",
+        settings=object(),
+        db=None,
+        yaml_text="version: v1alpha1\nmachine: {}\n",
+        mode="reboot",
+    )
+    assert result["ok"] is True
+    assert result["mode"] == "reboot"
+    assert len(captured["calls"]) == 2
+    apply_argv = captured["calls"][0]
+    assert apply_argv[1] == "apply-config"
+    mode_at = apply_argv.index("--mode")
+    assert apply_argv[mode_at + 1] == "auto"
+    assert apply_argv[mode_at + 1] != "reboot"
+    assert captured["calls"][1][1] == "reboot"
+    assert "--wait=false" in captured["calls"][1]
 
 
 def test_talos_apply_config_http(client, admin_headers, monkeypatch):

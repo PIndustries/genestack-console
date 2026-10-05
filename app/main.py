@@ -208,7 +208,26 @@ async def lifespan(app: FastAPI):
         start_from_db()
     except Exception:
         log.exception("pxe runtime start failed (non-fatal)")
+    try:
+        from app.services.talosctl_install import start_ensure
+
+        start_ensure()
+    except Exception:
+        log.exception("talosctl ensure failed to start (non-fatal)")
+    update_stop = asyncio.Event()
+    update_task = None
+    if get_settings().update_watch:
+        from app.services import updatecheck
+
+        update_task = asyncio.create_task(
+            updatecheck.watch_loop(update_stop, get_settings)
+        )
     yield
+    update_stop.set()
+    if update_task is not None:
+        update_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await update_task
     try:
         from app.services.pxe_runtime import stop_all
 

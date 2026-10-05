@@ -4,7 +4,7 @@
 // the "fleet" SSE topic; the 15s board refresh stays as fallback when the
 // stream is down. The dashboard stats render inline as a compact top bar.
 import { api, esc, fmtAge, toast } from "../api.js";
-import { store, canAdmin, gate } from "../store.js";
+import { store, canAdmin, gate, applyEnvLifecycle, reconcileEnvs } from "../store.js";
 import { connect } from "../stream.js";
 import { applyTenantFilter, currentTenantId } from "./tenant.js";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
@@ -29,10 +29,13 @@ function detailHref(id, step) {
 
 let refreshTimer = null;
 let onTenantChange = null;
+let onEnvsChanged = null;
 let liveMap = new Map(); // environment_id -> /api/v1/fleet/live entry
 let streamHandle = null;
 let sseLive = false;
 let statsCache = null; // cached stats from dashboard module for the top bar
+let fleetSeq = 0;
+let statsSeq = 0;
 
 export function destroy() {
   if (refreshTimer) {
@@ -42,6 +45,10 @@ export function destroy() {
   if (onTenantChange) {
     window.removeEventListener("tenantchange", onTenantChange);
     onTenantChange = null;
+  }
+  if (onEnvsChanged) {
+    window.removeEventListener("gsc-envs", onEnvsChanged);
+    onEnvsChanged = null;
   }
   if (streamHandle) {
     streamHandle.close();
@@ -56,14 +63,18 @@ export function destroy() {
 async function loadStatsBar() {
   const bar = document.getElementById("fl-stats-bar");
   if (!bar) return;
+  const seq = ++statsSeq;
 
   try {
     const [envs, svcStatus] = await Promise.all([
       api("/api/v1/fleet").catch(() => null),
       api("/api/v1/genestack/services/status").catch(() => null),
     ]);
+    if (seq !== statsSeq) return;
 
-    const envList = Array.isArray(envs && envs.environments) ? envs.environments : [];
+    // Same tenant filter as the cards. An environment in another tenant
+    // must not keep the count at 1 after this tenant's list is empty.
+    const envList = applyTenantFilter(Array.isArray(envs && envs.environments) ? envs.environments : []);
     const total = envList.length;
 
     let healthy = 0;
@@ -77,14 +88,16 @@ async function loadStatsBar() {
       else if (h === "degraded" || h === "down") alert++;
     });
 
-    if (svcStatus && svcStatus.reachable === true) {
+    if (total && svcStatus && svcStatus.reachable === true) {
       const rels = Array.isArray(svcStatus.releases) ? svcStatus.releases : [];
       deployed = rels.filter((r) => String(r.status || "").toLowerCase() === "deployed").length;
     }
 
+    if (seq !== statsSeq) return;
     statsCache = { total, healthy, deployed, alert };
     renderStatsBar(statsCache);
   } catch {
+    if (seq !== statsSeq) return;
     renderStatsBar(null);
   }
 }
@@ -174,6 +187,14 @@ export async function render(root) {
     loadStatsBar();
   };
   window.addEventListener("tenantchange", onTenantChange);
+  // reconcile is this page writing store.envs from the board it just drew.
+  onEnvsChanged = (ev) => {
+    const action = ev && ev.detail && ev.detail.action;
+    if (action === "reconcile") return;
+    if (!document.getElementById("fl-list")) return;
+    loadFleet({ background: true });
+  };
+  window.addEventListener("gsc-envs", onEnvsChanged);
 }
 
 function skeleton() {
@@ -197,6 +218,7 @@ function skeleton() {
 }
 
 async function loadFleet({ background = false } = {}) {
+  const seq = ++fleetSeq;
   const list = document.getElementById("fl-list");
   const err = document.getElementById("fl-err");
   if (!list || !err) return; // page was unloaded mid-flight
@@ -209,6 +231,7 @@ async function loadFleet({ background = false } = {}) {
   try {
     data = await api("/api/v1/fleet");
   } catch (e) {
+    if (seq !== fleetSeq) return;
     if (background && list.querySelector(".fl-env-card:not(.fl-skeleton)")) {
       let msg = e.message;
       if (e.isNetwork || e.isTimeout) msg = "Server unreachable. Check your connection.";
@@ -225,13 +248,17 @@ async function loadFleet({ background = false } = {}) {
   }
 
   const live = await livePromise;
+  if (seq !== fleetSeq) return;
   liveMap = new Map(
     (Array.isArray(live) ? live : [])
       .filter((e) => e && e.environment_id)
       .map((e) => [e.environment_id, e])
   );
 
-  const envs = applyTenantFilter(Array.isArray(data && data.environments) ? data.environments : []);
+  const allEnvs = Array.isArray(data && data.environments) ? data.environments : [];
+  reconcileEnvs(allEnvs);
+  if (seq !== fleetSeq) return;
+  const envs = applyTenantFilter(allEnvs);
   renderHeader(data, envs.length);
   err.innerHTML = "";
 
@@ -248,6 +275,7 @@ async function loadFleet({ background = false } = {}) {
   } else {
     const showTenant = !currentTenantId();
     const consoleLogs = await consoleDefaultLogs();
+    if (seq !== fleetSeq) return;
     // Render cards immediately without waiting for workflow step fetches.
     // Fire-and-forget the workflow calls so the page renders fast, then update
     // individual CTA labels when each response arrives.
@@ -382,6 +410,14 @@ async function deleteFleetEnv(id, name) {
   try {
     await api(`/api/v1/environments/${encodeURIComponent(id)}`, { method: "DELETE" });
     toast(`Environment '${label}' deleted`, "ok");
+    // Same event the stream publishes. The board reload below also reconciles
+    // store.envs, so a missed stream frame cannot leave the sidebar behind.
+    applyEnvLifecycle({
+      type: "environment",
+      action: "deleted",
+      environment_id: id,
+      name: label,
+    });
     await loadFleet();
     await loadStatsBar();
   } catch (e) {

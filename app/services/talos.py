@@ -30,6 +30,7 @@ import ipaddress
 import os
 import re
 import shlex
+import shutil
 from pathlib import Path
 from typing import Any, Callable
 
@@ -58,6 +59,11 @@ DEFAULT_TALOS_VERSION = "v1.13.9"
 DEFAULT_FACTORY_SCHEMATIC = (
     "613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245"
 )
+# Client installed on the deploy host. Talos 1.14 removed
+# ``apply-config --mode=reboot``; an older client cannot patch a 1.14 node.
+# This is the stable client, not a 1.15 alpha, and not the boot image above.
+# scripts/genestack-console.sh pins the same string.
+TALOSCTL_VERSION = "v1.14.2"
 DEFAULT_TALOS_IMAGE_URL = (
     f"https://factory.talos.dev/image/{DEFAULT_FACTORY_SCHEMATIC}/"
     f"{DEFAULT_TALOS_VERSION}/metal-amd64.qcow2"
@@ -145,6 +151,46 @@ def valid_node_endpoint(value: str) -> bool:
         return True
     except ValueError:
         return bool(_HOST_RE.match(host))
+
+
+def talosctl_bin() -> str | None:
+    """Bundled client first, then whatever ``talosctl`` is on PATH.
+
+    An older client earlier on PATH cannot patch a Talos 1.14 node.
+    """
+    seen: set[str] = set()
+    roots: list[str] = []
+    prefix = os.environ.get("GSC_PREFIX", "").strip()
+    if prefix:
+        roots.append(prefix)
+    roots.append("/opt/genestack-console")
+    for root in roots:
+        path = os.path.join(root, "bin", "talosctl")
+        if path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return shutil.which("talosctl")
+
+
+def talosctl_command() -> str:
+    """argv0 for a command on the deploy host. The name is the fallback."""
+    return talosctl_bin() or "talosctl"
+
+
+def apply_config_cli_mode(mode: str) -> tuple[str, bool]:
+    """CLI mode for talosctl 1.14, and whether to reboot after a successful apply.
+
+    The operator value ``reboot`` stays. Talos 1.14 does not accept
+    ``--mode reboot``, so the client gets ``auto`` and a separate reboot.
+    """
+    raw = str(mode or "auto").strip().lower() or "auto"
+    if raw == "reboot":
+        return "auto", True
+    if raw in {"auto", "staged", "no-reboot", "try"}:
+        return raw, False
+    return "auto", False
 
 
 def node_cluster_ip(entry: dict[str, Any], hostname: str = "") -> str:
@@ -614,6 +660,7 @@ def build_talos_plan(
         raise ConfigValidationError("talos.install_image is invalid")
     # talosctl v1.13+ only accepts --nodes/--insecure/--talosconfig AFTER the
     # subcommand (flags before the verb are treated as unknown commands).
+    ctl = talosctl_command()
     commands: list[dict[str, Any]] = [
         {
             "phase": "write-network-patch",
@@ -626,7 +673,7 @@ def build_talos_plan(
         {
             "phase": "gen-config",
             "argv": [
-                "talosctl",
+                ctl,
                 "gen",
                 "config",
                 cluster_name,
@@ -651,7 +698,7 @@ def build_talos_plan(
             # first_cp (private fabric); only the client config uses apply_ip.
             "phase": "endpoints",
             "argv": [
-                "talosctl",
+                ctl,
                 "config",
                 "endpoints",
                 apply_first,
@@ -686,7 +733,7 @@ def build_talos_plan(
         entry = entry if isinstance(entry, dict) else {}
         patch = node_vlan_patch_yaml(node["hostname"], entry, doc)
         argv = [
-            "talosctl",
+            ctl,
             "apply-config",
             "--insecure",
             "--nodes",
@@ -712,13 +759,14 @@ def build_talos_plan(
     # After apply the node leaves maintenance and reboots. Talk to the public
     # NIC: the console is not on the vRack. talosctl flags must follow the verb.
     apply_q = shlex.quote(apply_first)
+    ctl_q = shlex.quote(ctl)
     commands.append(
         {
             "phase": "wait-controlplane",
             "argv": [
                 "sh",
                 "-c",
-                "i=0; until talosctl version --nodes "
+                f"i=0; until {ctl_q} version --nodes "
                 f"{apply_q} --talosconfig=./talosconfig >/dev/null 2>&1; do "
                 'i=$((i+1)); [ "$i" -gt 90 ] && exit 1; '
                 f'echo waiting for Talos API on {apply_q} "($i/90)"; '
@@ -730,7 +778,7 @@ def build_talos_plan(
         {
             "phase": "bootstrap",
             "argv": [
-                "talosctl",
+                ctl,
                 "bootstrap",
                 "--nodes",
                 apply_first,
@@ -742,7 +790,7 @@ def build_talos_plan(
         {
             "phase": "kubeconfig",
             "argv": [
-                "talosctl",
+                ctl,
                 "kubeconfig",
                 str(kubeconfig),
                 "--nodes",

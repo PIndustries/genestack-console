@@ -43,11 +43,13 @@ auth:
   # exposed or production-adjacent — the server logs a loud startup warning.
   dev_auto_login: false
 
-# Public channel on genestack.dev (not source). Console checks this and can
-# replace its compiled binary. auto: daily timer from --auto-update.
+# Published build. The running console checks this file and installs a newer
+# build when no job is queued or running. watch: false leaves that to the
+# update button. auto is the daily timer from the installer --auto-update flag.
 update:
-  url: https://genestack.dev/releases/version.json
+  url: https://github.com/PIndustries/genestack-console/releases/latest/download/version.json
   auto: false
+  watch: true
 
 # Leave root empty to auto-detect (parent of this package, or /opt/genestack).
 genestack:

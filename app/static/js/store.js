@@ -29,9 +29,72 @@ export function gate(allowed, requiredRole) {
   return allowed ? "" : `disabled title="Requires ${requiredRole} role"`;
 }
 
+// Bumped when a lifecycle event changes the list, so a GET that started
+// earlier cannot write a deleted environment back into the store.
+let envLoadSeq = 0;
+
 export async function loadEnvs() {
-  store.envs = (await api("/api/v1/environments")) || [];
+  const seq = ++envLoadSeq;
+  const rows = (await api("/api/v1/environments")) || [];
+  if (seq !== envLoadSeq) return store.envs;
+  store.envs = rows;
   return store.envs;
+}
+
+/** Drop or reload `store.envs` from one environment lifecycle event, then tell the shell. */
+export function applyEnvLifecycle(payload) {
+  const action = payload && payload.action;
+  const id = payload && payload.environment_id ? String(payload.environment_id) : "";
+  if (action === "deleted" && id) {
+    envLoadSeq += 1;
+    store.envs = (store.envs || []).filter((e) => e && String(e.id) !== id);
+  }
+  window.dispatchEvent(new CustomEvent("gsc-envs", { detail: payload || {} }));
+}
+
+/**
+ * Make `store.envs` match the fleet board's environment rows.
+ * Dispatches `gsc-envs` with action `reconcile` only when the list changed,
+ * so a board refresh cannot reload itself.
+ */
+export function reconcileEnvs(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const prev = store.envs || [];
+  const prevById = new Map(prev.filter((e) => e && e.id).map((e) => [String(e.id), e]));
+  const next = [];
+  let changed = prev.length !== list.length;
+  const seen = new Set();
+  for (const row of list) {
+    if (!row || !row.id || seen.has(String(row.id))) continue;
+    seen.add(String(row.id));
+    const id = String(row.id);
+    const old = prevById.get(id);
+    const name = row.name || (old && old.name) || id;
+    const tenant_id = row.tenant_id != null ? row.tenant_id : (old ? old.tenant_id : null);
+    if (!old || old.name !== name || old.tenant_id !== tenant_id) changed = true;
+    next.push(old ? { ...old, id, name, tenant_id } : { id, name, tenant_id });
+  }
+  if (next.length !== prev.length) changed = true;
+  if (!changed) return;
+  envLoadSeq += 1;
+  store.envs = next;
+  window.dispatchEvent(new CustomEvent("gsc-envs", { detail: { action: "reconcile" } }));
+}
+
+/** Rewrite every environment `<select>` from the current store. Keeps the current value when it still exists. */
+export function refreshEnvSelects(root) {
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll("select[data-gsc-env-select]").forEach((select) => {
+    const previous = select.value;
+    const noneLabel = select.getAttribute("data-gsc-env-none");
+    const includeNone = noneLabel !== null;
+    select.innerHTML = envOptionsHtml(previous, {
+      includeNone,
+      noneLabel: noneLabel || "(no environment)",
+    });
+    const still = Array.from(select.options).some((opt) => opt.value === previous);
+    select.value = still ? previous : "";
+  });
 }
 
 export function isDemoEnv(env) {
