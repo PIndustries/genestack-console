@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.05.2
+
+The dry-run pill follows the environment you have open, and Guided setup can shape the lab.
+
+- On an environment, the top bar says dry-run ON or dry-run OFF for that environment. Apply on this environment updates the pill. Fleet cards say dry-run or applies, including when the environment inherits the console default.
+- Guided setup, Servers, Static IPs / SSH, has One machine and Three machines. One machine runs every role. Three machines are one control plane and two workers. A new static panel starts as one machine.
+
 ## 2026.10.05.1
 
 Guided setup creates the environment when the saved id is gone.
