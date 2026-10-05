@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.05.5
+
+Machines is one page, and the image cache is on Overview.
+
+- Talos and Ubuntu are tabs on Machines. Add a machine there. Overview is the install map. Kubernetes and OpenStack are their own pages.
+- Image cache sits above the map. It lists each pull-through registry and the Helm charts. Cache images and charts copies the images this cluster runs onto this console. An admin starts it. It does not power a machine. OCI charts are stored in that cache. The other charts stay on their Helm repo.
+
 ## 2026.10.05.4
 
 The environment overview fits the window, and Delete is on the environment list.
