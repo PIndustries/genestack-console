@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.models import Environment
+from app.models import BaremetalNode, Environment
 from app.services import envconfig
 from app.services.cluster import _kube_env, _node_roles, _node_status
 from app.services.envcontext import build_context
@@ -43,6 +43,34 @@ APPLY_YAML_MAX = 512_000
 
 def _clean_ip(value: Any) -> str:
     return str(value or "").split("/", 1)[0].strip()
+
+
+def _entry_os(entry: dict[str, Any], ubuntu_names: set[str], hostname: str) -> str:
+    """Ubuntu when the row is recorded that way. Otherwise Talos.
+
+    ``adopt: kubespray`` is the stored mark for a machine that already has
+    Ubuntu. A bare-metal next boot of ubuntu is the same operating system.
+    """
+    if str(entry.get("adopt") or "").strip() == "kubespray":
+        return "ubuntu"
+    if hostname in ubuntu_names:
+        return "ubuntu"
+    return "talos"
+
+
+def _ubuntu_hostnames(db: Session | None, environment_id: str) -> set[str]:
+    if db is None or not environment_id:
+        return set()
+    rows = (
+        db.query(BaremetalNode.name, BaremetalNode.next_boot, BaremetalNode.boot_stage)
+        .filter(BaremetalNode.environment_id == environment_id)
+        .all()
+    )
+    names: set[str] = set()
+    for name, nxt, stage in rows:
+        if str(nxt or "") == "ubuntu" or str(stage or "") == "ubuntu":
+            names.add(str(name))
+    return names
 
 
 def _node_talos_ip(entry: dict[str, Any], hostname: str) -> str:
@@ -306,6 +334,7 @@ def platform_overview(
                         "public_ip": kn.get("external_ip"),
                         "private_ip": kn.get("internal_ip"),
                         "roles": kn.get("roles"),
+                        "os": "talos",
                         "talos": {
                             "reachable": None,
                             "version": None,
@@ -325,13 +354,15 @@ def platform_overview(
             private_ip = node_cluster_ip(entry, hostname)
             pending.append((hostname, entry, public_ip, private_ip))
 
+        ubuntu_names = _ubuntu_hostnames(db, str(getattr(env, "id", "") or ""))
         talos_by_host: dict[str, dict[str, Any]] = {}
         if talosconfig:
             with ThreadPoolExecutor(max_workers=6) as pool:
                 futs = {
                     pool.submit(_talos_version, talosconfig, talos_ip): hostname
                     for hostname, entry, _pub, _priv in pending
-                    if (talos_ip := _node_talos_ip(entry, hostname))
+                    if _entry_os(entry, ubuntu_names, hostname) == "talos"
+                    and (talos_ip := _node_talos_ip(entry, hostname))
                 }
                 for fut in as_completed(futs):
                     talos_by_host[futs[fut]] = fut.result()
@@ -339,17 +370,22 @@ def platform_overview(
         for hostname, entry, public_ip, private_ip in pending:
             kn = _match_k8s(k8s, _clean_ip(private_ip), _clean_ip(public_ip))
             nova = _match_nova(computes, (kn or {}).get("name"))
-            talos = talos_by_host.get(hostname) or {
-                "reachable": False,
-                "version": None,
-                "error": "no talosconfig" if not talosconfig else "no ip",
-            }
+            os_name = _entry_os(entry, ubuntu_names, hostname)
+            if os_name == "ubuntu":
+                talos = {"reachable": None, "version": None, "error": None}
+            else:
+                talos = talos_by_host.get(hostname) or {
+                    "reachable": False,
+                    "version": None,
+                    "error": "no talosconfig" if not talosconfig else "no ip",
+                }
             nodes.append(
                 {
                     "name": hostname,
                     "public_ip": _clean_ip(entry.get("public_ip") or public_ip),
                     "private_ip": _clean_ip(entry.get("private_ip") or private_ip),
                     "roles": entry.get("roles"),
+                    "os": os_name,
                     "talos": talos,
                     "kubernetes": kn,
                     "openstack": nova,

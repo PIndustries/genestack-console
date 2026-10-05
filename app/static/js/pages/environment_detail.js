@@ -3,17 +3,17 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard } from "./environment_servers.js?v=ls22";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls27";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
-import { destroyWorkflowCard } from "./environment_workflow.js?v=slot2";
-import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=tu2";
+import { destroyWorkflowCard } from "./environment_workflow.js?v=ls27";
+import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=ls27";
 import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls26";
+import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls28";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js?v=ls26";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
@@ -27,7 +27,10 @@ import { setBreadcrumbs } from "../components/breadcrumbs.js";
 export const title = "Environment Detail";
 
 let envId = "";
-let activePtab = "ovh";
+let activePtab = "machines";
+let activeOs = "talos";
+let osPinned = false;
+let pathListener = null;
 
 function showPageLoading() {
   removePageLoading();
@@ -177,16 +180,29 @@ function gatewayHtml(gw) {
 // ---------- tab switching ----------
 
 const PTAB_LEAD = {
-  ovh: "Metal hosts — BMC, NICs, and the boxes under the cloud.",
-  machines: "Talos cluster — versions, Ready machines, logs, services, and day-2 upgrades.",
-  kubernetes: "Workloads, pods, and nodes — scale, restart, drain, describe.",
-  openstack: "Instances, images, volumes, networks, and in-portal consoles.",
+  machines: "The computers in this environment.",
+  kubernetes: "Workloads, pods, and nodes.",
+  openstack: "Instances, images, volumes, and networks.",
 };
+
+const OS_LEAD = {
+  talos: "Talos on these machines. Add a hostname and IP here. Overview is the install map.",
+  ubuntu: "Ubuntu on these machines. Add a hostname and IP, or record machines that already have Ubuntu.",
+};
+
+function normalizePtab(name) {
+  if (name === "kubernetes" || name === "openstack") return name;
+  return "machines";
+}
 
 function envTabHash(tabName, ptab) {
   const q = new URLSearchParams();
   q.set("tab", tabName);
-  if (tabName === "platform") q.set("ptab", ptab || activePtab || "ovh");
+  if (tabName === "platform") {
+    const id = normalizePtab(ptab || activePtab);
+    q.set("ptab", id);
+    if (id === "machines") q.set("os", activeOs === "ubuntu" ? "ubuntu" : "talos");
+  }
   return `#/environment_detail/${encodeURIComponent(envId)}?${q}`;
 }
 
@@ -203,13 +219,15 @@ function switchTab(tabName, ptab, opts = {}) {
   activeTab = resolved;
   const root = document.querySelector(".detail-page");
   if (!root) return;
-  root.querySelectorAll(".tab-bar > .tab[data-tab]").forEach((t) => t.classList.remove("active"));
+  const platformPtab = normalizePtab(ptab || activePtab);
+  root.querySelectorAll(".tab-bar > .tab[data-tab]").forEach((t) => {
+    const on = t.dataset.tab === resolved && (resolved !== "platform" || (t.dataset.ptab || "machines") === platformPtab);
+    t.classList.toggle("active", on);
+  });
   root.querySelectorAll(".tab-panel[data-panel]").forEach((p) => p.classList.remove("active"));
-  const tabBtn = root.querySelector(`.tab-bar > .tab[data-tab="${resolved}"]`);
   const panel = root.querySelector(`.tab-panel[data-panel="${resolved}"]`);
-  if (tabBtn) tabBtn.classList.add("active");
   if (panel) panel.classList.add("active");
-  if (resolved === "platform") switchPlatformSubtab(ptab || activePtab);
+  if (resolved === "platform") switchPlatformSubtab(platformPtab);
   else if (resolved === "settings") switchSettingsSubtab(stab[tabName] || ptab || "config");
   loadTab(resolved);
   if (resolved === "settings") loadDescriptor().catch(() => {});
@@ -223,27 +241,45 @@ export function applyQuery({ param, query }) {
   if (!param || param !== envId) return false;
   const tab = (query && query.get("tab")) || "workflow";
   const ptab = query && query.get("ptab");
-  switchTab(tab, tab === "platform" ? (ptab || "ovh") : ptab || undefined, { silent: true });
+  const os = query && query.get("os");
+  if (os === "ubuntu" || os === "talos") {
+    activeOs = os;
+    osPinned = true;
+  }
+  switchTab(tab, tab === "platform" ? normalizePtab(ptab) : ptab || undefined, { silent: true });
   return true;
 }
 
+function switchOsTab(name, opts = {}) {
+  const id = name === "ubuntu" ? "ubuntu" : "talos";
+  if (opts.pin) osPinned = true;
+  activeOs = id;
+  document.querySelectorAll("[data-ostab]").forEach((t) => t.classList.toggle("active", t.dataset.ostab === id));
+  const lead = document.getElementById("ostab-lead");
+  if (lead) lead.textContent = OS_LEAD[id] || "";
+  syncOsView(id);
+  if (!opts.silent && envId && activeTab === "platform" && activePtab === "machines") {
+    history.replaceState(null, "", envTabHash("platform", "machines"));
+    window.dispatchEvent(new CustomEvent("gsc-nav-sync"));
+  }
+}
+
 function switchPlatformSubtab(name) {
-  const id = name && PTAB_LEAD[name] ? name : "ovh";
+  const id = normalizePtab(name);
   activePtab = id;
   const panel = document.getElementById("panel-platform");
   if (!panel) return;
-  panel.querySelectorAll(".ptab").forEach((t) => t.classList.toggle("active", t.dataset.ptab === id));
   panel.querySelectorAll(".ptab-panel").forEach((p) => p.classList.toggle("active", p.dataset.ppanel === id));
-  const lead = document.getElementById("ptab-lead");
-  if (lead) lead.textContent = PTAB_LEAD[id] || "";
+  if (id === "machines") switchOsTab(activeOs, { silent: true });
   loadPlatformLayer(id);
 }
 
 function loadPlatformLayer(name) {
   if (!envId) return;
-  if (name === "ovh") loadServersCard(envId);
-  else if (name === "machines") loadPlatformCard(envId, { silent: tabLoads.has("platform:machines") });
-  else if (name === "kubernetes") loadClusterCard(envId);
+  if (name === "machines") {
+    loadServersCard(envId);
+    loadPlatformCard(envId, { silent: tabLoads.has("platform:machines") });
+  } else if (name === "kubernetes") loadClusterCard(envId);
   else if (name === "openstack") loadCloudCard(envId, { silent: tabLoads.has("platform:openstack") });
   tabLoads.set("platform", true);
   tabLoads.set(`platform:${name}`, true);
@@ -279,7 +315,9 @@ function loadTab(tabName) {
 export async function render(root, { param, query } = {}) {
   showPageLoading();
   activeTab = (query && query.get("tab")) || "workflow";
-  activePtab = (query && query.get("ptab")) || "ovh";
+  activePtab = normalizePtab((query && query.get("ptab")) || "machines");
+  activeOs = query && query.get("os") === "ubuntu" ? "ubuntu" : "talos";
+  osPinned = !!(query && (query.get("os") === "ubuntu" || query.get("os") === "talos"));
   tabLoads.clear();
   if (!store.envs.length) await loadEnvs().catch(() => {});
   if (param) envId = param;
@@ -337,7 +375,9 @@ export async function render(root, { param, query } = {}) {
     <div id="env-apply" class="hint-row" hidden></div>
     <div class="tab-bar">
       <button class="tab active" data-tab="workflow">Overview</button>
-      <button class="tab" data-tab="platform">Platform</button>
+      <button class="tab" data-tab="platform" data-ptab="machines">Machines</button>
+      <button class="tab" data-tab="platform" data-ptab="kubernetes">Kubernetes</button>
+      <button class="tab" data-tab="platform" data-ptab="openstack">OpenStack</button>
       <button class="tab" data-tab="observe">Observe</button>
       <button class="tab" data-tab="settings">Settings</button>
       <div class="tab-spacer"></div>
@@ -349,6 +389,7 @@ export async function render(root, { param, query } = {}) {
 
     <!-- ═══ OVERVIEW TAB ═══ -->
     <div class="tab-panel active" data-panel="workflow" id="panel-workflow">
+      <p class="hint-row">This is the install. Add a machine on <button type="button" class="linkish" data-goto-ptab="machines">Machines</button>.</p>
       ${deployMapHtml()}
       <div hidden>${progressCardHtml()}</div>
     </div>
@@ -367,8 +408,8 @@ export async function render(root, { param, query } = {}) {
       </div>
       <div class="card" style="margin-top:.75rem">
         <div class="toolbar"><h2>Dedicated servers</h2></div>
-        <div class="muted">Metal hosts, NICs, and BMC live on
-          <button type="button" class="linkish" data-goto-ptab="ovh">Platform → Hosts</button>.
+        <div class="muted">Machines, addresses, and management ports live on
+          <button type="button" class="linkish" data-goto-ptab="machines">Machines</button>.
         </div>
       </div>
       <div class="env-grid" style="margin-top:.75rem">
@@ -406,43 +447,31 @@ export async function render(root, { param, query } = {}) {
       </div>
     </div>
 
-    <!-- ═══ PLATFORM TAB (metal / Talos / Kubernetes / OpenStack) ═══ -->
+    <!-- ═══ MACHINES / KUBERNETES / OPENSTACK ═══ -->
     <div class="tab-panel" data-panel="platform" id="panel-platform">
-      <div class="ptab-bar" role="tablist" aria-label="Platform layers">
-        <button type="button" class="ptab active" data-ptab="ovh" role="tab">
-          <span class="ptab-kicker">Infrastructure</span>
-          Hosts
-        </button>
-        <button type="button" class="ptab" data-ptab="machines" role="tab">
-          <span class="ptab-kicker">Talos</span>
-          Machines
-        </button>
-        <button type="button" class="ptab" data-ptab="kubernetes" role="tab">
-          <span class="ptab-kicker">Orchestration</span>
-          Kubernetes
-        </button>
-        <button type="button" class="ptab" data-ptab="openstack" role="tab">
-          <span class="ptab-kicker">Cloud</span>
-          OpenStack
-        </button>
-      </div>
-      <p class="ptab-lead" id="ptab-lead">${PTAB_LEAD.ovh}</p>
-      <div class="ptab-panel active" data-ppanel="ovh">
+      <div class="ptab-panel active" data-ppanel="machines">
+        <div class="ostab-bar" id="ostab-bar" role="tablist" aria-label="Operating system">
+          <button type="button" class="ostab active" data-ostab="talos" role="tab">Talos</button>
+          <button type="button" class="ostab" data-ostab="ubuntu" role="tab">Ubuntu</button>
+        </div>
+        <p class="ptab-lead" id="ostab-lead">${OS_LEAD.talos}</p>
+        <div data-os-panel="talos">
+          <div class="env-grid full">
+            ${platformCardHtml()}
+          </div>
+        </div>
         <div class="env-grid full">
           ${serversCardHtml()}
         </div>
       </div>
-      <div class="ptab-panel" data-ppanel="machines">
-        <div class="env-grid full">
-          ${platformCardHtml()}
-        </div>
-      </div>
       <div class="ptab-panel" data-ppanel="kubernetes">
+        <p class="ptab-lead">${PTAB_LEAD.kubernetes}</p>
         <div class="env-grid full">
           ${clusterCardHtml()}
         </div>
       </div>
       <div class="ptab-panel" data-ppanel="openstack">
+        <p class="ptab-lead">${PTAB_LEAD.openstack}</p>
         <div class="env-grid full">
           ${cloudCardHtml()}
         </div>
@@ -502,15 +531,25 @@ export async function render(root, { param, query } = {}) {
   root.querySelector(".tab-bar").addEventListener("click", (e) => {
     const tab = e.target.closest(".tab[data-tab]");
     if (!tab) return;
-    switchTab(tab.dataset.tab);
+    switchTab(tab.dataset.tab, tab.dataset.ptab);
   });
-  const ptabBar = root.querySelector("#panel-platform .ptab-bar");
-  if (ptabBar) {
-    ptabBar.addEventListener("click", (e) => {
-      const tab = e.target.closest(".ptab[data-ptab]");
+  const osBar = document.getElementById("ostab-bar");
+  if (osBar) {
+    osBar.addEventListener("click", (e) => {
+      const tab = e.target.closest("[data-ostab]");
       if (!tab) return;
-      switchTab("platform", tab.dataset.ptab);
+      switchOsTab(tab.dataset.ostab, { pin: true });
     });
+  }
+  if (!pathListener) {
+    pathListener = (ev) => {
+      const provider = ev.detail && ev.detail.provider;
+      const quiet = !!(ev.detail && ev.detail.quiet);
+      if (quiet && osPinned) return;
+      if (provider === "kubespray") switchOsTab("ubuntu", { silent: true, pin: true });
+      else if (provider === "talos") switchOsTab("talos", { silent: true, pin: true });
+    };
+    window.addEventListener("gsc-metal-path", pathListener);
   }
   const stabBar = document.getElementById("stab-bar");
   if (stabBar) {

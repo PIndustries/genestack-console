@@ -113,6 +113,8 @@ let pipe = null;
 let job = null;
 let recentJobs = [];
 let snap = null;
+let registryGen = 0;
+let cacheCardSig = "";
 let platform = null;
 let workloads = null;
 let workloadsError = "";
@@ -3420,7 +3422,7 @@ function inspectorFor(id) {
       <p class="muted">Last warm: ${lastLine}</p>
       <div class="dm-insp-actions">${
         canAdmin()
-          ? `<button type="button" class="secondary btn-sm" data-dm-warm>Warm image cache</button>`
+          ? `<button type="button" class="secondary btn-sm" data-dm-warm>Cache images and charts</button>`
           : ""
       }</div>`
     );
@@ -3993,6 +3995,7 @@ function renderAll() {
   renderPipe();
   renderChrome();
   renderEnvHealth();
+  renderCacheCard();
   if (stageModalId) {
     const modal = document.getElementById("dm-tool-modal");
     if (modal && !modal.hidden) openStageModal(stageModalId);
@@ -4033,6 +4036,7 @@ async function fetchState() {
   if (!envId || fetchInflight) return;
   fetchInflight = true;
   const id = envId;
+  refreshRegistry(id);
   try {
     refreshPods(id);
     const [snapRes, pipeCat, vmsRes, jobsRes, bmRes, cloudRes, ingRes, svcRes, gwRes, routeRes, poolRes] = await Promise.all([
@@ -4519,11 +4523,11 @@ async function runValidation(kind) {
 async function warmImageCache() {
   if (!envId) return;
   try {
-    const created = await api(`/api/v1/ops/environments/${encodeURIComponent(envId)}/registry/mirror`, {
+    const created = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
       method: "POST",
-      body: JSON.stringify({ dry_run: false }),
+      body: JSON.stringify({ operation: "registry.mirror", params: {} }),
     });
-    toast(`Warming cache ${String(created.id || "").slice(0, 8)}…`, "ok");
+    toast(`Caching images ${String(created.id || "").slice(0, 8)}…`, "ok");
     beginLive({ collapse: true });
     await fetchState();
     schedule();
@@ -4748,7 +4752,7 @@ async function openIloConsole(currentEnv, node, opts) {
   closeIloConsole();
   iloLiveFrame = frame;
   if (!node || !node.id) {
-    throw new Error("No BMC/iLO registered for this host. Add it under Platform → Hosts.");
+    throw new Error("No management port is registered for this host. Add it on Machines.");
   }
   const data = await api(
     `/api/v1/environments/${encodeURIComponent(currentEnv)}/baremetal/nodes/${encodeURIComponent(node.id)}/console/session`,
@@ -4995,7 +4999,7 @@ async function startIloConsole(opts = {}) {
   try {
     const node = await bmNodeFor(nodeModal && nodeModal.name);
     if (!node || !node.id) {
-      const msg = "No BMC/iLO registered for this host. Add it under Platform → Hosts.";
+      const msg = "No management port is registered for this host. Add it on Machines.";
       setKvmWait(msg);
       if (help) help.textContent = msg;
       toast(msg, "warn");
@@ -6204,8 +6208,132 @@ function onFlowKey(e) {
   hammerUp();
 }
 
+function chartWhere(row) {
+  if (row && row.oci && row.registry) return `${row.registry} cache`;
+  const raw = String((row && row.url) || "");
+  try {
+    const host = new URL(raw).host;
+    if (host) return host;
+  } catch {
+    /* not a URL */
+  }
+  return raw;
+}
+
+function renderCacheCard() {
+  const regs = document.getElementById("reg-cache-regs");
+  const meta = document.getElementById("reg-cache-meta");
+  const list = document.getElementById("reg-cache-chart-list");
+  const chartsFold = document.getElementById("reg-cache-charts");
+  if (!regs) return;
+  const r = (snap && snap.registry) || {};
+  const caches = Array.isArray(r.caches) ? r.caches : [];
+  const charts = Array.isArray(r.charts) ? r.charts : [];
+  const sig = JSON.stringify([
+    r.bind,
+    r.ready_count,
+    r.cache_count,
+    r.image_count,
+    r.error,
+    r.last_mirror && r.last_mirror.id,
+    r.last_mirror && r.last_mirror.status,
+    caches,
+    charts.map((c) => c && c.name),
+  ]);
+  if (sig === cacheCardSig) return;
+  const open = new Set();
+  regs.querySelectorAll("details[open][data-reg]").forEach((el) => {
+    open.add(el.getAttribute("data-reg"));
+  });
+  cacheCardSig = sig;
+  const last = r.last_mirror;
+  const lastLine = last
+    ? `last cache ${last.status || ""} ${String(last.id || "").slice(0, 8)}`
+    : "not cached yet";
+  const head = caches.length
+    ? `${r.bind || ""} · ${Number(r.ready_count || 0)}/${Number(r.cache_count || caches.length)} up · ${Number(
+        r.image_count || 0
+      )} images · ${lastLine}`
+    : r.error
+      ? String(r.error)
+      : "Loading the registries…";
+  if (meta) meta.textContent = head;
+  if (!caches.length) {
+    regs.innerHTML = r.error ? `<p class="muted">${esc(String(r.error))}</p>` : "";
+  } else {
+    regs.innerHTML = `<table><tbody>${caches
+      .map((c) => {
+        const repos = Array.isArray(c.repositories) ? c.repositories : [];
+        const name = String(c.registry || "");
+        const repoHtml = repos.length
+          ? `<ul>${repos.map((repo) => `<li><code>${esc(repo)}</code></li>`).join("")}</ul>`
+          : `<p class="muted">No images stored yet.</p>`;
+        return `<tr>
+          <td><code>${esc(name)}</code></td>
+          <td><span class="pill ${c.running ? "ok" : "bad"}">${c.running ? "up" : "down"}</span></td>
+          <td class="muted">${esc(c.endpoint || "")}</td>
+          <td>${esc(String(c.images || 0))} images</td>
+        </tr>
+        <tr><td colspan="4"><details data-reg="${esc(name)}" ${open.has(name) ? "open" : ""}>
+          <summary>${repos.length ? `${repos.length} stored` : "Nothing stored"}</summary>
+          ${repoHtml}
+        </details></td></tr>`;
+      })
+      .join("")}</tbody></table>`;
+  }
+  if (chartsFold) {
+    const sum = chartsFold.querySelector("summary");
+    if (sum) sum.textContent = charts.length ? `Helm charts · ${charts.length}` : "Helm charts";
+  }
+  if (!list) return;
+  if (!charts.length) {
+    list.innerHTML = `<p class="muted">${caches.length ? "No charts listed." : ""}</p>`;
+    return;
+  }
+  const ordered = charts.slice().sort((a, b) => {
+    const oci = Number(!!b.oci) - Number(!!a.oci);
+    if (oci) return oci;
+    return String(a.name).localeCompare(String(b.name));
+  });
+  list.innerHTML = `<table><tbody>${ordered
+    .map(
+      (c) =>
+        `<tr><td><code>${esc(c.name || "")}</code></td><td class="muted">${esc(chartWhere(c))}</td><td>${
+          c.oci ? "on this console" : "Helm repo"
+        }</td></tr>`
+    )
+    .join("")}</tbody></table>`;
+}
+
+function refreshRegistry(id) {
+  if (!id) return;
+  const gen = ++registryGen;
+  api(`/api/v1/environments/${encodeURIComponent(id)}/registry`, { timeout: 12000 })
+    .then((regRes) => {
+      if (gen !== registryGen || envId !== id || !regRes || typeof regRes !== "object") return;
+      snap = Object.assign({}, snap || {}, { registry: regRes });
+      if (!envName && regRes.environment_name) envName = regRes.environment_name;
+      renderAll();
+    })
+    .catch(() => {});
+}
+
 export function deployMapHtml() {
   return `
+  <div class="card reg-cache" id="reg-cache-card">
+    <div class="toolbar">
+      <h2>Image cache</h2>
+      <button type="button" class="btn-sm" id="reg-cache-warm" ${gate(canAdmin(), "admin")}>Cache images and charts</button>
+    </div>
+    <p class="muted">Registries, container images, and Helm charts on this console. Nodes pull from here.</p>
+    <p class="muted" id="reg-cache-meta">Loading the registries…</p>
+    <div id="reg-cache-regs"></div>
+    <details id="reg-cache-charts">
+      <summary>Helm charts</summary>
+      <p class="muted">OCI charts sit in the registry cache. The others are Helm repos.</p>
+      <div id="reg-cache-chart-list"></div>
+    </details>
+  </div>
   <div id="dm-card" class="sf-shell">
     <div class="sf-chrome">
       <div class="sf-next-tools">
@@ -6213,7 +6341,7 @@ export function deployMapHtml() {
         <div id="dm-maint-menu" class="sf-maint-menu" hidden>
           <button type="button" class="secondary btn-sm" id="dm-repair">Repair cluster</button>
           <button type="button" class="btn-sm" id="dm-restack" title="Helm from OpenStack core. Does not upgrade kube-ovn.">Restack OpenStack</button>
-          <button type="button" class="secondary btn-sm" id="dm-warm">Warm image cache</button>
+          <button type="button" class="secondary btn-sm" id="dm-warm">Cache images and charts</button>
           <button type="button" class="secondary btn-sm" id="dm-validate" title="Tempest is its own job">Run Tempest</button>
           <button type="button" class="danger btn-sm" id="dm-greenfield" title="PXE every host. Destroys the cluster.">Greenfield metal wipe</button>
         </div>
@@ -6386,6 +6514,11 @@ export function wireDeployMap() {
     warm.dataset.wired = "1";
     warm.addEventListener("click", () => warmImageCache());
   }
+  const cacheWarm = document.getElementById("reg-cache-warm");
+  if (cacheWarm && !cacheWarm.dataset.wired) {
+    cacheWarm.dataset.wired = "1";
+    cacheWarm.addEventListener("click", () => warmImageCache());
+  }
   const validate = document.getElementById("dm-validate");
   if (validate && !validate.dataset.wired) {
     validate.dataset.wired = "1";
@@ -6460,6 +6593,8 @@ export async function loadDeployMap(id) {
     view = { x: 48, y: 36, k: 0.85 };
     workloads = null;
     workloadsError = "";
+    cacheCardSig = "";
+    registryGen += 1;
     workloadsAt = 0;
     liveMetrics = null;
     shownLive = null;
@@ -6602,6 +6737,8 @@ export function destroyDeployMap() {
   job = null;
   pipe = null;
   snap = null;
+  cacheCardSig = "";
+  registryGen += 1;
   platform = null;
   workloads = null;
   osVms = [];

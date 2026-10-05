@@ -345,7 +345,39 @@ def for_environment(
     except Exception:  # noqa: BLE001
         last = None
     payload["last_mirror"] = last
+    try:
+        payload["charts"] = helm_charts()
+    except Exception:  # noqa: BLE001
+        payload["charts"] = []
     return payload
+
+
+def helm_charts() -> list[dict[str, Any]]:
+    """Charts this console installs.
+
+    OCI charts share the pull-through cache. HTTP Helm repos stay on
+    their own URL; caching still copies the images those charts install.
+    """
+    from app.services.overlays import HELM_CHARTS, OCI_CHARTS
+
+    rows: list[dict[str, Any]] = []
+    for name in sorted(HELM_CHARTS):
+        repo, url = HELM_CHARTS[name]
+        oci = str(OCI_CHARTS.get(name) or "")
+        registry = ""
+        if oci.startswith("oci://"):
+            registry = oci[len("oci://") :].split("/", 1)[0]
+        rows.append(
+            {
+                "name": name,
+                "repo": repo,
+                "url": oci or url,
+                "oci": bool(oci),
+                "registry": registry,
+            }
+        )
+    rows.sort(key=lambda row: (not row["oci"], row["name"]))
+    return rows
 
 
 def registry_pull_env(doc: dict[str, Any] | None = None) -> dict[str, str]:

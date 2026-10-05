@@ -15,8 +15,16 @@ const REFRESH_MS = 15000;
 const STALE_MS = 5 * 60 * 1000; // telemetry older than 5min is flagged stale
 const STEPS = ["connect", "inventory", "config", "push", "deploy", "operate"];
 
-function detailHref(id) {
-  return `#/environment_detail/${encodeURIComponent(id)}`;
+function detailHref(id, step) {
+  const q = new URLSearchParams();
+  if (step === "inventory") {
+    q.set("tab", "platform");
+    q.set("ptab", "machines");
+  } else if (step === "config") {
+    q.set("tab", "settings");
+  }
+  const qs = q.toString();
+  return `#/environment_detail/${encodeURIComponent(id)}${qs ? "?" + qs : ""}`;
 }
 
 let refreshTimer = null;
@@ -321,7 +329,7 @@ function renderFleetCard(env, showTenant, consoleLogs) {
     const hint = c != null && t != null ? `<span class="fl-next-hint muted">stage ${c}/${t}</span>` : "";
     actionHtml_str = `<a class="btn-sm" href="${detailHref(id)}">Watch →</a>${hint}`;
   } else {
-    actionHtml_str = `<a class="btn-sm fl-action" data-env-id="${esc(id)}" href="${detailHref(id)}">Open →</a>`;
+    actionHtml_str = `<a class="btn-sm fl-action" data-env-id="${esc(id)}" href="${detailHref(id, cur)}">Open →</a>`;
   }
 
   return `<div class="card span-6 fl-env-card${complete ? " fl-row-complete" : ""}" data-env="${esc(id)}">
@@ -361,7 +369,10 @@ function updateActionLabel(env, list) {
   };
   const label = (currentStep && labels[currentStep]) || "Open →";
   const btn = list.querySelector(`.fl-action[data-env-id="${id}"]`);
-  if (btn) btn.textContent = label;
+  if (btn) {
+    btn.textContent = label;
+    btn.href = detailHref(id, currentStep);
+  }
 }
 
 async function deleteFleetEnv(id, name) {

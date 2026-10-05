@@ -74,6 +74,18 @@ function talosUp(info) {
   return !!(info && info.talos && info.talos.reachable);
 }
 
+function talosNodes(nodes) {
+  return (nodes || []).filter((n) => !n || n.os !== "ubuntu");
+}
+
+function talosStatusLabel(talos) {
+  if (talos && talos.reachable) return talos.version || "up";
+  const err = String((talos && talos.error) || "");
+  if (!err || err === "no ip") return "down";
+  if (/unavailable|no route|connection|dial|timeout|refused|unreachable/i.test(err)) return "unreachable";
+  return err.length > 42 ? `${err.slice(0, 39)}…` : err;
+}
+
 function unique(list) {
   return Array.from(new Set((list || []).filter(Boolean)));
 }
@@ -183,9 +195,9 @@ function overviewHtml(data) {
   <div class="om-overview">
     <div class="om-overview-head">
       <div>
-        <div class="om-kicker">Talos cluster</div>
+        <div class="om-kicker">Talos</div>
         <h2 class="om-title">${esc(title)}</h2>
-        <div class="muted om-sub">OS · Kubernetes · OpenStack compute on each box. Dual-NIC: cluster on private, manage on public.</div>
+        <div class="muted om-sub">Versions, Ready, logs, and upgrades for these machines.</div>
       </div>
       <div class="om-overview-actions">
         <button type="button" class="secondary btn-sm" data-pf-dl="kubeconfig">Kubeconfig</button>
@@ -271,7 +283,7 @@ function menuHtml(info) {
 function rowsHtml(nodes) {
   const shown = filteredNodes(nodes);
   if (!nodes.length) {
-    return `<div class="om-empty">No machines in inventory yet. Add hosts on Platform → Hosts, then deploy Talos from Overview.</div>`;
+    return `<div class="om-empty">No Talos machines yet. Add a hostname and IP below.</div>`;
   }
   if (!shown.length) {
     return `<div class="om-empty">No machines match this filter.</div>`;
@@ -297,7 +309,9 @@ function rowsHtml(nodes) {
               .join(" · ")
           : "—";
         const talosCell = `${dot(talos.reachable === true)}${
-          talos.reachable ? `<code>${esc(talos.version || "up")}</code>` : `<span class="muted">${esc(talos.error || "down")}</span>`
+          talos.reachable
+            ? `<code>${esc(talos.version || "up")}</code>`
+            : `<span class="muted" title="${esc(talos.error || "")}">${esc(talosStatusLabel(talos))}</span>`
         }`;
         const k8sCell = kn
           ? `${dot(k8sReady(kn))}<code>${esc(kn.version || kn.status || "—")}</code>${
@@ -550,8 +564,8 @@ export function platformCardHtml() {
   return `
   <div class="card span-12" id="pf-card">
     <div class="toolbar">
-      <h2>Machines</h2>
-      <span class="muted">Talos cluster — Omni-class day 2</span>
+      <h2>Talos</h2>
+      <span class="muted">Versions, Ready, logs, and upgrades.</span>
       <span id="pf-msg" class="muted"></span>
       <button class="secondary btn-sm" id="pf-refresh" type="button">Refresh</button>
     </div>
@@ -635,9 +649,10 @@ function render() {
   const filters = document.getElementById("pf-filters");
   const inspector = document.getElementById("pf-inspector");
   if (!body || !cache) return;
-  const nodes = cache.nodes || [];
+  const nodes = talosNodes(cache.nodes || []);
+  const view = Object.assign({}, cache, { nodes, cluster: null });
   body.classList.remove("muted");
-  if (overview) overview.innerHTML = overviewHtml(cache);
+  if (overview) overview.innerHTML = overviewHtml(view);
   if (filters) filters.innerHTML = filterHtml(nodes);
   const err = cache.error ? `<div class="hint muted">${esc(cache.error)}</div>` : "";
   body.innerHTML = rowsHtml(nodes) + err;

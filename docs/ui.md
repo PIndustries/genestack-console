@@ -27,22 +27,22 @@ The API docs link in the sidebar is `/docs` on the console. That is a catalog of
 
 ## One environment
 
-Open an environment and the sidebar gains a second block: Overview, Observe, Platform, Settings. The screen is `app/static/js/pages/environment_detail.js`. It pulls the other cards in. Those cards are the other files whose names start with `environment_`.
+Open an environment and the sidebar gains a second block: Overview, Machines, Kubernetes, OpenStack, Observe, Settings. The screen is `app/static/js/pages/environment_detail.js`. It pulls the other cards in. Those cards are the other files whose names start with `environment_`.
 
 The bar above the tabs is the switch for this environment. Apply on this environment makes jobs from here change the machines. Look around only puts them back to a log. It does not edit `config.yaml` and it does not restart a service. An operator can use it. A viewer sees it and cannot press it.
 
-Overview is the deploy map. It shows where this cloud is, from an empty checkout to OpenStack answering. The map reads the workflow API. It does not start a job by being opened.
+Overview is the install map. It shows where this cloud is, from an empty checkout to OpenStack answering. The map reads the workflow API. It does not start a job by being opened. Machines are added on Machines, not on this map. Image cache sits above that map. It lists each pull-through registry and the Helm charts. Cache images and charts queues `registry.mirror`. That copies the images this cluster runs onto this console. An admin starts it. It does not power a machine. OCI charts are stored in that same cache. The other charts stay on their Helm repo.
 
-Platform is four layers.
+Machines is the list of computers. Talos and Ubuntu are the tabs on that page.
 
 | Tab | What it is |
 | --- | --- |
-| Hosts | The servers in this environment. You add a machine, see its address, choose Ubuntu or Talos, and open a management-port console. OVH servers that the account can see are adopted from here. `environment_servers.js`. |
-| Machines | Talos on those servers, after they are installed. `environment_platform.js`. |
+| Talos | Talos on these machines: versions, Ready, logs, and upgrades. Add a hostname and IP on the same page. Talos is already installed applies a config to every saved address and does not power the machines. After that job succeeds, Deploy from infrastructure starts OpenStack and does not run Talos bootstrap again. `environment_platform.js` and `environment_servers.js`. |
+| Ubuntu | Machines that already have Ubuntu. Already have an OS only records them. Deploy over SSH starts at the hosts stage. |
 | Kubernetes | Nodes, namespaces, and pods. `environment_cluster.js`. |
 | OpenStack | The cloud services and the instances. `environment_openstack.js` and `environment_cloud.js`. |
 
-On `main`, each Hosts row shows Ubuntu and Talos with a mark beside the name. The outlined choice is the operating system already recorded on that row. The button says Reinstall when you keep that system, and Install when you pick the other one. Ubuntu queues `hosts.ubuntu.bringup`. Talos on a row that has a management port queues `baremetal.node.next_boot` with the next boot set to Talos and boot now. Talos on a row with no management port, and the Talos is already installed button, queue `genestack.talos.bootstrap` for every saved host. That job does not power the machines. An admin starts it. After that job succeeds, the same page shows Deploy from infrastructure. That Deploy starts at infrastructure and does not run Talos bootstrap again. Already have an OS records the selected hosts that already have an operating system. It does not install. A management port is optional. The wall says so when none are registered. The path above the table is Talos or Kubespray. Talos is the preferred direct boot. Kubespray records machines that already have an operating system. Choosing the path does not install an operating system. Open wall fills the screen with the management ports on the left. Select a server and its console appears. Select it again and that console goes away. Show all live opens the rest. Clear and Close empty the stage. Opening a console does not power or boot the machine. The row and the wall ship in `v2026.10.04.1`. The `v2026.10.03` binary does not have this row or this wall.
+On a row, Ubuntu and Talos are the two choices. The outlined choice is the operating system already recorded. The button says Reinstall when you keep that system, and Install when you pick the other one. Ubuntu queues `hosts.ubuntu.bringup`. Talos on a row that has a management port queues `baremetal.node.next_boot` with the next boot set to Talos and boot now. Talos on a row with no management port, and the Talos is already installed button, queue `genestack.talos.bootstrap` for every saved host. That job does not power the machines. An admin starts it. Already have an OS records the selected hosts that already have Ubuntu. It does not install. A management port is optional. Open wall lists the management ports. Select a server and its console appears. Select it again and that console goes away. Show all live opens the rest. Clear and Close empty the stage. Opening a console does not power or boot the machine. The row and the wall ship in `v2026.10.04.1`. The `v2026.10.03` binary does not have this row or this wall.
 
 Settings is four more tabs.
 

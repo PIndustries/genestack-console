@@ -83,6 +83,13 @@ def test_cluster_summary_counts_roles_and_versions():
     assert empty["name"] == "lab-1"
 
 
+def test_entry_os_ubuntu_is_not_dialed_as_talos():
+    assert platform._entry_os({"adopt": "kubespray"}, set(), "cp-1") == "ubuntu"
+    assert platform._entry_os({}, {"cp-1"}, "cp-1") == "ubuntu"
+    assert platform._entry_os({"adopt": ""}, set(), "cp-1") == "talos"
+    assert platform._entry_os({}, {"other"}, "cp-1") == "talos"
+
+
 def test_platform_endpoint_200(client, admin_headers, monkeypatch):
     env = client.post(
         "/api/v1/environments", headers=admin_headers, json={"name": "pf-1"}

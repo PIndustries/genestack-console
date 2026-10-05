@@ -91,17 +91,17 @@ const STEPS = [
     name: "Operate",
     howto: [
       "Start with Verify (quick, then standard).",
-      "Then open Platform: Machines, Kubernetes, and OpenStack.",
-      "Download kubeconfig and talosconfig from Platform. Do not use Lens.",
+      "Then open Machines, Kubernetes, and OpenStack.",
+      "Download kubeconfig and talosconfig from Machines. Do not use Lens.",
     ],
     info:
       "Day 2: cluster reachability, helm releases, pod health, and drift. Verify still " +
       "runs genestack's test suite (scripts/tests): k8s health → infra → services → a " +
-      "boot-a-VM smoke test. The Platform tab is the native operator surface " +
-      "(Talos machines, Kubernetes, OpenStack). Horizon remains at " +
+      "boot-a-VM smoke test. Machines, Kubernetes, and OpenStack are the operator " +
+      "screens. Horizon remains at " +
       "horizon.<gateway_domain> as a fallback. From a VPN, point that hostname " +
       "at the hub address the installer printed. " +
-      "kubeconfig and talosconfig download from the Platform tab; do not use Lens.",
+      "kubeconfig and talosconfig download from Machines; do not use Lens.",
   },
 ];
 
@@ -110,7 +110,7 @@ const ACTION_LABELS = {
   config: "Edit config ↓",
   push: "Push from the Config card ↓",
   deploy: "Deploy cluster",
-  operate: "Platform machines",
+  operate: "Machines",
 };
 
 // Card modules live in the detail page's tab panels; this stepper links to them.
@@ -1038,7 +1038,7 @@ function stepActionHtml(stepId, envId, current) {
     inventory: "Prepare fabric",
     config: "Edit Config",
     push: "Push Files",
-    operate: "Platform machines",
+    operate: "Machines",
   };
   const label = actionLabels[stepId] || tabName.charAt(0).toUpperCase() + tabName.slice(1);
   const cls = current ? "btn-sm wf-action primary" : "secondary btn-sm";

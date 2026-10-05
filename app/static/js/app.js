@@ -3,15 +3,15 @@ import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clea
 import { store, loadEnvs } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
-import * as fleet from "./pages/fleet.js?v=ls26";
+import * as fleet from "./pages/fleet.js?v=ls27";
 import * as hosts from "./pages/hosts.js";
 import * as environments from "./pages/environments.js";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls26";
-import * as envWizard from "./pages/env_wizard.js?v=ls25";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls28";
+import * as envWizard from "./pages/env_wizard.js?v=ls27";
 import * as admin from "./pages/admin.js";
 
 const PAGES = { fleet, hosts, environments, hardware, activity, operations, observe, environment_detail: environmentDetail, setup: envWizard, admin };
@@ -518,9 +518,12 @@ function syncNav(name, param, query) {
     if (inEnv && page === "fleet") on = false;
     a.classList.toggle("active", on);
   });
+  const rawPtab = (query && query.get("ptab")) || "machines";
+  const ptab = rawPtab === "ovh" || rawPtab === "hosts" ? "machines" : rawPtab;
   document.querySelectorAll(".nav-link[data-env-tab]").forEach((a) => {
-    a.classList.toggle("active", inEnv && a.dataset.envTab === envTab);
-    if (inEnv) a.href = envHash(param, a.dataset.envTab, a.dataset.envTab === "platform" ? "ovh" : "");
+    const wantPtab = a.dataset.envPtab || "";
+    a.classList.toggle("active", inEnv && a.dataset.envTab === envTab && (!wantPtab || wantPtab === ptab));
+    if (inEnv) a.href = envHash(param, a.dataset.envTab, wantPtab);
   });
   const titleLink = $("nav-env-title");
   if (titleLink && inEnv) {

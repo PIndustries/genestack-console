@@ -64,7 +64,7 @@ These drive the checkout at `/opt/genestack`. A push writes the saved settings i
 | `genestack.backup_mariadb` | `app/modules/genestack/backup_mariadb.py` | Backs up MariaDB. |
 | `genestack.hyperconverged_lab` | `app/modules/genestack/hyperconverged_lab.py` | Deploys the single-machine lab. |
 | `genestack.state.export` | `app/modules/genestack/state_export.py` | Writes rendered state back into a Genestack checkout. |
-| `registry.mirror` | `app/modules/genestack/registry_mirror.py` | Pulls container images into the cluster cache. |
+| `registry.mirror` | `app/modules/genestack/registry_mirror.py` | Starts the pull-through registries and pulls every image the live cluster runs. Overview → Image cache is the button. OCI Helm charts land in that same cache. |
 
 The pipeline stages, in order, are:
 

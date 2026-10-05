@@ -243,6 +243,37 @@ def delete_environment(
     db.commit()
 
 
+@router.get("/{environment_id}/registry")
+def get_environment_registry(
+    db: Session = Depends(get_db),
+    env: Environment = Depends(get_env_scoped("viewer")),
+) -> dict[str, Any]:
+    """Pull-through caches and Helm charts for this environment.
+
+    A viewer can read it. Docker or catalog trouble comes back as an
+    ``error`` string with empty caches. It does not start a job.
+    """
+    from app.services import image_registry
+
+    try:
+        return image_registry.for_environment(db, env, get_settings())
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "environment_id": env.id,
+            "environment_name": env.name,
+            "bind": "",
+            "running": False,
+            "ready": False,
+            "caches": [],
+            "ready_count": 0,
+            "cache_count": 0,
+            "image_count": 0,
+            "last_mirror": None,
+            "charts": [],
+            "error": str(exc)[:240],
+        }
+
+
 def _key_fingerprint(public_key: str) -> Optional[str]:
     """Compute SSH key fingerprint from public key."""
     import subprocess

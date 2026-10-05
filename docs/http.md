@@ -50,7 +50,7 @@ A route that names an environment checks your membership in that environment's t
 | `app/routers/auth.py` | Login, refresh, logout, whoami, and the optional company login. |
 | `app/routers/oauth.py` | OAuth 2 authorize, token, revoke, introspect, and the discovery document. |
 | `app/routers/tenants.py` | Tenants and memberships. |
-| `app/routers/environments.py` | Create and list environments. An environment is one cloud. |
+| `app/routers/environments.py` | Create and list environments. An environment is one cloud. `GET /api/v1/environments/{id}/registry` lists the pull-through caches and Helm charts. A viewer can read it. It does not start a job. |
 | `app/routers/envconfig.py` | The settings document for one environment, and its older versions. Saving does not edit `/etc/genestack` by itself. A job copies the document onto the deploy host. |
 | `app/routers/overlays.py` | Network overlays saved on the environment. |
 | `app/routers/operations.py` | `GET /api/v1/operations`, the catalog. |

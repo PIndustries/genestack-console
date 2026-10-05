@@ -1,18 +1,14 @@
-// pages/environment_servers.js — server inventory card for the environment detail page.
-// Saved servers render in an Inventory table with role chips, Save, and Remove.
-// OVH import is only for an environment bound to an OVH account. A role is a
-// saved cluster plan. It does not install an operating system.
-// Checked inventory rows can queue one next-boot job each when they have a
-// management port. Apply names the servers first. Nothing is queued until
-// that confirm. Talos is already installed applies a config to every saved
-// address and does not power the machines. After that job succeeds, Deploy
-// from infrastructure starts OpenStack and does not run Talos bootstrap again.
-// Already have an OS only records.
+// pages/environment_servers.js — add a machine and edit its address and roles.
+// The Machines page has Talos and Ubuntu tabs. This card is that list.
+// Talos is already installed applies a config to every saved address and does
+// not power the machines. After that job succeeds, Deploy from infrastructure
+// starts OpenStack and does not run Talos bootstrap again.
+// Already have an OS only records Ubuntu that is already there.
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { ROLES, ROLE_LABELS } from "../roles.js";
 import { clearOvhPoll } from "../ovh.js";
-import { clusterOsHtml, fetchMetalPath, metalPathSentence, osNameHtml } from "../metal_path.js";
+import { clusterOsHtml, fetchMetalPath, osNameHtml } from "../metal_path.js";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
@@ -106,7 +102,8 @@ export function serversCardHtml() {
 #srv-card .srv-pick { width:1rem; height:1rem; }
 #srv-card .srv-path-switch { display:flex; flex-wrap:wrap; align-items:center; gap:.45rem .75rem; margin:0 0 .7rem; color:var(--text,#eafaef); }
 #srv-card .srv-path-switch label { display:inline-flex; align-items:center; gap:.35rem; font-size:.82rem; color:var(--text,#eafaef); }
-#srv-card .srv-flow { margin:0 0 .7rem; padding:.6rem .7rem; background:rgba(7,14,9,.35); border:1px solid rgba(125,255,176,.18); border-radius:.45rem; }
+#srv-card .srv-flow { margin:.45rem 0 .7rem; padding:.6rem .7rem; background:rgba(7,14,9,.35); border:1px solid rgba(125,255,176,.18); border-radius:.45rem; }
+#srv-roles > summary, #srv-bmc-wall > summary { cursor:pointer; color:var(--text,#eafaef); margin:.45rem 0; }
 #srv-card .srv-flow pre { margin:0 0 .55rem; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.75rem; line-height:1.35; white-space:pre; overflow-x:auto; color:var(--fg-muted,#b7d4c4); }
 #srv-card .srv-flow-actions { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; }
 @media (max-width:700px) {
@@ -125,45 +122,51 @@ export function serversCardHtml() {
   padding: .2rem .35rem;
 }
 </style>
-<div class="card span-12" id="srv-card">
+<div class="card span-12" id="srv-card" data-os-view="talos">
   <div class="toolbar">
-    <h2 id="srv-title">Metal hosts</h2>
-    <span class="muted" id="srv-kicker">Hostname and IP are enough. A management port is optional.</span>
+    <h2 id="srv-title">Add a machine</h2>
+    <span class="muted" id="srv-kicker">Hostname and IP. Saving does not boot the machine.</span>
     <button class="secondary btn-sm" id="srv-refresh" type="button">Refresh</button>
     <span id="srv-msg" class="muted"></span>
   </div>
-  <div class="hint-row" id="srv-hint">Add a host by hostname and IP. Talos is already installed applies a config to every saved address and does not power the machines. Already have an OS records Ubuntu that is already there. A role only saves the cluster plan.</div>
-  <div class="hint-row" id="srv-path">Reading the metal path for this environment…</div>
-  <div class="srv-path-switch" id="srv-path-switch">
-    <label><input type="radio" name="srv-path-choice" value="talos"> ${osNameHtml("talos", "Talos, preferred")}</label>
-    <label><input type="radio" name="srv-path-choice" value="kubespray"> Kubespray, adopt an existing OS</label>
-    <button class="btn-sm" id="srv-path-save" type="button" disabled>Save path</button>
-    <button class="btn-sm" id="srv-talos-installed" type="button">Talos is already installed</button>
-    <span id="srv-path-msg" class="muted"></span>
-  </div>
-  <div id="srv-talos-flow" class="srv-flow" hidden>
-    <pre id="srv-talos-flow-map"></pre>
+  <div data-os-show="talos" id="srv-talos-actions">
+    <p class="hint-row" id="srv-hint">Talos is already installed applies the config to every saved address. It does not power the machines.</p>
     <div class="srv-flow-actions">
+      <button class="btn-sm" id="srv-talos-installed" type="button">Talos is already installed</button>
       <button class="btn-sm" id="srv-talos-deploy" type="button" data-srv-talos-deploy disabled>Deploy from infrastructure</button>
+      <span id="srv-path-msg" class="muted"></span>
+    </div>
+    <div id="srv-talos-flow" class="srv-flow" hidden>
+      <pre id="srv-talos-flow-map"></pre>
       <span id="srv-talos-flow-msg" class="muted"></span>
     </div>
   </div>
+  <div data-os-show="ubuntu" id="srv-ubuntu-actions" hidden>
+    <p class="hint-row">These machines already have Ubuntu. Select the rows, then Already have an OS. That only records them. Deploy on Overview runs over SSH.</p>
+  </div>
+  <p class="hint-row" id="srv-path-mismatch" hidden></p>
+  <button class="secondary btn-sm" id="srv-path-use" type="button" hidden>Use this operating system</button>
   <div id="srv-ovh-banner"></div>
   <div id="srv-vrack"></div>
   <div id="srv-err"></div>
-  <div id="srv-bmc-wall"><div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted">Loading BMCs…</p></div>
-  <h3>Inventory (assigned)</h3>
+  <details id="srv-bmc-wall">
+    <summary>Management ports</summary>
+    <p class="muted">Loading…</p>
+  </details>
+  <div class="add-host-section" id="srv-add-host"></div>
+  <details id="srv-roles" open>
+    <summary>Addresses and roles</summary>
   <div id="srv-become" class="srv-become hidden">
     <strong id="srv-become-count">0 servers</strong>
     <label><input type="radio" name="srv-become" value="ubuntu"> ${osNameHtml("ubuntu")}</label>
-    <label><input type="radio" name="srv-become" value="talos"> ${osNameHtml("talos", "Talos cluster")}</label>
-    <label><input type="radio" name="srv-become" value="kubespray"> Kubespray</label>
+    <label><input type="radio" name="srv-become" value="talos"> ${osNameHtml("talos")}</label>
     <button class="btn-sm" id="srv-become-apply" type="button">Apply</button>
     <button class="secondary btn-sm" id="srv-adapt" type="button">Already have an OS</button>
     <button class="secondary btn-sm" id="srv-adapt-clear" type="button">Clear that record</button>
     <span id="srv-become-msg" class="muted"></span>
-    <p class="srv-become-note">Ubuntu brings the selected hosts up by itself. A host that already answers stays on disk and leaves the Talos plan. A host that does not answer is installed, and the job waits until it answers. Talos cluster and Kubespray reboot through a management port. Already have an OS only records machines that already have one.</p>
+    <p class="srv-become-note">Installs the selected rows. Already have an OS only records them.</p>
   </div>
+  <p class="hint-row" id="srv-os-empty" hidden></p>
   <table>
     <thead><tr>
       <th style="width:2rem"><input type="checkbox" id="srv-select-all" class="srv-pick" aria-label="Select all hosts"></th>
@@ -172,14 +175,12 @@ export function serversCardHtml() {
     <tbody id="srv-tbody"><tr><td colspan="8">
       <div class="card-empty">
         <div class="empty-icon">⬡</div>
-        <p>No servers configured</p>
-        <p class="empty-hint">Add a host by hostname and IP</p>
+        <p>No machines yet</p>
+        <p class="empty-hint">Add a hostname and IP</p>
       </div>
     </td></tr></tbody>
   </table>
-  <div class="add-host-section">
-    <div id="srv-add-host"></div>
-  </div>
+  </details>
   <div id="srv-discovered"></div>
 </div>`;
 }
@@ -235,10 +236,9 @@ export function wireServersCard(getEnvId) {
       return;
     }
     if (t.matches("input[data-srv-pick]")) syncBecomeBar();
-    if (t.name === "srv-path-choice") syncPathSwitch();
   });
   card?.addEventListener("click", (e) => {
-    const save = e.target.closest("#srv-path-save");
+    const save = e.target.closest("#srv-path-use");
     if (save && !save.disabled) {
       saveMetalPath(getEnvId());
       return;
@@ -495,24 +495,33 @@ function renderBmcWall(envId, nodes, note) {
   if (!root) return;
   if (note) {
     closeBmcWall();
-    root.innerHTML = `<div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted" style="font-size:.78rem">${esc(note)}</p>`;
+    root.innerHTML = `<summary>Management ports</summary><p class="muted" style="font-size:.78rem">${esc(note)}</p>`;
     return;
   }
   const list = sortedBmcNodes(nodes);
   if (!list.length) {
     closeBmcWall();
-    root.innerHTML = `<div class="srv-bmc-head"><h3>BMC wall</h3></div><p class="muted" style="font-size:.78rem">No management ports are registered. A BMC is optional. Hostname and IP are enough to start.</p>`;
+    root.innerHTML = `<summary>Management ports</summary><p class="muted" style="font-size:.78rem">None registered. A management port is optional.</p>`;
     return;
   }
   root.innerHTML = `
+    <summary>Management ports <span class="muted">${list.length}</span></summary>
     <div class="srv-bmc-head">
-      <h3>BMC wall</h3>
-      <span class="muted">${list.length} registered</span>
       <button class="btn-sm" type="button" id="srv-bmc-open">Open wall</button>
     </div>
-    <p class="hint-row">Open wall lists every BMC on the left. Select any of them and each one shows up live. Show all live selects every BMC. Opening a console does not power or boot the machine.</p>`;
+    <p class="hint-row">Open wall lists every management port. Opening a console does not power or boot the machine.</p>`;
   const open = root.querySelector("#srv-bmc-open");
   if (open) open.addEventListener("click", () => openBmcWall(envId, list));
+}
+
+function hostMachineOs(server, boot, metalPath) {
+  const next = String((boot && boot.next_boot) || "");
+  const stage = String((boot && boot.boot_stage) || "");
+  if (String((server && server.adopt) || "") === "kubespray" || next === "ubuntu" || stage === "ubuntu") {
+    return "ubuntu";
+  }
+  if (next === "talos" || stage === "talos") return "talos";
+  return metalPath === "kubespray" ? "ubuntu" : "talos";
 }
 
 function hostOsLabel(server, bootByName, clusterIps, metalPath) {
@@ -524,7 +533,7 @@ function hostOsLabel(server, bootByName, clusterIps, metalPath) {
   const inCluster = !!(ip && clusterIps.has(ip));
   if (String((server && server.adopt) || "") === "kubespray" && !inCluster) {
     const ubuntuBoot = next === "ubuntu" || stage === "ubuntu";
-    return `<span class="pill ok">Kubespray</span> <span class="muted">recorded, not in the cluster${ubuntuBoot ? `. ${osNameHtml("ubuntu")} next boot` : ""}</span>`;
+    return `<span class="pill ok">${osNameHtml("ubuntu")}</span> <span class="muted">recorded${ubuntuBoot ? ", next boot" : ""}</span>`;
   }
   if (next === "ubuntu" || stage === "ubuntu") {
     return inCluster
@@ -1219,47 +1228,94 @@ function gateInstalled() {
   else btn.title = "Talos is already running, for example from an ISO. Does not power the machines.";
 }
 
-function syncPathSwitch() {
-  const save = document.getElementById("srv-path-save");
-  if (!save) return;
-  const chosen = document.querySelector("#srv-path-switch input[name='srv-path-choice']:checked");
-  const value = chosen ? chosen.value : "";
-  save.disabled = !canRun() || !value || value === savedMetalPath;
-  if (!canRun()) save.title = "Requires operator role";
+function osView() {
+  const card = document.getElementById("srv-card");
+  return card && card.dataset.osView === "ubuntu" ? "ubuntu" : "talos";
 }
 
-function paintPathSwitch(provider) {
+function paintPathMismatch() {
+  const line = document.getElementById("srv-path-mismatch");
+  const btn = document.getElementById("srv-path-use");
+  if (!line || !btn) return;
+  const view = osView();
+  const want = view === "ubuntu" ? "kubespray" : "talos";
+  const mismatch = !!savedMetalPath && savedMetalPath !== want;
+  line.hidden = !mismatch;
+  btn.hidden = !mismatch;
+  if (!mismatch) return;
+  if (view === "ubuntu") {
+    line.textContent = "This environment still installs Talos. Use Ubuntu when these machines already have it.";
+    btn.textContent = "Use Ubuntu";
+  } else {
+    line.textContent = "This environment still installs on Ubuntu. Use Talos when the machines boot Talos.";
+    btn.textContent = "Use Talos";
+  }
+  btn.disabled = !canRun();
+  if (!canRun()) btn.title = "Requires operator role";
+}
+
+function rememberMetalPath(provider) {
   savedMetalPath = provider === "kubespray" || provider === "talos" ? provider : "";
-  document.querySelectorAll("#srv-path-switch input[name='srv-path-choice']").forEach((el) => {
-    el.checked = el.value === savedMetalPath;
-    el.disabled = !canRun();
+  paintPathMismatch();
+}
+
+export function syncOsView(os) {
+  const view = os === "ubuntu" ? "ubuntu" : "talos";
+  const card = document.getElementById("srv-card");
+  if (card) card.dataset.osView = view;
+  document.querySelectorAll("#panel-platform [data-os-show]").forEach((el) => {
+    el.hidden = el.dataset.osShow !== view;
   });
-  syncPathSwitch();
+  document.querySelectorAll("#panel-platform [data-os-panel]").forEach((el) => {
+    el.hidden = el.dataset.osPanel !== view;
+  });
+  document.querySelectorAll("#srv-tbody tr[data-machine-os]").forEach((tr) => {
+    const show = tr.dataset.machineOs === view;
+    tr.hidden = !show;
+    if (!show) {
+      const cb = tr.querySelector("input[data-srv-pick]");
+      if (cb) cb.checked = false;
+    }
+  });
+  const rows = document.querySelectorAll("#srv-tbody tr[data-machine-os]");
+  const shown = document.querySelectorAll(`#srv-tbody tr[data-machine-os="${view}"]:not([hidden])`).length;
+  const empty = document.getElementById("srv-os-empty");
+  if (empty) {
+    empty.hidden = !rows.length || shown > 0;
+    empty.textContent = view === "ubuntu"
+      ? "No Ubuntu machines. Add a hostname and IP, or record one with Already have an OS."
+      : "No Talos machines in this list. Add a hostname and IP.";
+  }
+  const roles = document.getElementById("srv-roles");
+  if (roles && rows.length) roles.open = view === "ubuntu";
+  paintPathMismatch();
+  if (typeof syncBecomeBar === "function") syncBecomeBar();
 }
 
 async function saveMetalPath(envId) {
   const msg = document.getElementById("srv-path-msg");
-  const chosen = document.querySelector("#srv-path-switch input[name='srv-path-choice']:checked");
-  if (!chosen || !chosen.value || chosen.value === savedMetalPath) return;
-  const label = chosen.value === "kubespray" ? "Kubespray" : "Talos";
+  const view = osView();
+  const provider = view === "ubuntu" ? "kubespray" : "talos";
+  if (!provider || provider === savedMetalPath) return;
+  const label = view === "ubuntu" ? "Ubuntu" : "Talos";
   if (!window.confirm(
-    `Save this environment's metal path as ${label}?\n\nThis does not reboot any machine and does not start a playbook.`
+    `Use ${label} for this environment?\n\nThis records the install path. It does not reboot any machine and does not start a job.`
   )) return;
-  const btn = document.getElementById("srv-path-save");
+  const btn = document.getElementById("srv-path-use");
   if (btn) btn.disabled = true;
   try {
     await api(`/api/v1/environments/${encodeURIComponent(envId)}/config/provider`, {
       method: "PUT",
-      body: JSON.stringify({ provider: chosen.value }),
+      body: JSON.stringify({ provider }),
     });
-    if (msg) msg.textContent = `Saved ${label}. Nothing rebooted.`;
-    toast(`Metal path saved as ${label}`, "ok");
-    window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: chosen.value } }));
+    if (msg) msg.textContent = `This environment uses ${label}. Nothing rebooted.`;
+    toast(`This environment uses ${label}`, "ok");
+    window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider } }));
     await loadServersCard(envId);
   } catch (e) {
     if (msg) msg.textContent = e.message;
     toast(e.message, "bad");
-    syncPathSwitch();
+    paintPathMismatch();
   }
 }
 
@@ -1307,7 +1363,7 @@ async function applyAdapt(envId, adopt) {
   const text = !ready.length
     ? `Every selected machine is already in the cluster, so nothing will be recorded:\n${skipped.map((row) => row.hostname).join("\n")}`
     : adopt
-      ? `Record that these machines already have an OS?\n\n${names}\n\nThis does not reboot them, install anything, or start a playbook. The row shows Kubespray recorded. Roles stay.${skipLine}`
+      ? `Record that these machines already have Ubuntu?\n\n${names}\n\nThis does not reboot them, install anything, or start a job. The row shows Ubuntu recorded. Roles stay.${skipLine}`
       : `Clear that record on these machines?\n\n${names}\n\nThis does not reboot them or change their roles.${skipLine}`;
   if (!window.confirm(text)) return;
   if (!ready.length) {
@@ -1545,7 +1601,7 @@ async function applyBecome(envId) {
   if (!picks.length) return;
   const choiceEl = document.querySelector("#srv-become input[name='srv-become']:checked");
   if (!choiceEl) {
-    if (msg) msg.textContent = "Pick Ubuntu server, Talos cluster, or Kubespray.";
+    if (msg) msg.textContent = "Pick Ubuntu or Talos.";
     return;
   }
   if (choiceEl.value === "ubuntu") {
@@ -1655,26 +1711,25 @@ export async function loadServersCard(envId) {
   const title = document.getElementById("srv-title");
   const kicker = document.getElementById("srv-kicker");
   const hint = document.getElementById("srv-hint");
-  if (title) title.textContent = ovhBound ? "OVH infrastructure" : "Metal hosts";
+  if (title) title.textContent = ovhBound ? "OVH" : "Add a machine";
   if (kicker) {
     kicker.textContent = ovhBound
-      ? "Dedicated · vRack · private fabric"
-      : "Hostname and IP are enough. A management port is optional.";
+      ? "Dedicated servers on the bound account."
+      : "Hostname and IP. Saving does not boot the machine.";
   }
   if (hint) {
     hint.textContent = ovhBound
-      ? "Dedicated servers use a public NIC for management and a private NIC on the vRack. Roles here are the saved cluster plan."
-      : "Add a host by hostname and IP. Talos is already installed applies a config to every saved address and does not power the machines. Already have an OS records Ubuntu that is already there. A role only saves the cluster plan.";
+      ? "Dedicated servers use a public NIC for management and a private NIC on the vRack."
+      : "Talos is already installed applies the config to every saved address. It does not power the machines.";
   }
-  const pathLine = document.getElementById("srv-path");
-  if (pathLine) pathLine.textContent = metalPathSentence(metalPath);
-  paintPathSwitch(metalPath);
+  rememberMetalPath(metalPath);
+  window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: metalPath, quiet: true } }));
   loadTalosFlow(envId);
   msg.textContent = servers.length ? `${servers.length} server(s)` : "No servers in inventory yet.";
   const ovhBanner = document.getElementById("srv-ovh-banner");
   if (ovhBanner) {
     ovhBanner.innerHTML = ovhBound
-      ? `<div class="hint-row" style="color:var(--ok,#4caf50)">OVH environment — dedicated servers from the bound account. ${metalPath === "kubespray" ? "Kubespray" : "Talos"}, Kubernetes, and Genestack use the <strong>private NIC</strong> (vRack). The public NIC stays up but the host firewall default-denies the internet edge.</div>`
+      ? `<div class="hint-row" style="color:var(--ok,#4caf50)">OVH environment. Dedicated servers from the bound account. ${metalPath === "kubespray" ? "Ubuntu" : "Talos"} uses the private NIC.</div>`
       : "";
   }
   const vrackBox = document.getElementById("srv-vrack");
@@ -1759,10 +1814,11 @@ export async function loadServersCard(envId) {
               (s.private_mac ? `<div style="font-size:.7rem">${esc(s.private_mac)}</div>` : "")
             : esc(s.ip || "—");
           const boot = bootByName.get(String(s.hostname || "")) || {};
+          const machineOs = hostMachineOs(s, boot, metalPath);
           const ilo = boot.bmc_host
             ? `<div style="font-size:.7rem;color:var(--fg-muted,#b7d4c4)">iLO ${esc(boot.bmc_host)}</div>`
             : "";
-          return `<tr data-row="${i}">
+          return `<tr data-row="${i}" data-machine-os="${machineOs}">
             <td><input type="checkbox" class="srv-pick" data-srv-pick="${i}" aria-label="Select ${esc(s.hostname || "host")}"></td>
             <td><strong>${esc(s.hostname || "?")}</strong>${sub}${ilo}</td>
             <td class="muted">${ipCell}</td>
@@ -1829,7 +1885,6 @@ export async function loadServersCard(envId) {
 
   const addHostHtml = `
     <div id="srv-add-host">
-      <h3>Add host</h3>
       <div id="cluster-status-bar" style="margin:.3rem 0 .5rem"></div>
       <div class="sshkey-auth-section" style="margin-bottom:.4rem">
         <label style="font-size:.8rem;display:flex;align-items:center;gap:.4rem">
@@ -1852,7 +1907,7 @@ export async function loadServersCard(envId) {
           <span style="margin-left:.3rem">View on</span>
           <button type="button" data-srv-view-key style="background:none;border:none;color:var(--accent,#4a9eff);cursor:pointer;font-size:.72rem;padding:0">Config tab → SSH Keys</button>
         </div>
-        <p class="muted" style="margin:.35rem 0 .2rem">Saving a host records it. It does not boot Talos or Ubuntu.</p>
+        <p class="muted" style="margin:.35rem 0 .2rem">Saving records the machine. It does not boot it.</p>
         <div style="margin-top:.35rem;font-size:.78rem;color:var(--fg-muted,#888)">Topology</div>
         <div id="srv-topo-select" style="margin-top:.3rem"></div>
         <div id="srv-add-roles" style="margin-top:.5rem;display:none">
@@ -1862,7 +1917,7 @@ export async function loadServersCard(envId) {
           </div>
         </div>
         <div id="srv-add-quick" style="margin-top:.5rem">
-          <button class="secondary btn-sm" id="srv-add-btn-quick" type="button" ${gate(canRun(), "operator")}>Add</button>
+          <button class="btn-sm" id="srv-add-btn-quick" type="button" ${gate(canRun(), "operator")}>Add</button>
         </div>
       </div>
     </div>`;
@@ -1957,8 +2012,9 @@ export async function loadServersCard(envId) {
   }
 
   discovered.innerHTML = ovhBound
-    ? `<p class="muted" style="margin:.3rem 0">Import dedicated servers from the bound OVH account, or add a host by hostname and IP.</p>`
-    : `<p class="muted" style="margin:.3rem 0">Add a host by hostname and IP. This only saves the host. It does not boot it. Use this for a Talos ISO, or for Ubuntu that is already installed.</p>`;
+    ? `<p class="muted" style="margin:.3rem 0">Import dedicated servers from the bound OVH account, or add a machine by hostname and IP.</p>`
+    : "";
+  syncOsView(osView());
 }
 
 async function saveInventoryRow(envId, server, rowIdx) {
@@ -2125,11 +2181,16 @@ function paintTalosFlow(bootstrap, deploy) {
   const depStage = jobStage(deploy);
   const depLive = dep === "queued" || dep === "running";
   const marks = {};
-  let note = "Boot each machine from the Talos ISO, then Talos is already installed. Deploy waits until that job succeeds.";
+  let note = "";
   let allow = false;
   if (!boot) {
-    marks.talos = { glyph: ">", note: "next" };
-    marks.infrastructure = { glyph: " ", note: "after Kubernetes is up" };
+    box.hidden = true;
+    btn.disabled = true;
+    btn.title = canAdmin()
+      ? "Deploy waits until Talos is already installed."
+      : "Requires admin role";
+    if (msg) msg.textContent = "";
+    return;
   } else if (boot === "queued" || boot === "running") {
     marks.talos = { glyph: "*", note: boot };
     marks.infrastructure = { glyph: " ", note: "Deploy waits" };
@@ -2174,6 +2235,7 @@ function paintTalosFlow(bootstrap, deploy) {
       allow = true;
     }
   }
+  box.hidden = osView() === "ubuntu";
   map.textContent = flowDiagram(marks);
   if (msg) msg.textContent = note;
   const admin = canAdmin();
@@ -2188,13 +2250,12 @@ async function loadTalosFlow(envId) {
   clearTalosFlowTimer();
   const box = document.getElementById("srv-talos-flow");
   if (!box) return;
-  if (!envId || savedMetalPath === "kubespray") {
+  if (!envId || savedMetalPath === "kubespray" || osView() === "ubuntu") {
     box.hidden = true;
     return;
   }
   const btn = document.getElementById("srv-talos-deploy");
   if (btn) btn.disabled = true;
-  box.hidden = false;
   let jobs = [];
   try {
     jobs = await api(`/api/v1/jobs?environment_id=${encodeURIComponent(envId)}&limit=20`) || [];

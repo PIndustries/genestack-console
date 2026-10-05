@@ -20,13 +20,9 @@ export function metalLead(provider) {
 }
 
 export function metalPathSentence(provider) {
-  if (provider === "kubespray") {
-    return "Cluster path is Kubespray. That adopts machines that already have an OS. On a row, Reinstall keeps that OS. The menu beside it installs Ubuntu or Talos.";
-  }
-  if (provider === "talos") {
-    return "Cluster path is Talos, the preferred direct boot. On a row, Reinstall keeps that OS. The menu beside it installs Ubuntu or Talos.";
-  }
-  return "Reading the metal path for this environment…";
+  if (provider === "kubespray") return "This environment installs on Ubuntu.";
+  if (provider === "talos") return "This environment installs Talos.";
+  return "";
 }
 
 export function metalPathLine(provider) {
@@ -54,7 +50,7 @@ export function osNameHtml(kind, label) {
 
 export function clusterOsHtml(provider) {
   if (provider === "kubespray") {
-    return `<span class="pill ok">Kubespray</span> <span class="muted">in the cluster</span>`;
+    return `<span class="pill ok">${osNameHtml("ubuntu")}</span> <span class="muted">in the cluster</span>`;
   }
   if (provider === "talos") {
     return `<span class="pill ok">${osNameHtml("talos")}</span> <span class="muted">in the cluster</span>`;

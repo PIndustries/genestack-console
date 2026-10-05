@@ -2039,6 +2039,20 @@ body.gsc-term-fs-lock { overflow: hidden; }
 .ptab:hover { color: var(--text); background: var(--panel2); }
 .ptab.active { color: var(--text); border-bottom-color: var(--accent); }
 .ptab-lead { margin: 0 0 0.7rem; font-size: 0.78rem; color: var(--muted); }
+.ostab-bar { display: flex; gap: 0.35rem; margin: 0 0 0.55rem; }
+.ostab {
+  padding: 0.28rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--fg-muted, #b7d4c4);
+  font-weight: 650;
+}
+.ostab.active {
+  color: #04130a;
+  background: #34c759;
+  border-color: #34c759;
+}
 .ptab-panel { display: none; }
 .ptab-panel.active { display: block; }
 button.linkish {
@@ -2310,6 +2324,19 @@ button.ob-stat:hover { border-color: var(--accent); }
   padding: 0;
   overflow: hidden;
 }
+#page-root:has(#panel-workflow.tab-panel.active) #panel-workflow > .hint-row {
+  flex: none;
+}
+#page-root:has(#panel-workflow.tab-panel.active) #reg-cache-card {
+  flex: 0 1 auto;
+  max-height: min(42vh, 22rem);
+  overflow: auto;
+  margin: 0 0 0.45rem;
+}
+#page-root:has(#panel-workflow.tab-panel.active) .sf-shell {
+  height: auto;
+  min-height: 12rem;
+}
 .sf-shell {
   position: relative;
   flex: 1 1 auto;
@@ -2327,6 +2354,12 @@ button.ob-stat:hover { border-color: var(--accent); }
   border-radius: 0.6rem;
   overflow: hidden;
 }
+.reg-cache { margin-bottom: 0.75rem; }
+.reg-cache table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.reg-cache td { padding: 0.28rem 0.35rem; border-top: 1px solid var(--border); vertical-align: top; }
+.reg-cache details { margin-top: 0.35rem; }
+.reg-cache summary { cursor: pointer; }
+.reg-cache ul { margin: 0.25rem 0 0.4rem 1rem; padding: 0; }
 .sf-chrome {
   grid-area: chrome;
   display: flex;

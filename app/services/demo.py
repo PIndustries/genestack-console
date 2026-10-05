@@ -1012,6 +1012,7 @@ def canned_platform_overview(env: Environment) -> dict[str, Any]:
                 "public_ip": spec["ip"],
                 "private_ip": spec["ip"],
                 "roles": list(spec["roles"]),
+                "os": "talos",
                 "talos": {"reachable": True, "version": _TALOS_VER, "error": None},
                 "kubernetes": kn,
                 "openstack": nova,

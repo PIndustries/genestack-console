@@ -562,12 +562,13 @@ function step4Html() {
   const detailUrl = state.envId
     ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=workflow"
     : "#/environments";
+  const os = v("provider", "talos") === "kubespray" ? "ubuntu" : "talos";
   const hostsUrl = state.envId
-    ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=platform&ptab=ovh"
+    ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=platform&ptab=machines&os=" + os
     : "#/environments";
   const openHosts = metalSource() === "static";
   const openUrl = openHosts ? hostsUrl : detailUrl;
-  const openLabel = openHosts ? "Open Hosts" : "Open guided deploy →";
+  const openLabel = openHosts ? "Open Machines" : "Open guided deploy →";
 
   return `
   <div class="wz-success" style="text-align:left">
@@ -615,10 +616,10 @@ function metalNextHint(src, provider) {
   if (src === "pxe") return "Claim PXE nodes on Hardware → Inventory, then continue Workflow.";
   if (src === "bmc") return "Register BMCs on Hardware → Bare metal, then continue Workflow.";
   if (src === "static" && provider === "talos") {
-    return "Boot the Talos ISO on each machine. Then Hosts, Talos is already installed. The console does not power them. After Kubernetes is up, Hosts, Deploy from infrastructure.";
+    return "Boot the Talos ISO on each machine. Then Machines, Talos, Talos is already installed. The console does not power them. After Kubernetes is up, Deploy from infrastructure.";
   }
   if (src === "static") {
-    return "Hosts, Already have an OS, records them. Deploy from this console installs Kubernetes and OpenStack over SSH.";
+    return "Machines, Ubuntu, Already have an OS, records them. Deploy from this console installs Kubernetes and OpenStack over SSH.";
   }
   if (provider === "talos") return "Next: open Workflow, then Deploy. Deploy wipes boxes that are not yet Talos.";
   return null;
