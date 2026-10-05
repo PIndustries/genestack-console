@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.05.4
+
+The environment overview fits the window, and Delete is on the environment list.
+
+- An idle deploy-host terminal stays one line. Open terminal still opens a shell, and expand still fills the screen.
+- Repair, restack, image cache, Tempest, and Greenfield metal wipe are under Maintenance. The metal wipe still asks before it runs.
+- Delete is on each environment card and on the environment page. It asks before it removes the environment. An admin is required.
+
 ## 2026.10.05.3
 
 Guided setup lets you add the hosts you have. One machine and three machines are examples.
