@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.05.1
+
+Guided setup creates the environment when the saved id is gone.
+
+- Create environment was retrying an id left in the browser from an earlier attempt. If that environment had been deleted, the page stopped on "Environment not found" and did not create the new one.
+- A missing id, or a name you changed on Basics, now creates the environment you just named.
+
 ## 2026.10.04.8
 
 Hosts shows the next step after Talos is already installed.
