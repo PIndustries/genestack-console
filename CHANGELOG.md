@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.05.6
+
+The console follows the latest build, and the page uses the whole window.
+
+- The running console checks the published release. When a newer build exists and no job is queued or running, it installs that binary, restarts, and reloads the page. The release notes stay up until they are acknowledged. Changelog, at the bottom of the sidebar, opens the same notes. `update.watch` defaults to on when that key is omitted. `update.auto` is only the installer's daily timer. The example `update.url` is the GitHub latest `version.json`.
+- A deleted environment leaves the sidebar and every environment list together.
+- The install places `talosctl` v1.14.2 on the deploy host. A reboot request applies with mode `auto`, then reboots the node. The client does not receive `--mode reboot`. The metal image stays v1.13.9.
+- The page fills the window, including a wide display, and stacks on a narrow one. Toasts sit on the screen. A structured API error shows its message. When live metrics are not published, the panel says so once.
+
 ## 2026.10.05.5
 
 Machines is one page, and the image cache is on Overview.
