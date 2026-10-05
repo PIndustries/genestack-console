@@ -78,7 +78,7 @@ In the console, Guided setup:
 
 1. Basics names the environment. Connect stays on this console.
 2. Deployment: open Advanced and choose Kubespray. Ubuntu is already installed, so this path uses SSH.
-3. Servers: Static IPs / SSH. Guided setup's Servers step has **One machine** and **Three machines**. **One machine** is this cloud machine. It runs every role. After the environment exists, Platform, then Hosts, the same roles are the preset **All-in-One (single node)**.
+3. Servers: Static IPs / SSH. Add the cloud machine and set its roles. One machine that runs every role is an example on that step. Add more hosts when you have them. After the environment exists, Platform, then Hosts, the same roles are the preset **All-in-One (single node)**.
 4. **Apply on this environment.**
 5. Platform, then Hosts. Select the row. **Already have an OS.** That records the machine. It does not reboot it.
 6. Settings, then Config, then Deploy. Deploy installs Kubernetes and OpenStack over SSH.
@@ -95,7 +95,7 @@ curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --with-aio-vm
 
 The console is the published binary on that server. The installer creates one local Ubuntu virtual machine and an environment named `genestack-aio`. The default size is 4 vCPU, 8 GiB of memory, and a 60 GB disk. SSH is `ssh -i /opt/genestack-console/ssh/genestack-aio_key -p 2222 ubuntu@127.0.0.1`. Open that environment, apply it when you mean the jobs to run, and open `#/hosts` for the virtual machine. On the virtual machine, `sudo /usr/local/sbin/genestack-aio-setup.sh` clones Genestack and runs `bootstrap.sh`. A computer that cannot run a local virtual machine uses the one Ubuntu machine above: the console on one computer, the cloud on the other.
 
-The server is the one cloud machine. Install Ubuntu on it. Install the console on a different computer: the Mac command above, or any other Ubuntu computer with the plain install command. In that console, Guided setup's Servers step has **One machine** and **Three machines**. Choose **One machine** for this server. After the environment exists, Platform, then Hosts, the same roles are the preset **All-in-One (single node)**. Then **Already have an OS**, **Apply on this environment**, and Deploy. The console stays on the other computer.
+The server is the one cloud machine. Install Ubuntu on it. Install the console on a different computer: the Mac command above, or any other Ubuntu computer with the plain install command. In that console, add this server on Servers and set its roles, or use the one-machine example. Add more hosts when you have them. After the environment exists, Platform, then Hosts, the same roles are the preset **All-in-One (single node)**. Then **Already have an OS**, **Apply on this environment**, and Deploy. The console stays on the other computer.
 
 ## Three machines in one environment
 
@@ -109,9 +109,9 @@ Talos is the operating system this console prefers. Boot the three machines from
 https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64.iso
 ```
 
-A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc and does not power the machine. Then follow Talos is already installed, below. Guided setup's Servers step has **One machine** and **Three machines**. **Three machines** is one control plane plus two workers. After the environment exists, Platform, then Hosts, the same roles are the preset **Control Plane** on one machine and **Worker (compute + storage)** on the other two.
+A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc and does not power the machine. Then follow Talos is already installed, below. Add each host and set its roles. Three machines with one control plane and two workers is an example on that step. Add or remove hosts for the machines you have. After the environment exists, Platform, then Hosts, the same roles are the preset **Control Plane** on one machine and **Worker (compute + storage)** on the other two.
 
-Ubuntu that is already installed follows Ubuntu is already installed, below. Guided setup's Servers step has **One machine** and **Three machines**. **Three machines** is one control plane plus two workers. After the environment exists, Platform, then Hosts, the same roles are the preset **Control Plane** on one machine and **Worker (compute + storage)** on the other two.
+Ubuntu that is already installed follows Ubuntu is already installed, below. Add each host and set its roles. Three machines with one control plane and two workers is an example. After the environment exists, Platform, then Hosts, the same roles are the preset **Control Plane** on one machine and **Worker (compute + storage)** on the other two.
 
 The console computer is Ubuntu and the plain install command:
 
@@ -143,7 +143,7 @@ The Genestack checkout at `/opt/genestack` is what the install scripts run from.
 Use this when Talos is already running and waiting for a config. A Talos ISO does that. A virtual machine, or any machine with no management port, starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
 
 1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
-2. Servers: Static IPs / SSH. Guided setup's Servers step has **One machine** and **Three machines**. **One machine** runs every role. **Three machines** is one control plane plus two workers. Enter each hostname and IP.
+2. Servers: Static IPs / SSH. Add each host, its hostname, its IP, and its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples. Add the hosts you have.
 3. On the environment, Platform, then Hosts. The path above the table stays Talos. Choosing the path does not install an operating system.
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
 5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.
@@ -154,7 +154,7 @@ Kubernetes is up after that job succeeds. On Hosts, the diagram marks infrastruc
 
 Use this for a group of servers that already have Ubuntu, including guests you installed yourself. Kubespray adopts machines that already have an operating system and SSH.
 
-1. Guided setup. Open Advanced: Kubespray (Ansible). On Servers choose Static IPs / SSH. Guided setup's Servers step has **One machine** and **Three machines**. Enter each hostname and IP. The deploy host has to reach those machines over SSH.
+1. Guided setup. Open Advanced: Kubespray (Ansible). On Servers choose Static IPs / SSH. Add each host, its hostname, its IP, and its roles. The deploy host has to reach those machines over SSH.
 2. On Hosts, the path above the table is Kubespray. Choosing the path does not reboot anything.
 3. Select the rows. Already have an OS. That records them. The row shows Kubespray recorded. It does not reboot them, install anything, or start a playbook. Clear that record removes the mark. Roles stay.
 4. Across the group you still want a Kubernetes control plane, etcd, OpenStack control, a worker, and storage. After the environment exists, the Hosts presets are those same roles.

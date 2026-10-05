@@ -472,17 +472,16 @@ function staticPanelHtml() {
   const atCap = servers.length >= MAX_SERVER_ROWS;
   const canRemove = servers.length > 1;
   return `
-  <p class="hint muted" style="margin:.2rem 0 .6rem">These machines already have an address. Talos from an ISO is waiting for a config. Ubuntu is already installed. The console does not power them. One machine runs every role. Three machines are one control plane plus two workers.</p>
+  <p class="hint muted" style="margin:.2rem 0 .6rem">These machines already have an address. Talos from an ISO is waiting for a config. Ubuntu is already installed. The console does not power them. Add each host and set its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples.</p>
   <div style="display:flex;gap:.4rem;margin:0 0 .6rem;flex-wrap:wrap;align-items:center">
+    ${showAddBtn ? `<button class="btn-sm" id="wz-srv-add" type="button">Add server</button>` : ""}
+    ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">Remove last</button>` : ""}
+    <span class="hint muted">Examples</span>
     <button class="secondary btn-sm" id="wz-srv-one" type="button">One machine</button>
     <button class="secondary btn-sm" id="wz-srv-three" type="button">Three machines</button>
+    ${atCap ? '<span class="hint muted">Add more servers later from the environment page.</span>' : ""}
   </div>
-  <div id="wz-servers-list">${serversHtml}</div>
-  <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;align-items:center">
-    ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">− Remove last</button>` : ""}
-    ${showAddBtn ? `<button class="secondary btn-sm" id="wz-srv-add" type="button">+ Add server</button>` : ""}
-    ${atCap ? '<span class="hint muted">Add more servers later from the environment detail page.</span>' : ""}
-  </div>`;
+  <div id="wz-servers-list">${serversHtml}</div>`;
 }
 
 function serverRowHtml(srv, idx) {
@@ -979,7 +978,10 @@ function wireStaticRows() {
       captureServers();
       if (!Array.isArray(state.servers)) state.servers = [];
       if (state.servers.length >= MAX_SERVER_ROWS) return;
-      state.servers.push({ hostname: `node${state.servers.length + 1}`, ip: "", roles: [...REQUIRED_ROLES] });
+      const roles = collectServerRoles(state.servers).k8s_control_plane
+        ? [...WORKER_ROLES]
+        : [...REQUIRED_ROLES];
+      state.servers.push({ hostname: `node${state.servers.length + 1}`, ip: "", roles });
       paintStaticServers(state.servers);
     });
   }
