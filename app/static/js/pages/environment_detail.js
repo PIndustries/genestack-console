@@ -636,6 +636,7 @@ async function paintEnvApply(el, env) {
       });
       toast(nextDry ? "This environment only logs" : "This environment applies", "ok");
       paintEnvApply(el, updated);
+      window.dispatchEvent(new CustomEvent("gsc-dry-run"));
     } catch (e) {
       toast(e.message || "Could not update this environment", "bad");
       btn.disabled = false;

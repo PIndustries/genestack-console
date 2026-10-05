@@ -3,15 +3,15 @@ import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clea
 import { store, loadEnvs } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
-import * as fleet from "./pages/fleet.js?v=ls20";
+import * as fleet from "./pages/fleet.js?v=ls24";
 import * as hosts from "./pages/hosts.js";
 import * as environments from "./pages/environments.js";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls22";
-import * as envWizard from "./pages/env_wizard.js?v=ls23";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls24";
+import * as envWizard from "./pages/env_wizard.js?v=ls24";
 import * as admin from "./pages/admin.js";
 
 const PAGES = { fleet, hosts, environments, hardware, activity, operations, observe, environment_detail: environmentDetail, setup: envWizard, admin };
@@ -97,7 +97,11 @@ async function loadVersionLines() {
   } catch { /* version line is cosmetic */ }
 }
 
+// Drop a slow /health result once a newer route has started its own refresh.
+let topbarSeq = 0;
+
 async function refreshTopbar() {
+  const seq = ++topbarSeq;
   const badge = $("role-badge");
   const name = $("user-chip-name");
   const degraded = store.degradedAuth ? " (auth degraded)" : "";
@@ -109,19 +113,46 @@ async function refreshTopbar() {
   }
   try {
     const h = await api("/health");
+    if (seq !== topbarSeq) return;
     store.health = h;
     setPill($("health-pill"), "health: " + (h.status || "ok"), "ok");
-    setPill($("dryrun-pill"), h.dry_run ? "dry-run ON" : "dry-run OFF", h.dry_run ? "warn" : "ok");
     const hl = $("user-health-line");
-    const dl = $("user-dryrun-line");
     if (hl) hl.textContent = h.status === "ok" ? "Console healthy" : `Console ${h.status || "unknown"}`;
-    if (dl) {
-      dl.textContent = h.dry_run
-        ? "Console default is a dry run. Each environment applies from its own switch."
-        : "Console default applies. An environment can still look around only.";
-    }
     setVersionLines(versionText(h));
+
+    // Own true/false wins. null inherits the console default. A missing health
+    // payload counts as logging, matching paintEnvApply.
+    let logging = h ? !!h.dry_run : true;
+    let envScoped = false;
+    const routed = parseHash();
+    if (routed.name === "environment_detail" && routed.param) {
+      try {
+        const env = await api(`/api/v1/environments/${encodeURIComponent(routed.param)}`);
+        if (seq !== topbarSeq) return;
+        envScoped = true;
+        logging = env.dry_run == null ? (h ? !!h.dry_run : true) : env.dry_run === true;
+      } catch {
+        if (seq !== topbarSeq) return;
+        envScoped = false;
+        logging = h ? !!h.dry_run : true;
+      }
+    }
+    if (seq !== topbarSeq) return;
+    setPill($("dryrun-pill"), logging ? "dry-run ON" : "dry-run OFF", logging ? "warn" : "ok");
+    const dl = $("user-dryrun-line");
+    if (dl) {
+      if (envScoped) {
+        dl.textContent = logging
+          ? "This environment only logs. Jobs do not change the machines."
+          : "This environment applies. Jobs from here change the machines.";
+      } else {
+        dl.textContent = h.dry_run
+          ? "Console default is a dry run. Each environment applies from its own switch."
+          : "Console default applies. An environment can still look around only.";
+      }
+    }
   } catch {
+    if (seq !== topbarSeq) return;
     setPill($("health-pill"), "health: unreachable", "bad");
     const hl = $("user-health-line");
     if (hl) hl.textContent = "Console unreachable";
@@ -515,6 +546,7 @@ async function route() {
   ) {
     syncNav(name, param, query);
     $("page-title").textContent = page.title || "Environment";
+    refreshTopbar();
     return;
   }
   if (current && current.destroy) {
@@ -533,6 +565,7 @@ async function route() {
     root.innerHTML = `<div class="error">${esc(e.message || String(e))}</div>`;
     if (e.status === 403) toast("Insufficient role for this view", "bad");
   }
+  refreshTopbar();
 }
 
 // ---------- wiring & boot ----------
@@ -595,6 +628,9 @@ $("btn-logout").addEventListener("click", () => logout());
 })();
 
 window.addEventListener("hashchange", route);
+window.addEventListener("gsc-dry-run", () => {
+  refreshTopbar();
+});
 window.addEventListener("gsc-nav-sync", () => {
   const { name, param, query } = parseHash();
   syncNav(name, param, query);

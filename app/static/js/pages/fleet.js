@@ -232,11 +232,13 @@ async function loadFleet({ background = false } = {}) {
     }
   } else {
     const showTenant = !currentTenantId();
+    const consoleLogs = await consoleDefaultLogs();
     // Render cards immediately without waiting for workflow step fetches.
     // Fire-and-forget the workflow calls so the page renders fast, then update
     // individual CTA labels when each response arrives.
-    const cardPromises = envs.map((env) => renderFleetCard(env, showTenant));
+    const cardPromises = envs.map((env) => renderFleetCard(env, showTenant, consoleLogs));
     const list = document.getElementById("fl-list");
+    if (!list) return;
     list.innerHTML = (await Promise.all(cardPromises)).join("");
     // Update CTA labels from the current_step already present on each /fleet row.
     envs.forEach((env) => {
@@ -265,7 +267,30 @@ function renderHeader(data, count) {
   }
 }
 
-function renderFleetCard(env, showTenant) {
+// Inherited dry_run (null) follows the console default. One /health per board
+// render when the topbar has not stored it; a missing payload counts as logging.
+async function consoleDefaultLogs() {
+  let health = store.health;
+  if (!health) {
+    try {
+      health = await api("/health");
+      store.health = health;
+    } catch {
+      health = null;
+    }
+  }
+  return health ? !!health.dry_run : true;
+}
+
+function dryRunPillHtml(env, consoleLogs) {
+  const own = env ? env.dry_run : null;
+  const logs = own == null ? consoleLogs : own === true;
+  return logs
+    ? `<span class="pill warn">dry-run</span>`
+    : `<span class="pill ok">applies</span>`;
+}
+
+function renderFleetCard(env, showTenant, consoleLogs) {
   const id = env && env.id ? env.id : "";
   const name = (env && env.name) || id || "(unnamed)";
   const steps = env && env.steps && typeof env.steps === "object" ? env.steps : {};
@@ -301,7 +326,7 @@ function renderFleetCard(env, showTenant) {
     <div style="display:flex; gap:1rem; margin:.3rem 0; font-size:.8rem">
       ${env.region ? `<span class="muted">Region: <code>${esc(env.region)}</code></span>` : ""}
       ${env.tier ? `<span class="muted">Tier: <code>${esc(env.tier)}</code></span>` : ""}
-      ${env.dry_run ? `<span class="pill warn">dry-run</span>` : ""}
+      ${dryRunPillHtml(env, consoleLogs)}
     </div>
     <div style="display:flex; gap:.5rem; align-items:center">
       ${healthPill}

@@ -45,6 +45,10 @@ function rolePlain(r) {
   return ROLE_PLAIN[r] || ROLE_LABELS[r] || r;
 }
 
+// Hosts presets: All-in-One, and Worker (compute + storage). Control Plane is REQUIRED_ROLES.
+const AIO_ROLES = ["k8s_control_plane", "etcd", "control", "compute", "network", "storage"];
+const WORKER_ROLES = ["compute", "storage"];
+
 // agent.install requires the admin role server-side (catalog). Agent and
 // deploy-host SSH stay behind Advanced; the community default is this console
 // as the fleet hub (conn = "later") so the default path needs no remote agent.
@@ -427,16 +431,52 @@ function bmcPanelHtml() {
     · <a href="#/hardware?tab=discovery">Discovery</a></p>`;
 }
 
+function typedStaticField(row, key) {
+  if (!row) return "";
+  return String(row[key] == null ? "" : row[key]).trim();
+}
+
+function oneMachineServers(prev) {
+  const rows = Array.isArray(prev) ? prev : [];
+  if (rows.length === 1) {
+    const hostname = typedStaticField(rows[0], "hostname");
+    return [{
+      hostname: hostname || "node01",
+      ip: typedStaticField(rows[0], "ip"),
+      roles: [...AIO_ROLES],
+    }];
+  }
+  return [{ hostname: "node01", ip: "", roles: [...AIO_ROLES] }];
+}
+
+function threeMachineServers(prev) {
+  const rows = Array.isArray(prev) ? prev : [];
+  const roleSets = [REQUIRED_ROLES, WORKER_ROLES, WORKER_ROLES];
+  return roleSets.map((roles, i) => {
+    const row = rows[i];
+    const hostname = typedStaticField(row, "hostname");
+    return {
+      hostname: hostname || `node0${i + 1}`,
+      ip: row ? typedStaticField(row, "ip") : "",
+      roles: [...roles],
+    };
+  });
+}
+
 function staticPanelHtml() {
   const servers = Array.isArray(state.servers) && state.servers.length
     ? state.servers
-    : [{ hostname: "node01", ip: "", roles: [...REQUIRED_ROLES] }];
+    : oneMachineServers([]);
   const serversHtml = servers.map((srv, i) => serverRowHtml(srv, i)).join("");
   const showAddBtn = servers.length < MAX_SERVER_ROWS;
   const atCap = servers.length >= MAX_SERVER_ROWS;
   const canRemove = servers.length > 1;
   return `
-  <p class="hint muted" style="margin:.2rem 0 .6rem">These machines already have an address. Talos from an ISO is waiting for a config. Ubuntu is already installed. The console does not power them. Mark at least one <strong>control plane</strong> and one <strong>worker</strong>. Required inventory roles: control plane, etcd, and control.</p>
+  <p class="hint muted" style="margin:.2rem 0 .6rem">These machines already have an address. Talos from an ISO is waiting for a config. Ubuntu is already installed. The console does not power them. One machine runs every role. Three machines are one control plane plus two workers.</p>
+  <div style="display:flex;gap:.4rem;margin:0 0 .6rem;flex-wrap:wrap;align-items:center">
+    <button class="secondary btn-sm" id="wz-srv-one" type="button">One machine</button>
+    <button class="secondary btn-sm" id="wz-srv-three" type="button">Three machines</button>
+  </div>
   <div id="wz-servers-list">${serversHtml}</div>
   <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;align-items:center">
     ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">− Remove last</button>` : ""}
@@ -923,6 +963,15 @@ function syncServersActionButton() {
   if (btn && !btn.disabled) btn.textContent = serversActionLabel();
 }
 
+function paintStaticServers(next) {
+  state.servers = next;
+  state.serverSource = "static";
+  saveState();
+  const panel = document.getElementById("wz-src-panel");
+  if (panel) panel.innerHTML = staticPanelHtml();
+  wireStaticRows();
+}
+
 function wireStaticRows() {
   const addBtn = document.getElementById("wz-srv-add");
   if (addBtn) {
@@ -931,11 +980,7 @@ function wireStaticRows() {
       if (!Array.isArray(state.servers)) state.servers = [];
       if (state.servers.length >= MAX_SERVER_ROWS) return;
       state.servers.push({ hostname: `node${state.servers.length + 1}`, ip: "", roles: [...REQUIRED_ROLES] });
-      state.serverSource = "static";
-      saveState();
-      const panel = document.getElementById("wz-src-panel");
-      if (panel) panel.innerHTML = staticPanelHtml();
-      wireStaticRows();
+      paintStaticServers(state.servers);
     });
   }
 
@@ -945,10 +990,23 @@ function wireStaticRows() {
       captureServers();
       if ((state.servers || []).length <= 1) return;
       state.servers.pop();
-      saveState();
-      const panel = document.getElementById("wz-src-panel");
-      if (panel) panel.innerHTML = staticPanelHtml();
-      wireStaticRows();
+      paintStaticServers(state.servers);
+    });
+  }
+
+  const oneBtn = document.getElementById("wz-srv-one");
+  if (oneBtn) {
+    oneBtn.addEventListener("click", () => {
+      captureServers();
+      paintStaticServers(oneMachineServers(state.servers));
+    });
+  }
+
+  const threeBtn = document.getElementById("wz-srv-three");
+  if (threeBtn) {
+    threeBtn.addEventListener("click", () => {
+      captureServers();
+      paintStaticServers(threeMachineServers(state.servers));
     });
   }
 }
