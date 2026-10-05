@@ -1087,13 +1087,24 @@ async function createAndConnect() {
   document.getElementById("wz-err").innerHTML = "";
 
   try {
-    // Resume instead of re-POST: a previous partial run already created the
-    // environment (state.envId persisted), so GET it to verify it exists and
-    // skip creation. Only POST when no environment was created yet.
-    let env;
+    // Resume a partial run only when that environment is still there and the
+    // name still matches. A deleted id, or a name the operator just changed,
+    // must create a new environment instead of stopping on "not found".
+    let env = null;
     if (state.envId) {
-      env = await api(`/api/v1/environments/${encodeURIComponent(state.envId)}`);
-    } else {
+      try {
+        env = await api(`/api/v1/environments/${encodeURIComponent(state.envId)}`);
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        env = null;
+      }
+      if (env && state.name && env.name !== state.name) env = null;
+      if (!env) {
+        state.envId = "";
+        saveState();
+      }
+    }
+    if (!env) {
       env = await api("/api/v1/environments", {
         method: "POST",
         body: JSON.stringify(buildEnvBody()),

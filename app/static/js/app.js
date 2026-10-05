@@ -11,7 +11,7 @@ import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
 import * as environmentDetail from "./pages/environment_detail.js?v=ls22";
-import * as envWizard from "./pages/env_wizard.js?v=ls22";
+import * as envWizard from "./pages/env_wizard.js?v=ls23";
 import * as admin from "./pages/admin.js";
 
 const PAGES = { fleet, hosts, environments, hardware, activity, operations, observe, environment_detail: environmentDetail, setup: envWizard, admin };
