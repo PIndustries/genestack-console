@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.05.3
+
+Guided setup lets you add the hosts you have. One machine and three machines are examples.
+
+- Add server is the action on Static IPs / SSH. Each row keeps its own roles. A further host starts as a worker when a control plane is already listed.
+- One machine and Three machines fill an example. One machine runs every role. Three machines are one control plane and two workers. Add or remove hosts and change the roles after that.
+
 ## 2026.10.05.2
 
 The dry-run pill follows the environment you have open, and Guided setup can shape the lab.
