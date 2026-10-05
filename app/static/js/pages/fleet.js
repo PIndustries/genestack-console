@@ -3,8 +3,8 @@
 // live health pill per environment from /api/v1/fleet/live, kept current via
 // the "fleet" SSE topic; the 15s board refresh stays as fallback when the
 // stream is down. The dashboard stats render inline as a compact top bar.
-import { api, esc, fmtAge } from "../api.js";
-import { store } from "../store.js";
+import { api, esc, fmtAge, toast } from "../api.js";
+import { store, canAdmin, gate } from "../store.js";
 import { connect } from "../stream.js";
 import { applyTenantFilter, currentTenantId } from "./tenant.js";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
@@ -123,6 +123,13 @@ export async function render(root) {
     location.hash = "#/setup";
   });
   document.getElementById("btn-fl-refresh").addEventListener("click", () => loadFleet());
+  document.getElementById("fl-list").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-fl-delete]");
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    deleteFleetEnv(btn.getAttribute("data-fl-delete") || "", btn.getAttribute("data-fl-name") || "");
+  });
 
   // Client-side search filter
   const searchInput = document.getElementById("fl-search");
@@ -328,10 +335,11 @@ function renderFleetCard(env, showTenant, consoleLogs) {
       ${env.tier ? `<span class="muted">Tier: <code>${esc(env.tier)}</code></span>` : ""}
       ${dryRunPillHtml(env, consoleLogs)}
     </div>
-    <div style="display:flex; gap:.5rem; align-items:center">
+    <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap">
       ${healthPill}
       <span class="muted" style="font-size:.78rem">${lastAction}</span>
       <span style="flex:1"></span>
+      <button class="danger btn-sm" type="button" data-fl-delete="${esc(id)}" data-fl-name="${esc(name)}" ${gate(canAdmin(), "admin")}>Delete</button>
       ${actionHtml_str}
     </div>
   </div>`;
@@ -354,6 +362,20 @@ function updateActionLabel(env, list) {
   const label = (currentStep && labels[currentStep]) || "Open →";
   const btn = list.querySelector(`.fl-action[data-env-id="${id}"]`);
   if (btn) btn.textContent = label;
+}
+
+async function deleteFleetEnv(id, name) {
+  if (!id) return;
+  const label = name || id;
+  if (!window.confirm(`Delete environment '${label}'?\n\nThis cannot be undone.`)) return;
+  try {
+    await api(`/api/v1/environments/${encodeURIComponent(id)}`, { method: "DELETE" });
+    toast(`Environment '${label}' deleted`, "ok");
+    await loadFleet();
+    await loadStatsBar();
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, "bad");
+  }
 }
 
 function getLastActionLabel(env) {

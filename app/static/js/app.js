@@ -3,14 +3,14 @@ import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clea
 import { store, loadEnvs } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
-import * as fleet from "./pages/fleet.js?v=ls24";
+import * as fleet from "./pages/fleet.js?v=ls26";
 import * as hosts from "./pages/hosts.js";
 import * as environments from "./pages/environments.js";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls24";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls26";
 import * as envWizard from "./pages/env_wizard.js?v=ls25";
 import * as admin from "./pages/admin.js";
 

@@ -1,7 +1,7 @@
 // pages/environment_detail.js — tabbed admin layout.
 // Overview is the live environment tree (internal tab id: workflow).
 import { api, esc, fmtTime, toast } from "../api.js";
-import { store, loadEnvs, envOptionsHtml, canRun, gate, isDemoEnv } from "../store.js";
+import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
 import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard } from "./environment_servers.js?v=ls22";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
@@ -13,9 +13,9 @@ import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard }
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls24";
+import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls26";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
-import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js";
+import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js?v=ls26";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";
 import { reachCardHtml, wireReachCard, loadReachCard, destroyReachCard } from "./environment_reach.js";
@@ -54,6 +54,21 @@ function unavail(note) {
 
 function errorNote(err) {
   return `<div class="error">${esc(typeof err === "string" ? err : "section reported an error")}</div>`;
+}
+
+async function deleteOpenEnv() {
+  if (!envId) return;
+  const listed = store.envs.find((e) => e.id === envId);
+  const name = (listed && listed.name) || envId;
+  if (!window.confirm(`Delete environment '${name}'?\n\nThis cannot be undone.`)) return;
+  try {
+    await api(`/api/v1/environments/${encodeURIComponent(envId)}`, { method: "DELETE" });
+    toast(`Environment '${name}' deleted`, "ok");
+    store.envs = store.envs.filter((e) => e.id !== envId);
+    location.hash = "#/fleet";
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, "bad");
+  }
 }
 
 // ---------- section renderers ----------
@@ -328,6 +343,7 @@ export async function render(root, { param, query } = {}) {
       <div class="tab-spacer"></div>
       <select id="desc-env">${envOptionsHtml(envId, { includeNone: true, noneLabel: "Environment" })}</select>
       <button class="secondary btn-sm" id="desc-refresh" type="button">Refresh</button>
+      <button class="danger btn-sm" id="desc-delete" type="button" ${gate(canAdmin(), "admin")}>Delete</button>
       <span id="desc-msg" class="muted"></span>
     </div>
 
@@ -336,7 +352,6 @@ export async function render(root, { param, query } = {}) {
       ${deployMapHtml()}
       <div hidden>${progressCardHtml()}</div>
     </div>
-    ${terminalCardHtml()}
 
     <!-- ═══ SETTINGS (config / apps / access / expert) ═══ -->
     <div class="tab-panel" data-panel="settings" id="panel-settings">
@@ -479,6 +494,7 @@ export async function render(root, { param, query } = {}) {
       </details>
     </div>
 
+    ${terminalCardHtml()}
     <div id="wf-mod-park" hidden></div>
   </div>`;
 
@@ -522,6 +538,7 @@ export async function render(root, { param, query } = {}) {
     loadAll();
   });
   document.getElementById("desc-refresh").addEventListener("click", () => loadAll());
+  document.getElementById("desc-delete").addEventListener("click", () => deleteOpenEnv());
 
   // Wire all cards (event listeners, etc.)
   wirePlatformCard(() => envId);

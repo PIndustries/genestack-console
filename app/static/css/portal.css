@@ -1626,12 +1626,23 @@ button.nav-link {
 }
 #gsc-term-card .gsc-term-iconbtn { padding-left: 0.55rem; padding-right: 0.55rem; }
 
-/* Terminal body: fills the card width, ~60vh tall, true black inside. */
+/* Idle is one line. A live session gets a short pane. Fullscreen still fills the screen. */
+#gsc-term-card {
+  flex: 0 0 auto;
+}
+#gsc-term-card.gsc-term-idle .gsc-term-header {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+#gsc-term-card.gsc-term-idle .gsc-term-body {
+  display: none;
+}
 #gsc-term-card .gsc-term-body {
   background: #000;
   border-color: #1f1f1f;
-  height: 60vh;
-  min-height: 22rem;
+  height: min(32vh, 18rem);
+  min-height: 8rem;
   width: 100%;
 }
 #gsc-term-card .gsc-term-body .xterm {
@@ -2672,11 +2683,30 @@ button.ob-stat:hover { border-color: var(--accent); }
 .sf-handle-in { left: -5px; }
 .sf-handle-out { right: -5px; }
 .sf-next-tools {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
   flex: none;
 }
+.sf-maint-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  min-width: 13.5rem;
+  padding: 0.4rem;
+  background: #0e1e12;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.sf-maint-menu[hidden] { display: none !important; }
+.sf-maint-menu .btn-sm { width: 100%; text-align: left; }
 .sf-next {
   display: flex;
   align-items: center;
@@ -2762,23 +2792,27 @@ button.ob-stat:hover { border-color: var(--accent); }
   bottom: 0.7rem;
   z-index: 4;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  max-width: calc(100% - 1.4rem);
   border: 1px solid var(--border);
   border-radius: 0.4rem;
-  overflow: hidden;
+  overflow-x: auto;
   background: #0e1e12;
 }
 .sf-controls button {
-  width: 1.85rem;
+  width: auto;
+  min-width: 1.85rem;
   height: 1.85rem;
+  padding: 0 0.4rem;
   border: 0;
-  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   background: transparent;
   color: var(--text);
   cursor: pointer;
   font-size: 0.95rem;
+  white-space: nowrap;
 }
-.sf-controls button:last-child { border-bottom: 0; }
+.sf-controls button:last-child { border-right: 0; }
 .sf-controls button:hover { background: var(--panel2); }
 .sf-minimap {
   position: absolute;

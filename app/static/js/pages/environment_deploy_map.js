@@ -2987,10 +2987,15 @@ function focusStart() {
   );
   const cx = (left + right) / 2;
   const cy = (top + bot) / 2;
-  const vw = Math.max(240, flow.clientWidth);
-  const vh = Math.max(180, flow.clientHeight);
-  view.k = 1;
-  view.x = vw / 2 - cx * view.k + 28;
+  const vw = flow.clientWidth;
+  const vh = flow.clientHeight;
+  if (vw < 40 || vh < 40) return;
+  const gw = Math.max(1, right - left);
+  const gh = Math.max(1, bot - top);
+  // Shrink only when the start of the graph does not fit. Leave a strip for the control bar.
+  const k = Math.min(1.05, (vw - 56) / gw, (vh - 48) / gh);
+  view.k = Math.max(0.2, k);
+  view.x = vw / 2 - cx * view.k;
   view.y = vh / 2 - cy * view.k;
   applyView();
 }
@@ -6204,11 +6209,14 @@ export function deployMapHtml() {
   <div id="dm-card" class="sf-shell">
     <div class="sf-chrome">
       <div class="sf-next-tools">
-        <button type="button" class="secondary btn-sm" id="dm-repair">Repair cluster</button>
-        <button type="button" class="btn-sm" id="dm-restack" title="Helm from OpenStack core. Does not upgrade kube-ovn.">Restack OpenStack</button>
-        <button type="button" class="secondary btn-sm" id="dm-warm">Warm image cache</button>
-        <button type="button" class="secondary btn-sm" id="dm-validate" title="Tempest is its own job">Run Tempest</button>
-        <button type="button" class="danger btn-sm" id="dm-greenfield" title="PXE every host. Destroys the cluster.">Greenfield metal wipe</button>
+        <button type="button" class="secondary btn-sm" id="dm-maint" aria-expanded="false" aria-controls="dm-maint-menu" title="Repair, restack, image cache, Tempest, and metal wipe">Maintenance</button>
+        <div id="dm-maint-menu" class="sf-maint-menu" hidden>
+          <button type="button" class="secondary btn-sm" id="dm-repair">Repair cluster</button>
+          <button type="button" class="btn-sm" id="dm-restack" title="Helm from OpenStack core. Does not upgrade kube-ovn.">Restack OpenStack</button>
+          <button type="button" class="secondary btn-sm" id="dm-warm">Warm image cache</button>
+          <button type="button" class="secondary btn-sm" id="dm-validate" title="Tempest is its own job">Run Tempest</button>
+          <button type="button" class="danger btn-sm" id="dm-greenfield" title="PXE every host. Destroys the cluster.">Greenfield metal wipe</button>
+        </div>
       </div>
       <div id="dm-next" class="sf-next dm-next"></div>
     </div>
@@ -6382,6 +6390,35 @@ export function wireDeployMap() {
   if (validate && !validate.dataset.wired) {
     validate.dataset.wired = "1";
     validate.addEventListener("click", () => runValidation("tempest"));
+  }
+  const maint = document.getElementById("dm-maint");
+  const maintMenu = document.getElementById("dm-maint-menu");
+  if (maint && maintMenu && !maint.dataset.wired) {
+    maint.dataset.wired = "1";
+    const closeMaint = () => {
+      maintMenu.hidden = true;
+      maint.setAttribute("aria-expanded", "false");
+    };
+    maint.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = maintMenu.hidden;
+      maintMenu.hidden = !open;
+      maint.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    maintMenu.addEventListener("click", (e) => {
+      if (e.target.closest("button")) closeMaint();
+    });
+    if (!window.__dmMaintDoc) {
+      window.__dmMaintDoc = true;
+      document.addEventListener("click", (e) => {
+        const menu = document.getElementById("dm-maint-menu");
+        const btn = document.getElementById("dm-maint");
+        if (!menu || menu.hidden) return;
+        if (e.target.closest("#dm-maint-menu")) return;
+        menu.hidden = true;
+        if (btn) btn.setAttribute("aria-expanded", "false");
+      });
+    }
   }
   const card = document.getElementById("dm-card");
   if (card && !card.dataset.inspWired) {

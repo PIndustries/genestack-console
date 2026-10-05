@@ -117,6 +117,13 @@ function setButtons() {
   if (close) close.disabled = !live;
 }
 
+// An idle card is the header only. The overview map keeps the rest of the window.
+function setTermOpen(open) {
+  const card = document.getElementById("gsc-term-card");
+  if (!card) return;
+  card.classList.toggle("gsc-term-idle", !open);
+}
+
 // ---------- clipboard (native-terminal chords) ----------
 
 // Copy text via the clipboard API. Where the API is blocked (non-secure
@@ -206,6 +213,8 @@ function onFsEsc(e) {
 function setFullscreen(on) {
   const card = document.getElementById("gsc-term-card");
   if (!card) return;
+  if (on) setTermOpen(true);
+  else if (!current) setTermOpen(false);
   card.classList.toggle(FS_CLASS, on);
   document.body.classList.toggle("gsc-term-fs-lock", on);
   const btn = document.getElementById("gsc-term-expand");
@@ -231,6 +240,7 @@ function setFullscreen(on) {
 // repeatedly; used on env switch, page destroy, and before a reconnect.
 export function destroyTerminalCard() {
   setFullscreen(false);
+  setTermOpen(false);
   if (!current) return;
   const sess = current;
   current = null;
@@ -305,6 +315,7 @@ function startFallback(body, ws, onEnded) {
 async function connect(envId) {
   if (!envId || (current && current.ws && current.ws.readyState === WebSocket.OPEN)) return;
   destroyTerminalCard();
+  setTermOpen(true);
   const body = document.getElementById("gsc-term-body");
   if (!body) return;
   setStatus('<span class="pill warn">connecting…</span>');
@@ -322,6 +333,7 @@ async function connect(envId) {
   } catch (e) {
     setStatus(`<span class="pill bad">auth failed — ${esc(e.message || "ticket error")}</span>`);
     setButtons();
+    setTermOpen(false);
     return;
   }
   if (!document.getElementById("gsc-term-body")) return; // navigated away mid-load
@@ -427,7 +439,7 @@ async function connect(envId) {
 
 export function terminalCardHtml() {
   return `
-  <div class="card span-12" id="gsc-term-card">
+  <div class="card span-12 gsc-term-idle" id="gsc-term-card">
     <div class="toolbar gsc-term-header">
       <h2>Deploy host terminal</h2>
       <span id="gsc-term-target" class="muted"></span>
