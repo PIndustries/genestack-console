@@ -20,7 +20,7 @@ curl -fsSL https://get.genestack.dev/console.sh | bash
 # then open http://127.0.0.1:8080/ui and follow Guided setup
 ```
 
-`get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080` on the deploy host. From your laptop, `ssh -L 8080:127.0.0.1:8080 <deploy-host>` and open the same URL. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md).
+`get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080` on the deploy host. From your laptop, `ssh -L 8080:127.0.0.1:8080 <deploy-host>` and open the same URL. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md). What each build changed is in [CHANGELOG.md](CHANGELOG.md).
 
 Run the same command again to move an install to the latest release. `genestack-console update` does that replace without the rest of the install. Either one leaves `config.yaml`, the database, and `/opt/genestack` as they are. To install a published build by name: `curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3`.
 

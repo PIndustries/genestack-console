@@ -13,7 +13,9 @@ git push origin v2026.10.04.1
 
 The tag is `v` plus the exact `VERSION` string. The release workflow builds
 `genestack-console-linux-amd64` and attaches that file, `version.json`,
-`console.sh`, and `console.ps1` to the GitHub Release.
+`console.sh`, and `console.ps1` to the GitHub Release. Before the tag, add a
+`CHANGELOG.md` section whose heading is that version. The workflow copies it
+onto the release. A tag with no matching section fails.
 
 Installers and the update check read:
 

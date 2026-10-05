@@ -119,6 +119,41 @@ jobs:
           cp scripts/genestack-console.sh dist/console.sh
           cp scripts/console.ps1 dist/console.ps1
 
+      - name: Write release notes
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          version = os.environ["VERSION"].strip()
+          lines = Path("CHANGELOG.md").read_text().splitlines()
+          grabbed = []
+          take = False
+          for line in lines:
+              if line.startswith("## "):
+                  if take:
+                      break
+                  take = line[3:].strip() == version
+                  continue
+              if take:
+                  grabbed.append(line)
+          notes = "\n".join(grabbed).strip()
+          if not notes:
+              raise SystemExit(f"CHANGELOG.md has no section for {version}")
+          text = (
+              f"Genestack Console {version} for Linux.\n\n"
+              "The asset `genestack-console-linux-amd64` is the single binary.\n"
+              "`version.json` names that asset for the update check.\n"
+              "`console.sh` and `console.ps1` are the installers. "
+              "`get.genestack.dev` redirects to them.\n\n"
+              f"{notes}\n"
+          )
+          Path("dist").mkdir(exist_ok=True)
+          Path("dist/NOTES.md").write_text(text)
+          print(text)
+          PY
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -134,9 +169,4 @@ jobs:
             dist/version.json
             dist/console.sh
             dist/console.ps1
-          body: |
-            Genestack Console ${{ steps.ver.outputs.version }} for Linux.
-
-            The asset `genestack-console-linux-amd64` is the single binary.
-            `version.json` names that asset for the update check.
-            `console.sh` and `console.ps1` are the installers. `get.genestack.dev` redirects to them.
+          body_path: dist/NOTES.md
