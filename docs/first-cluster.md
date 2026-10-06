@@ -62,7 +62,7 @@ On the virtual machine, `sudo /usr/local/sbin/genestack-aio-setup.sh` clones Gen
 
 ## One Ubuntu machine
 
-Use this when the cloud is one computer that already has Ubuntu, and the console is a different computer. The cloud machine can be a physical server or a virtual machine. The hypervisor is the one you already run. The console does not create that machine, and it does not install the hypervisor.
+Use this when the cloud is one computer that already has Ubuntu, and the console is a different computer. The cloud machine can be a physical server or a virtual machine. The hypervisor is the one you already run. VMware is that hypervisor when the lab is VMware. Create the guests there. The console does not create that machine, and it does not install the hypervisor.
 
 The console computer is Ubuntu as well. A virtual machine is fine. Install the console there:
 
@@ -77,8 +77,8 @@ The cloud machine needs a hostname and an IP address the console can reach. A st
 In the console, Guided setup:
 
 1. Basics names the environment. Connect stays on this console.
-2. Deployment: open Advanced and choose Kubespray. Ubuntu is already installed, so this path uses SSH.
-3. Servers: Static IPs / SSH. Add the cloud machine and set its roles. One machine that runs every role is an example on that step. Add more hosts when you have them. After the environment exists, Machines, the same roles are the preset **All-in-One (single node)**.
+2. Deployment: open Advanced and choose Kubespray. Ubuntu is already installed, so Deploy uses SSH. Talos stays the usual install when the machine is not already Ubuntu.
+3. Servers: add the cloud machine by hostname and IP and set its roles. One machine that runs every role is an example on that step. Add more hosts when you have them. After the environment exists, Machines, the same roles are the preset **All-in-One (single node)**.
 4. **Apply on this environment.**
 5. Machines, then Ubuntu. Select the row. **Already have an OS.** That records the machine. It does not reboot it.
 6. Settings, then Config, then Deploy. Deploy installs Kubernetes and OpenStack over SSH.
@@ -127,7 +127,7 @@ Do not reinstall it. Do not run a wipe, and do not run Deploy, until you mean to
 
 1. On the deploy host, use the Genestack checkout and the `/etc/genestack` inventory that this cluster was built from. Guided setup asks for those two paths. If the checkout is not on this machine yet, clone it to `/opt/genestack`. Do not run `bootstrap.sh` over an inventory you already use.
 2. The console has to reach the Kubernetes API of that cluster. A kubeconfig is the file `kubectl` uses. Copy it to the deploy host. Do not paste it into a chat or a ticket.
-3. Open the environment, then Settings, then Access, then Hosts. Paste the kubeconfig and choose Adopt Kubespray. That records the cluster. It does not clone Kubespray, it does not run Ansible, and it does not reinstall Kubernetes. Dry run must be off or the job will not store the file.
+3. Open the environment, then Settings, then Access. Paste the kubeconfig and choose Adopt Kubespray. That records the cluster. It does not clone Kubespray, it does not run Ansible, and it does not reinstall Kubernetes. Dry run must be off or the job will not store the file. Add servers on Machines when you mean to change the machines.
 4. Kubernetes lists the nodes once the console can reach the API. If the nodes are Talos, Machines, then Talos, is where you manage them. Talosconfig is the file for Talos. Download it from Machines after the console has it.
 
 Day to day you stay on this environment. Settings, then Config, is the settings document. Save stores a new version in the console. The menu next to the version opens an older one, read-only. Push writes the current version onto the deploy host. Deploy writes it and then runs the Genestack scripts. Saving by itself does not change the live cloud.
@@ -143,7 +143,7 @@ The Genestack checkout at `/opt/genestack` is what the install scripts run from.
 Use this when Talos is already running and waiting for a config. A Talos ISO does that. A virtual machine, or any machine with no management port, starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
 
 1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
-2. Servers: Static IPs / SSH. Add each host, its hostname, its IP, and its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples. Add the hosts you have.
+2. Servers: add each host by hostname and IP, and set its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples. Add the hosts you have. Import or discover writes this same list.
 3. On the environment, open Machines and stay on Talos. The tab does not install an operating system.
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
 5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.
@@ -154,7 +154,7 @@ Kubernetes is up after that job succeeds. On Machines, Talos, the diagram marks 
 
 Use this for a group of servers that already have Ubuntu, including guests you installed yourself. Kubespray adopts machines that already have an operating system and SSH.
 
-1. Guided setup. Open Advanced: Kubespray (Ansible). On Servers choose Static IPs / SSH. Add each host, its hostname, its IP, and its roles. The deploy host has to reach those machines over SSH.
+1. Guided setup. Open Advanced and choose Kubespray. On Servers, add each host by hostname and IP, and set its roles. The deploy host has to reach those machines over SSH.
 2. Open Machines and choose Ubuntu. The tab does not reboot anything.
 3. Select the rows. Already have an OS. That records them. The row shows Kubespray recorded. It does not reboot them, install anything, or start a playbook. Clear that record removes the mark. Roles stay.
 4. Across the group you still want a Kubernetes control plane, etcd, OpenStack control, a worker, and storage. After the environment exists, the Machines presets are those same roles.
@@ -162,7 +162,7 @@ Use this for a group of servers that already have Ubuntu, including guests you i
 
 A machine may stay a plain Ubuntu server. Install Ubuntu on a Machines row is a different action. It puts Ubuntu on that one machine and waits until it answers. It does not install Kubernetes or OpenStack. A host that already answers stays on disk. A host that does not answer is network-booted, and that boot uses a management port when the machine has one.
 
-Settings, then Access, then Hosts, then Adopt Kubespray is the record for a cluster that is already up. Paste the kubeconfig there. It does not clone Kubespray and it does not run Ansible. Dry run must be off or the file is not stored.
+Settings, then Access, then Adopt Kubespray is the record for a cluster that is already up. Paste the kubeconfig there. It does not clone Kubespray and it does not run Ansible. Dry run must be off or the file is not stored. Add servers on Machines.
 
 ### The console installs the operating system
 

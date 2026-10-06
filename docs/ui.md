@@ -21,7 +21,7 @@ The sidebar is:
 | Catalog | `#/operations` | `app/static/js/pages/operations.js` | Every operation the console can run. The same list as `GET /api/v1/operations`. |
 | Admin | `#/admin` | `app/static/js/pages/admin.js` | People, tenants, memberships, and, on `main`, Reach and Database. Hidden unless you are a platform admin. |
 
-A new install opens on a welcome. It says this machine stays outside the cluster, the other machines are a hostname and an IP, and Deploy is how OpenStack gets installed. Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. It creates the environment and points it at `/opt/genestack` and `/etc/genestack`. The server step starts on a hostname and an IP. The Talos image field stays blank, and the page shows the ISO to boot yourself. The summary has Apply on this environment. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
+A new install opens on a welcome. It says this machine stays outside the cluster, and inventory is one list. Add each machine by hostname and IP. A virtual machine and a physical server are the same row. On Machines, record Talos or Ubuntu, then Deploy. A cluster that is already running is Settings, Access, Adopt Kubespray. Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. The Servers step is that list. Import or discover stays behind it and writes the same rows. The Talos image field stays blank, and the page shows the ISO to boot yourself. The summary has Apply on this environment and opens Machines. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
 
 The API docs link in the sidebar is `/docs` on the console. That is a catalog of the routes, with a curl for each one. The curls point at the console you are signed in to.
 
@@ -73,7 +73,7 @@ On `main`, Admin has a Database card that shows SQLite or Postgres, the URL with
 
 Traces are API-only. An admin reads and posts spans at `/api/v1/traces`. There is no traces screen. This is on `main`. It is not in the `v2026.10.03` binary.
 
-On `main`, Settings → Access has a Hosts card. It prepares an Ubuntu autoinstall seed, queues a MicroK8s install, or records a Kubespray cluster that already exists. Talos stays on its own card. Install Ubuntu on the bare-metal row is the boot that puts Ubuntu on the machine. The `v2026.10.03` binary does not have the Hosts card. Install Ubuntu is on `main` and is not in that binary either.
+On `main`, Settings → Access has the cluster-already-running card. Adopt Kubespray is the first form. Paste the kubeconfig there. That records a cluster that is already up. It does not add servers. Servers are added on Machines. Ubuntu autoinstall and MicroK8s stay behind that form. Talos stays on Machines. Install Ubuntu on the bare-metal row is the boot that puts Ubuntu on the machine. The `v2026.10.03` binary does not have this card. Install Ubuntu is on `main` and is not in that binary either.
 
 ## What the other screen files are
 

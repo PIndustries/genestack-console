@@ -11,9 +11,9 @@
 //            → This console (later): jobs run on the fleet hub, then → Step 2
 //            → Agent: triggers install job, polls until done, then → Step 2
 //            → Deploy host: PATCHes ssh host, then → Step 2
-//   Step 2 — Deployment (provider: talos / kubespray + provider fields)
-//   Step 3 — Servers / metal source (Terraform, OVH API, PXE, static SSH, BMC)
-//   Step 4 — Summary + "Open environment" → Workflow tab
+//   Step 2 — Deployment (Talos, or Kubespray when Ubuntu is already installed)
+//   Step 3 — Inventory: hostname and IP. Import or discover stays behind that.
+//   Step 4 — Summary. Open Machines. A running cluster is Adopt on Settings.
 import { api, esc, toast } from "../api.js";
 import { loadEnvs, canRun, gate, store } from "../store.js";
 import { ROLES, REQUIRED_ROLES, ROLE_LABELS } from "../roles.js";
@@ -53,33 +53,33 @@ const WORKER_ROLES = ["compute", "storage"];
 // deploy-host SSH stay behind Advanced; the community default is this console
 // as the fleet hub (conn = "later") so the default path needs no remote agent.
 
-// Metal-source picker on the Servers step. "manual" is a legacy sessionStorage
-// value from before Static IPs / SSH was a first-class source.
+// "manual" is a legacy sessionStorage value from before hostname and IP
+// was the inventory form. Import and discovery write the same list.
 const METAL_SOURCES = [
+  {
+    id: "static",
+    title: "Hostname and IP",
+    hint: "Type each machine. A virtual machine and a physical server are the same row.",
+  },
   {
     id: "terraform",
     title: "Terraform",
-    hint: "AWS, Azure, GCP, or Rackspace. Save keys on Hardware → Providers; plan/apply there after this environment exists.",
+    hint: "AWS, Azure, GCP, or Rackspace. Save keys on Hardware, Providers. Plan and apply there after this environment exists.",
   },
   {
     id: "ovh",
-    title: "OVH via API",
-    hint: "Import dedicated servers from a bound OVH account.",
+    title: "OVH",
+    hint: "Import dedicated servers from an OVH account.",
   },
   {
     id: "pxe",
-    title: "PXE",
-    hint: "Claim PXE/DHCP sightings on Hardware → Inventory.",
-  },
-  {
-    id: "static",
-    title: "Static IPs / SSH",
-    hint: "Hostname and IP. Talos from an ISO, or Ubuntu that is already installed. A BMC is not required.",
+    title: "Network discovery",
+    hint: "A machine that asked this console for an address. Claim it on Hardware, Inventory.",
   },
   {
     id: "bmc",
-    title: "BMC / Redfish",
-    hint: "Optional. Powers the machine, network-boots it, and opens the console wall.",
+    title: "Management port",
+    hint: "A machine with a management port. Register it on Hardware, Bare metal.",
   },
 ];
 const TF_KIND_ORDER = ["aws", "azure", "gcp", "rackspace"];
@@ -313,7 +313,7 @@ function step2Html() {
   const isTalos = provider !== "kubespray";
   const sel = (p) => `id="wz-prov-${p}" type="radio" name="wz-provider" value="${p}"${provider === p ? " checked" : ""}`;
   return `
-  <p class="wz-lead muted">Talos is the operating system this console prefers. Machines that are already waiting from an ISO get a config from here. The console does not power them. Empty machines with a management port can still be network-booted later.</p>
+  <p class="wz-lead muted">Talos is the usual install. Ubuntu that is already on the machine uses Kubespray, under Advanced. The next step is the same list either way.</p>
   <div class="wz-choice">
     <label class="wz-radio${isTalos ? " selected" : ""}" data-radio="talos">
       <input ${sel("talos")} />
@@ -331,7 +331,7 @@ function step2Html() {
         <input ${sel("kubespray")} />
         <div>
           <strong>Kubespray (Ansible)</strong>
-          <div class="hint muted">Classic ansible-driven OpenStack + k8s install. Needs SSH access to every node.</div>
+          <div class="hint muted">Ubuntu is already installed. Deploy uses SSH. The machine list is still hostname and IP.</div>
         </div>
       </label>
     </div>
@@ -373,7 +373,8 @@ function talosFieldsHtml() {
 
 function step3Html() {
   const src = metalSource();
-  const radios = METAL_SOURCES.map((opt) => {
+  const importing = src !== "static";
+  const radios = METAL_SOURCES.filter((opt) => opt.id !== "static").map((opt) => {
     const checked = src === opt.id;
     return `<label class="wz-radio${checked ? " selected" : ""}" data-metal="${opt.id}">
       <input id="wz-metal-${opt.id}" type="radio" name="wz-metal" value="${opt.id}"${checked ? " checked" : ""} />
@@ -383,10 +384,18 @@ function step3Html() {
       </div>
     </label>`;
   }).join("");
+  const back = importing
+    ? `<p style="margin:.6rem 0"><button type="button" class="secondary btn-sm" id="wz-type-hosts">Type hostname and IP</button></p>`
+    : "";
   return `
-  <p class="wz-lead muted">Start with a hostname and an IP. That covers a virtual machine and any machine with no management port. Boot a Talos ISO on it yourself, or use Ubuntu that is already installed. Terraform, OVH, PXE, and a management port are optional.</p>
-  <div class="wz-choice wz-source-grid">${radios}</div>
-  <div id="wz-src-panel" class="wz-src-panel">${metalPanelHtml()}</div>`;
+  <p class="wz-lead muted">Add each machine by hostname and IP. A virtual machine and a physical server are the same row.</p>
+  <div id="wz-src-panel" class="wz-src-panel">${importing ? metalPanelHtml() : staticPanelHtml()}</div>
+  <details id="wz-import" style="margin-top:.9rem" ${importing ? "open" : ""}>
+    <summary style="cursor:pointer">Import or discover</summary>
+    <p class="hint muted" style="margin:.5rem 0">A provider account or a network sighting writes the same list.</p>
+    ${back}
+    <div class="wz-choice wz-source-grid">${radios}</div>
+  </details>`;
 }
 
 function metalPanelHtml() {
@@ -472,7 +481,7 @@ function staticPanelHtml() {
   const atCap = servers.length >= MAX_SERVER_ROWS;
   const canRemove = servers.length > 1;
   return `
-  <p class="hint muted" style="margin:.2rem 0 .6rem">These machines already have an address. Talos from an ISO is waiting for a config. Ubuntu is already installed. The console does not power them. Add each host and set its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples.</p>
+  <p class="hint muted" style="margin:.2rem 0 .6rem">Each row is one machine. Set its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples.</p>
   <div style="display:flex;gap:.4rem;margin:0 0 .6rem;flex-wrap:wrap;align-items:center">
     ${showAddBtn ? `<button class="btn-sm" id="wz-srv-add" type="button">Add server</button>` : ""}
     ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">Remove last</button>` : ""}
@@ -525,10 +534,9 @@ function step4Html() {
     .join("");
 
   const provider = v("provider", "talos");
-  const depDetail =
-    provider === "talos"
-      ? `Talos — cluster "${state.talos_cluster || v("name") || "—"}"`
-      : `Kubespray (Ansible) — ssh user ${v("dep_ssh_user") || "—"}`;
+  const depDetail = provider === "talos"
+    ? `Talos — cluster "${state.talos_cluster || v("name") || "—"}"`
+    : `Kubespray (Ansible) — ssh user ${v("dep_ssh_user") || "—"}`;
   const src = metalSource();
   const nextHint = metalNextHint(src, provider);
 
@@ -536,7 +544,7 @@ function step4Html() {
   const serverCount = servers.length
     ? String(servers.length)
     : HARDWARE_SOURCES.has(src)
-      ? "add from Hardware"
+      ? "import on Hardware"
       : "—";
   const rows = [
     ["Environment", envName],
@@ -545,7 +553,7 @@ function step4Html() {
     ["Description", v("description") || "—"],
     ["Connection", connDetail],
     ["Deployment", depDetail],
-    ["Metal source", metalSourceLabel(src)],
+    ["Inventory", metalSourceLabel(src)],
     ["Servers", serverCount],
     ["Roles covered", roleChips || "—"],
   ];
@@ -559,26 +567,19 @@ function step4Html() {
     })
     .join("");
 
-  const detailUrl = state.envId
-    ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=workflow"
-    : "#/environments";
-  const os = v("provider", "talos") === "kubespray" ? "ubuntu" : "talos";
-  const hostsUrl = state.envId
-    ? "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=platform&ptab=machines&os=" + os
-    : "#/environments";
-  const openHosts = metalSource() === "static";
-  const openUrl = openHosts ? hostsUrl : detailUrl;
-  const openLabel = openHosts ? "Open Machines" : "Open guided deploy →";
+  const open = summaryOpen();
+  const openUrl = open.url;
+  const openLabel = open.label;
 
   return `
   <div class="wz-success" style="text-align:left">
     <h3>✓ Environment <strong>'${esc(envName)}'</strong> is ready</h3>
     <div class="hint-row" id="wz-apply">This environment only logs until you apply it. The switch is on the environment. No file edit and no restart.</div>
     ${HARDWARE_SOURCES.has(src) && !servers.length
-      ? '<p class="muted" style="font-size:.85rem;margin:.3rem 0">Metal is added from Hardware after this step.</p>'
+      ? '<p class="muted" style="font-size:.85rem;margin:.3rem 0">Those machines join the same list from Hardware.</p>'
       : requiredMet
         ? '<p style="color:var(--ok);font-size:.85rem;margin:.3rem 0">All required roles covered.</p>'
-        : '<p style="color:var(--warn);font-size:.85rem;margin:.3rem 0">⚠ Some required roles not yet assigned — add servers from the detail page.</p>'}
+        : '<p style="color:var(--warn);font-size:.85rem;margin:.3rem 0">Some required roles are still open. Add them on Machines.</p>'}
     <table class="wz-review"><tbody>${tableRows}</tbody></table>
     <div class="row" style="margin-top:1.2rem">
       <button class="btn-sm" type="button" id="wz-apply-btn" ${gate(canRun(), "operator")}>Apply on this environment</button>
@@ -600,7 +601,7 @@ function wireSummaryApply() {
         body: JSON.stringify({ dry_run: false }),
       });
       if (slot) {
-        slot.textContent = "This environment applies. Jobs from here change the machines. Open Hosts and continue in this console.";
+        slot.textContent = "This environment applies. Open Machines and record Talos or Ubuntu on each row.";
       }
       btn.textContent = "This environment applies";
       toast("This environment applies", "ok");
@@ -611,18 +612,25 @@ function wireSummaryApply() {
   });
 }
 
+function summaryOpen() {
+  if (!state.envId) return { url: "#/environments", label: "Open environments" };
+  const os = v("provider", "talos") === "kubespray" ? "ubuntu" : "talos";
+  return {
+    url: "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=platform&ptab=machines&os=" + os,
+    label: "Open Machines",
+  };
+}
+
 function metalNextHint(src, provider) {
-  if (src === "terraform") return "Save Terraform keys on Hardware → Providers, then plan/apply from there.";
-  if (src === "pxe") return "Claim PXE nodes on Hardware → Inventory, then continue Workflow.";
-  if (src === "bmc") return "Register BMCs on Hardware → Bare metal, then continue Workflow.";
-  if (src === "static" && provider === "talos") {
-    return "Boot the Talos ISO on each machine. Then Machines, Talos, Talos is already installed. The console does not power them. After Kubernetes is up, Deploy from infrastructure.";
+  if (src === "terraform") return "Save the provider keys on Hardware, Providers, then plan and apply there.";
+  if (src === "pxe") return "Claim the sighting on Hardware, Inventory. It joins this same list.";
+  if (src === "bmc") return "Register the management port on Hardware, Bare metal. It joins this same list.";
+  if (src === "static" || src === "ovh") {
+    return provider === "talos"
+      ? "Open Machines. Record Talos or Ubuntu on each row, then Deploy."
+      : "Open Machines, Ubuntu. Already have an OS records the row. Deploy uses SSH.";
   }
-  if (src === "static") {
-    return "Machines, Ubuntu, Already have an OS, records them. Deploy from this console installs Kubernetes and OpenStack over SSH.";
-  }
-  if (provider === "talos") return "Next: open Workflow, then Deploy. Deploy wipes boxes that are not yet Talos.";
-  return null;
+  return "Open Machines.";
 }
 
 function connDetailLabel(method) {
@@ -743,12 +751,12 @@ function validateStep() {
   }
   if (state.step === 3) {
     const src = metalSource();
-    if (!src) return "Choose how metal arrives.";
+    if (!src) return "Add a hostname and IP.";
     if (HARDWARE_SOURCES.has(src)) return null;
     const servers = state.servers || [];
     if (!servers.length) {
       return src === "ovh"
-        ? "Pick the dedicated servers to import, or switch to Static IPs / SSH."
+        ? "Pick the dedicated servers to import, or type a hostname and IP."
         : "Enter at least one hostname.";
     }
     for (const srv of servers) {
@@ -774,6 +782,16 @@ function renderStep() {
   if (state.step === 2) wireDeploymentStep();
   if (state.step === 3) wireServersStep();
   if (state.step === 4) wireSummaryApply();
+
+  const again = document.getElementById("wz-create-another");
+  if (again) {
+    again.addEventListener("click", () => {
+      clearState();
+      state.step = 0;
+      saveState();
+      renderStep();
+    });
+  }
 
   const nav = document.getElementById("wz-nav");
   const isSummary = state.step === 4;
@@ -828,16 +846,6 @@ function renderStep() {
 
   const addBtn = document.getElementById("wz-add-servers");
   if (addBtn) addBtn.addEventListener("click", addServers);
-
-  const again = document.getElementById("wz-create-another");
-  if (again) {
-    again.addEventListener("click", () => {
-      clearState();
-      state.step = 0;
-      saveState();
-      renderStep();
-    });
-  }
 }
 
 function showError(msg) {
@@ -930,22 +938,32 @@ function wireServersStep() {
   wireMetalPanel();
 }
 
+function refreshServersStep() {
+  const body = document.getElementById("wz-body");
+  if (!body || state.step !== 3) return;
+  body.innerHTML = step3Html();
+  wireServersStep();
+  syncServersActionButton();
+}
+
 function wireMetalSourcePicker() {
-  const radios = document.querySelectorAll('input[name="wz-metal"]');
-  radios.forEach((radio) => {
+  document.querySelectorAll('input[name="wz-metal"]').forEach((radio) => {
     radio.addEventListener("change", () => {
       captureMetalServerRows();
       state.serverSource = radio.value;
       saveState();
-      document.querySelectorAll("[data-metal]").forEach((l) => {
-        l.classList.toggle("selected", l.dataset.metal === radio.value);
-      });
-      const panel = document.getElementById("wz-src-panel");
-      if (panel) panel.innerHTML = metalPanelHtml();
-      wireMetalPanel();
-      syncServersActionButton();
+      refreshServersStep();
     });
   });
+  const typed = document.getElementById("wz-type-hosts");
+  if (typed) {
+    typed.addEventListener("click", () => {
+      captureMetalServerRows();
+      state.serverSource = "static";
+      saveState();
+      refreshServersStep();
+    });
+  }
 }
 
 function wireMetalPanel() {
@@ -1327,7 +1345,7 @@ async function addServers() {
     } catch {
       toast("Deployment config not saved — set it on the environment page", "warn");
     }
-    toast("Environment ready — add metal from Hardware when you are ready", "ok");
+    toast("Environment ready. Those machines join the list from Hardware.", "ok");
     state.servers = [];
     finishWizardToSummary();
     return;

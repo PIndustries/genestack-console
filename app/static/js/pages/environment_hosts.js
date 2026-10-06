@@ -1,37 +1,46 @@
-// Ubuntu, MicroK8s, or an existing Kubespray cluster. Talos stays on its own card.
+// A cluster that is already up. Machines is where servers are added.
+// Ubuntu seed and MicroK8s stay on this card, behind the adopt form.
 import { api, esc, toast } from "../api.js";
 
 export function hostsCardHtml() {
   return `<div class="card" id="hosts-card">
     <div class="toolbar">
-      <h2>Hosts</h2>
+      <h2>Cluster already running</h2>
       <span class="muted" id="hosts-msg"></span>
     </div>
     <p class="muted" style="font-size:.78rem">
-      Talos and Ubuntu are the operating systems this console installs.
-      Install Ubuntu is on the bare-metal row for one machine. This form writes that machine's seed.
-      It does not install OpenStack.
+      Add servers on Machines. This card records a Genestack cluster that is already up.
+      Paste the kubeconfig and choose Adopt Kubespray. That records the cluster.
+      It does not clone Kubespray, run Ansible, or reinstall Kubernetes.
+      Dry run must be off or the file is not stored. Do not Deploy until you mean to change that cloud.
     </p>
-    <form id="hosts-ubuntu" class="install-form">
-      <input name="hostname" type="text" placeholder="hostname" maxlength="63" autocomplete="off" />
-      <input name="ssh_key" type="text" placeholder="SSH public key" autocomplete="off" />
-      <button class="secondary btn-sm" type="submit">Prepare Ubuntu autoinstall</button>
-    </form>
-    <form id="hosts-microk8s" class="install-form">
-      <input name="host" type="text" placeholder="host" maxlength="253" autocomplete="off" />
-      <input name="ssh_user" type="text" placeholder="ssh user (ubuntu)" maxlength="32" autocomplete="off" />
-      <button class="secondary btn-sm" type="submit">Install MicroK8s</button>
-      <p class="muted" style="font-size:.78rem">Queues a job. SSH runs only when this environment is not in dry-run. The console default is a dry run.</p>
-    </form>
     <form id="hosts-kubespray" class="install-form">
       <textarea name="kubeconfig" rows="4" placeholder="kubeconfig" autocomplete="off"></textarea>
       <button class="secondary btn-sm" type="submit">Adopt Kubespray</button>
     </form>
-    <p class="muted" style="font-size:.78rem">
-      A machine that is already Ubuntu uses the existing agent.
-      Run operation agent.install, or the one-liner on the Agents card.
-      One command on each machine.
-    </p>
+    <details style="margin-top:.75rem">
+      <summary>Ubuntu seed and MicroK8s</summary>
+      <p class="muted" style="font-size:.78rem">
+        Install Ubuntu on a Machines row is the boot for one machine.
+        Prepare Ubuntu autoinstall writes that machine's seed. It does not install OpenStack.
+      </p>
+      <form id="hosts-ubuntu" class="install-form">
+        <input name="hostname" type="text" placeholder="hostname" maxlength="63" autocomplete="off" />
+        <input name="ssh_key" type="text" placeholder="SSH public key" autocomplete="off" />
+        <button class="secondary btn-sm" type="submit">Prepare Ubuntu autoinstall</button>
+      </form>
+      <form id="hosts-microk8s" class="install-form">
+        <input name="host" type="text" placeholder="host" maxlength="253" autocomplete="off" />
+        <input name="ssh_user" type="text" placeholder="ssh user (ubuntu)" maxlength="32" autocomplete="off" />
+        <button class="secondary btn-sm" type="submit">Install MicroK8s</button>
+        <p class="muted" style="font-size:.78rem">Queues a job. SSH runs only when this environment is not in dry-run. The console default is a dry run.</p>
+      </form>
+      <p class="muted" style="font-size:.78rem">
+        A machine that is already Ubuntu uses the existing agent.
+        Run operation agent.install, or the one-liner on the Agents card.
+        One command on each machine.
+      </p>
+    </details>
   </div>`;
 }
 

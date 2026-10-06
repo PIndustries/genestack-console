@@ -20,6 +20,16 @@ curl -fsSL https://get.genestack.dev/console.sh | bash
 # then open http://127.0.0.1:8080/ui and follow Guided setup
 ```
 
+## What to do next
+
+The console is up when that command finishes. The computer that runs the console stays outside the cluster. Inventory is one list, on Machines. Add each machine by hostname and IP. A virtual machine and a physical server are the same row. On Machines, record Talos or Ubuntu, then Deploy.
+
+A provider account or a network sighting can import that same list. Guided setup keeps those under Import or discover.
+
+A cluster that is already running is not a list of machines. Settings, Access, Adopt Kubespray records it. Paste the kubeconfig. Dry run must be off or the file is not stored.
+
+[Your first cluster](docs/first-cluster.md) is the walkthrough. A starting size for one virtual machine is 4 vCPU, 16 GiB of memory, and an 80 GB disk.
+
 `get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080` on the deploy host. From your laptop, `ssh -L 8080:127.0.0.1:8080 <deploy-host>` and open the same URL. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md). What each build changed is in [CHANGELOG.md](CHANGELOG.md).
 
 Run the same command again to move an install to the latest release. `genestack-console update` does that replace without the rest of the install. Either one leaves `config.yaml`, the database, and `/opt/genestack` as they are. To install a published build by name: `curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3`.

@@ -986,7 +986,9 @@ a.wf-action.primary:hover { filter: brightness(1.15); color: #fff; }
   border: 1px solid var(--accent);
   border-radius: 1rem;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  max-width: 44rem; width: 100%;
+  max-width: 52rem; width: 100%;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
   padding: 1.4rem 1.6rem;
 }
 .gs-welcome-card h2 { margin: 0 0 0.25rem; }

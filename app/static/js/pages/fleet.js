@@ -268,7 +268,7 @@ async function loadFleet({ background = false } = {}) {
     } else {
       list.innerHTML = `<div class="fl-empty fl-empty-cta" style="grid-column:span 12">
         <h3>No environments yet</h3>
-        <p class="muted">Guided setup: add machines by hostname and IP. A Talos ISO, or Ubuntu that is already installed, is enough. A management port is optional.</p>
+        <p class="muted">Add each machine by hostname and IP. A virtual machine and a physical server are the same row.</p>
         <a class="fl-next fl-cta" href="#/setup">Guided setup →</a>
       </div>`;
     }

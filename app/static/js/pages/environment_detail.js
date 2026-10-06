@@ -208,6 +208,9 @@ function envTabHash(tabName, ptab) {
     const id = normalizePtab(ptab || activePtab);
     q.set("ptab", id);
     if (id === "machines") q.set("os", activeOs === "ubuntu" ? "ubuntu" : "talos");
+  } else if (tabName === "settings") {
+    const id = ptab || "config";
+    if (id === "config" || id === "apps" || id === "access" || id === "expert") q.set("ptab", id);
   }
   return `#/environment_detail/${encodeURIComponent(envId)}?${q}`;
 }
@@ -321,7 +324,11 @@ function loadTab(tabName) {
 export async function render(root, { param, query } = {}) {
   showPageLoading();
   activeTab = (query && query.get("tab")) || "workflow";
-  activePtab = normalizePtab((query && query.get("ptab")) || "machines");
+  const rawPtab = (query && query.get("ptab")) || "";
+  const settingsTabs = new Set(["settings", "inventory", "config", "apps", "expert"]);
+  activePtab = settingsTabs.has(activeTab)
+    ? (rawPtab || "config")
+    : normalizePtab(rawPtab || "machines");
   activeOs = query && query.get("os") === "ubuntu" ? "ubuntu" : "talos";
   osPinned = !!(query && (query.get("os") === "ubuntu" || query.get("os") === "talos"));
   tabLoads.clear();
@@ -610,6 +617,10 @@ export async function render(root, { param, query } = {}) {
   syncDemoBanner();
   if (envId) {
     switchTab(activeTab || "workflow", activePtab, { silent: true });
+    if (query && query.get("focus") === "adopt") {
+      const adopt = document.getElementById("hosts-kubespray");
+      if (adopt) adopt.scrollIntoView({ block: "center" });
+    }
     history.replaceState(null, "", envTabHash(activeTab || "workflow", activePtab));
     window.dispatchEvent(new CustomEvent("gsc-nav-sync"));
     removePageLoading();

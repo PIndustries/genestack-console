@@ -527,22 +527,22 @@ function maybeShowWelcome() {
   overlay.innerHTML = `
     <div class="gs-welcome-card" role="dialog" aria-modal="true" aria-label="Welcome to the Genestack console">
       <h2>Welcome to the Genestack console</h2>
-      <p class="muted">Three steps. This console does the install.</p>
+      <p class="muted">This machine stays outside the cluster. Inventory is one list.</p>
       <div class="gs-welcome-panels">
         <div class="gs-welcome-panel">
           <div class="gs-welcome-num">1</div>
-          <p><strong>This machine stays outside the cluster.</strong> The cloud is other machines.</p>
-          <a href="#/setup" data-gs-welcome-link>Guided setup →</a>
+          <p><strong>Add each machine by hostname and IP.</strong> A virtual machine and a physical server are the same row.</p>
         </div>
         <div class="gs-welcome-panel">
           <div class="gs-welcome-num">2</div>
-          <p><strong>Add those machines by hostname and IP.</strong> Boot a Talos ISO on them yourself, or use Ubuntu that is already installed. A management port is optional.</p>
+          <p><strong>On Machines, record Talos or Ubuntu.</strong> Then Deploy.</p>
         </div>
         <div class="gs-welcome-panel">
           <div class="gs-welcome-num">3</div>
-          <p><strong>Talos is already installed</strong>, or <strong>Already have an OS</strong>. Then Deploy from this console. That Deploy is OpenStack.</p>
+          <p><strong>A cluster that is already running</strong> is Settings, Access, Adopt Kubespray. Paste the kubeconfig.</p>
         </div>
       </div>
+      <p><a href="#/setup" data-gs-welcome-link>Guided setup →</a></p>
       <div class="gs-welcome-actions">
         <button class="secondary" type="button" data-gs-welcome-dismiss>Dismiss</button>
         <button type="button" data-gs-welcome-dismiss>Don't show again</button>
