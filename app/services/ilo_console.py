@@ -40,7 +40,10 @@ SOCKADDR_OLD = 'this.sockaddr = "wss://" + options.host + "/wss/ircport"'
 SOCKADDR_NEW = (
     "this.sockaddr = (function(){var loc=self.location;"
     'var proto=loc.protocol==="https:"?"wss://":"ws://";'
-    'var dir=loc.pathname.replace(/\\/[^/]*$/,"/").replace(/\\/js\\/$,"/");'
+    # The second regex needs its closing slash. Without it, `/\\/js\\/$,"/"`
+    # eats the rest of the call and socket.js fails to parse, so the KVM
+    # canvas stays black.
+    'var dir=loc.pathname.replace(/\\/[^/]*$/,"/").replace(/\\/js\\/$/,"/");'
     'return proto+loc.host+dir+"wss/ircport"})()'
 )
 # renderer.js: in an iframe, iLO sets path="../" so Worker("js/worker_decoder.js")

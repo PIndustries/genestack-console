@@ -5,7 +5,7 @@
 // so a failed manage probe never blanks the rest of the card.
 // Defensive: the endpoint may 404, return partial payloads, or omit the
 // optional health/warnings/access keys — every path degrades, never a page break.
-import { api, downloadAuth, esc, fmtAge, toast } from "../api.js";
+import { api, downloadAuth, esc, fmtAge, loadingHtml, toast } from "../api.js";
 import { canRun, gate } from "../store.js";
 import { connect } from "../stream.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
@@ -1718,7 +1718,7 @@ export function clusterCardHtml() {
     </div>
     ${apply}
     <div class="tab-bar" id="kc-tabs">${tabs}</div>
-    <div id="kc-body" class="muted">Select an environment.</div>
+    <div id="kc-body">${loadingHtml("Loading Kubernetes…")}</div>
     <div id="kc-logs" class="lc-logs" hidden>
       <div class="toolbar">
         <h3 class="lc-title" style="margin:0">Pod logs</h3>
@@ -1956,7 +1956,11 @@ export async function loadClusterCard(envId, { silent = false } = {}) {
     setHealthStrip('<span class="muted">Checking cluster…</span>');
   }
 
-  if (!silent && msg) msg.textContent = "Loading…";
+  if (!silent && msg) msg.textContent = "";
+  if (!silent && !clusterCache) {
+    const body = document.getElementById("kc-body");
+    if (body) body.innerHTML = loadingHtml("Loading Kubernetes…");
+  }
 
   let d;
   try {

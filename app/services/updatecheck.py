@@ -207,38 +207,90 @@ def _apply_binary_locked(settings: Settings) -> dict[str, Any]:
     }
 
 
+def _maybe_sudo(cmd: list[str]) -> list[str] | None:
+    """Prefix ``sudo -n`` when this process is not root. None means no sudo."""
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        sudo = shutil.which("sudo")
+        if not sudo:
+            return None
+        return [sudo, "-n", *cmd]
+    return list(cmd)
+
+
 def _restart_services() -> tuple[bool, str, bool]:
-    """Restart both units. Returns ``(restarted, message, ok)``."""
+    """Schedule a restart after this request returns.
+
+    ``systemctl restart`` of the unit that is serving the request kills the
+    waiter and the browser sees a failed replace. A transient timer runs
+    outside this process, so the HTTP response can finish first.
+    Returns ``(restarted, message, ok)``.
+    """
     systemctl = shutil.which("systemctl")
     if not systemctl:
         return False, "binary replaced; systemctl not found", True
     unit = Path("/etc/systemd/system/genestack-console.service")
     if not unit.is_file():
         return False, "binary replaced; genestack-console.service is not installed", True
-    cmd = [
-        systemctl,
-        "restart",
-        "genestack-console.service",
-        "genestack-console-worker.service",
-    ]
-    if hasattr(os, "geteuid") and os.geteuid() != 0:
-        sudo = shutil.which("sudo")
-        if not sudo:
+    services = ["genestack-console.service", "genestack-console-worker.service"]
+    systemd_run = shutil.which("systemd-run")
+    if systemd_run:
+        cmd = _maybe_sudo(
+            [
+                systemd_run,
+                f"--unit=genestack-console-restart-{os.getpid()}",
+                "--collect",
+                "--on-active=1s",
+                "--timer-property=AccuracySec=100ms",
+                "--",
+                systemctl,
+                "restart",
+                *services,
+            ]
+        )
+        if cmd is None:
             return False, "binary replaced; restart needs root", False
-        # A timer has no tty, so it must not sit on a password prompt.
-        cmd = [sudo, *cmd] if os.isatty(0) else [sudo, "-n", *cmd]
-    proc = subprocess.run(  # noqa: S603
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=60,
+        try:
+            proc = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, f"binary replaced; restart failed: {exc}"[:240], False
+        if proc.returncode == 0:
+            log.info("console binary replaced; restart scheduled")
+            return True, "binary replaced; restarting", True
+        detail = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")
+        if detail:
+            return False, f"binary replaced; restart failed: {detail[:200]}", False
+        return False, "binary replaced; restart failed", False
+    # No systemd-run. Detach a short sleep so this request can still answer.
+    bash = shutil.which("bash")
+    if not bash:
+        return False, "binary replaced; could not schedule a restart", False
+    cmd = _maybe_sudo(
+        [
+            bash,
+            "-c",
+            "sleep 1; exec systemctl restart genestack-console.service genestack-console-worker.service",
+        ]
     )
-    if proc.returncode == 0:
-        return True, "binary replaced and services restarted", True
-    detail = (proc.stderr or proc.stdout or "").strip().replace("\n", " ")
-    if detail:
-        return False, f"binary replaced; restart failed: {detail[:200]}", False
-    return False, "binary replaced; restart failed", False
+    if cmd is None:
+        return False, "binary replaced; restart needs root", False
+    try:
+        subprocess.Popen(  # noqa: S603
+            cmd,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        return False, f"binary replaced; restart failed: {exc}"[:240], False
+    log.info("console binary replaced; restart scheduled")
+    return True, "binary replaced; restarting", True
 
 
 def active_jobs() -> int:
@@ -290,6 +342,12 @@ def watch_once(
         return {**current, "applied": False, "skipped": "current"}
     here = can_apply_here() if installed is None else bool(installed)
     if not here:
+        with _cache_lock:
+            first = "not-installed" not in _wait_logged
+            if first:
+                _wait_logged.add("not-installed")
+        if first:
+            log.info("console update skipped: this process is not an installed binary")
         return {**current, "applied": False, "skipped": "not installed"}
     now = time.time()
     with _cache_lock:

@@ -1,7 +1,7 @@
 // pages/environment_observe.js — Grafana-ish Observe tab for one environment.
 // Plane stats, SVG area charts, and "now" pills. Auto-refresh ~20s.
 // GET /api/v1/environments/{id}/observe?hours= ; on 404 compose from live APIs.
-import { api, esc, fmtAge } from "../api.js";
+import { api, esc, fmtAge, loadingHtml } from "../api.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
 
 const REFRESH_MS = 20000;
@@ -425,7 +425,7 @@ export function observeCardHtml() {
     <div class="ob-charts" id="ob-charts">${chartPanelsHtml()}</div>
     <div id="ob-now">
       <div class="ob-row-title">Now</div>
-      <div class="muted">Loading live counts…</div>
+      ${loadingHtml("Loading live counts…")}
     </div>
   </div>`;
 }

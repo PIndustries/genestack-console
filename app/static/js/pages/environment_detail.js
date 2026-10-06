@@ -3,7 +3,7 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls27";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls35";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
@@ -13,7 +13,7 @@ import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard }
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, wireDeployMap, loadDeployMap, destroyDeployMap } from "./environment_deploy_map.js?v=ls33";
+import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap } from "./environment_deploy_map.js?v=ls35";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js?v=ls26";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
@@ -192,9 +192,42 @@ const PTAB_LEAD = {
 };
 
 const OS_LEAD = {
-  talos: "Talos on these machines. Add a hostname and IP here. Overview is the install map.",
-  ubuntu: "Ubuntu on these machines. Add a hostname and IP, or record machines that already have Ubuntu.",
+  talos: "Talos machines in this list. Add a machine records a hostname and IP. It does not boot the machine.",
+  ubuntu: "Ubuntu machines in this list. Status shows whether each one is up, running, reachable, and authenticated.",
 };
+
+const PANEL_LOAD_MS = 30000;
+
+function showPanelLoading(panel, label) {
+  if (!panel || panel.dataset.gscReady === "1") return;
+  panel.classList.add("is-loading");
+  let el = panel.querySelector(":scope > .gsc-loading");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "gsc-loading";
+    el.setAttribute("role", "status");
+    panel.prepend(el);
+  }
+  el.innerHTML = `<span class="gsc-spin" aria-hidden="true"></span><span>${esc(label || "Loading…")}</span>`;
+}
+
+function finishPanelLoad(panel) {
+  if (!panel) return;
+  panel.classList.remove("is-loading");
+  panel.dataset.gscReady = "1";
+  const el = panel.querySelector(":scope > .gsc-loading");
+  if (el) el.remove();
+}
+
+function settlePanel(panel, job) {
+  const first = !!(panel && panel.dataset.gscReady !== "1");
+  Promise.race([
+    Promise.resolve(job).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, PANEL_LOAD_MS)),
+  ]).finally(() => {
+    if (first) finishPanelLoad(panel);
+  });
+}
 
 function normalizePtab(name) {
   if (name === "kubernetes" || name === "openstack") return name;
@@ -285,13 +318,25 @@ function switchPlatformSubtab(name) {
 
 function loadPlatformLayer(name) {
   if (!envId) return;
+  const panel = document.querySelector(`#panel-platform .ptab-panel[data-ppanel="${name}"]`);
+  const labels = {
+    machines: "Loading machines…",
+    kubernetes: "Loading Kubernetes…",
+    openstack: "Loading OpenStack…",
+  };
+  showPanelLoading(panel, labels[name] || "Loading…");
+  let job = Promise.resolve();
   if (name === "machines") {
-    loadServersCard(envId);
     loadPlatformCard(envId, { silent: tabLoads.has("platform:machines") });
-  } else if (name === "kubernetes") loadClusterCard(envId);
-  else if (name === "openstack") loadCloudCard(envId, { silent: tabLoads.has("platform:openstack") });
+    job = Promise.resolve(loadServersCard(envId)).catch(() => {});
+  } else if (name === "kubernetes") {
+    job = Promise.resolve(loadClusterCard(envId)).catch(() => {});
+  } else if (name === "openstack") {
+    job = Promise.resolve(loadCloudCard(envId, { silent: tabLoads.has("platform:openstack") })).catch(() => {});
+  }
   tabLoads.set("platform", true);
   tabLoads.set(`platform:${name}`, true);
+  settlePanel(panel, job);
 }
 
 // Lazy-load cards for each tab on first visit. Cards stay in DOM after first load.
@@ -301,6 +346,7 @@ const tabLoads = new Map();
 let activeTab = "workflow";
 const TAB_LOADERS = {
   workflow: [loadDeployMap, loadProgressCard, loadTerminalCard],
+  cache: [loadImageCache],
   observe: [loadObserveCard],
   settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
   inventory: [loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
@@ -315,8 +361,19 @@ function loadTab(tabName) {
   }
   const loaders = TAB_LOADERS[tabName];
   if (!loaders) return;
+  const panel = document.querySelector(`.detail-page .tab-panel[data-panel="${tabName}"]`);
+  const labels = {
+    workflow: "Loading overview…",
+    cache: "Loading image cache…",
+    observe: "Loading observe…",
+    settings: "Loading settings…",
+  };
+  showPanelLoading(panel, labels[tabName] || "Loading…");
   tabLoads.set(tabName, true);
-  loaders.forEach((fn) => fn(envId));
+  const job = Promise.all(
+    loaders.map((fn) => Promise.resolve().then(() => fn(envId)).catch(() => {}))
+  );
+  settlePanel(panel, job);
 }
 
 // ---------- page ----------
@@ -388,6 +445,7 @@ export async function render(root, { param, query } = {}) {
     <div id="env-apply" class="hint-row" hidden></div>
     <div class="tab-bar">
       <button class="tab active" data-tab="workflow">Overview</button>
+      <button class="tab" data-tab="cache">Image cache</button>
       <button class="tab" data-tab="platform" data-ptab="machines">Machines</button>
       <button class="tab" data-tab="platform" data-ptab="kubernetes">Kubernetes</button>
       <button class="tab" data-tab="platform" data-ptab="openstack">OpenStack</button>
@@ -405,6 +463,10 @@ export async function render(root, { param, query } = {}) {
       <p class="hint-row">This is the install. Add a machine on <button type="button" class="linkish" data-goto-ptab="machines">Machines</button>.</p>
       ${deployMapHtml()}
       <div hidden>${progressCardHtml()}</div>
+    </div>
+
+    <div class="tab-panel" data-panel="cache" id="panel-cache">
+      ${imageCacheHtml()}
     </div>
 
     <!-- ═══ SETTINGS (config / apps / access / expert) ═══ -->
@@ -468,13 +530,13 @@ export async function render(root, { param, query } = {}) {
           <button type="button" class="ostab" data-ostab="ubuntu" role="tab">Ubuntu</button>
         </div>
         <p class="ptab-lead" id="ostab-lead">${OS_LEAD.talos}</p>
+        <div class="env-grid full">
+          ${serversCardHtml()}
+        </div>
         <div data-os-panel="talos">
           <div class="env-grid full">
             ${platformCardHtml()}
           </div>
-        </div>
-        <div class="env-grid full">
-          ${serversCardHtml()}
         </div>
       </div>
       <div class="ptab-panel" data-ppanel="kubernetes">

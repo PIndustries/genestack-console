@@ -13,7 +13,15 @@ from pathlib import Path
 
 
 def frozen() -> bool:
-    return bool(getattr(sys, "frozen", False))
+    """True for a published binary.
+
+    PyInstaller sets ``sys.frozen``. Nuitka onefile does not. It sets
+    ``__compiled__`` on this module instead. A source checkout has neither,
+    so the update watcher must not download the Linux binary there.
+    """
+    if getattr(sys, "frozen", False):
+        return True
+    return "__compiled__" in globals()
 
 
 def package_root() -> Path:

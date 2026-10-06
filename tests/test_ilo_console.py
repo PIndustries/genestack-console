@@ -98,6 +98,9 @@ def test_rewrite_socket_js_keeps_kvm_on_console_origin():
     assert "wss/ircport" in out
     assert "ws://" in out
     assert "window.location" not in out
+    # A missing slash here is a SyntaxError and the console canvas stays black.
+    assert '.replace(/\\/js\\/$/,"/")' in out
+    assert '.replace(/\\/js\\/$,"/")' not in out
 
 
 def test_rewrite_json_roots_keeps_relative_json_under_session_prefix():

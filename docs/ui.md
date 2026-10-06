@@ -29,18 +29,20 @@ Changelog is the button under that link. It lists the public pipeline and the re
 
 ## One environment
 
-Open an environment and the sidebar gains a second block: Overview, Machines, Kubernetes, OpenStack, Observe, Settings. The screen is `app/static/js/pages/environment_detail.js`. It pulls the other cards in. Those cards are the other files whose names start with `environment_`.
+Open an environment and the sidebar gains a second block: Overview, Image cache, Machines, Kubernetes, OpenStack, Observe, Settings. The screen is `app/static/js/pages/environment_detail.js`. It pulls the other cards in. Those cards are the other files whose names start with `environment_`.
 
 The bar above the tabs is the switch for this environment. Apply on this environment makes jobs from here change the machines. Look around only puts them back to a log. It does not edit `config.yaml` and it does not restart a service. An operator can use it. A viewer sees it and cannot press it.
 
-Overview is the install map. It shows where this cloud is, from an empty checkout to OpenStack answering. The map reads the workflow API. It does not start a job by being opened. Machines are added on Machines, not on this map. Image cache sits above that map. It lists each pull-through registry and the Helm charts. Cache images and charts queues `registry.mirror`. That copies the images this cluster runs onto this console. An admin starts it. It does not power a machine. OCI charts are stored in that same cache. The other charts stay on their Helm repo.
+Overview is the install map. It shows where this cloud is, from an empty checkout to OpenStack answering. The map reads the workflow API. It does not start a job by being opened. Machines are added on Machines, not on this map.
 
-Machines is the list of computers. Talos and Ubuntu are the tabs on that page.
+Image cache is its own tab. It lists each pull-through registry and the Helm charts. Cache images and charts queues `registry.mirror`. That copies the images this cluster runs onto this console. An admin starts it. It does not power a machine. OCI charts are stored in that same cache. The other charts stay on their Helm repo. Maintenance on the map still has the same button.
+
+Machines is the list of computers. The list is the first thing on the page. Talos and Ubuntu filter that list. Add a machine opens a dialog. Saving records a hostname and IP. It does not boot the machine. Each row shows whether the address is up, the system is running, the console can connect, and the login was accepted. A Talos machine with no SSH port stays marked Talos. `environment_servers.js` asks `GET /servers/reach`. That check does not install or reboot anything.
 
 | Tab | What it is |
 | --- | --- |
-| Talos | Talos on these machines: versions, Ready, logs, and upgrades. Add a hostname and IP on the same page. Talos is already installed applies a config to every saved address and does not power the machines. After that job succeeds, Deploy from infrastructure starts OpenStack and does not run Talos bootstrap again. `environment_platform.js` and `environment_servers.js`. |
-| Ubuntu | Machines that already have Ubuntu. Already have an OS only records them. Deploy over SSH starts at the hosts stage. |
+| Talos | Talos machines in the list. Versions, Ready, logs, and upgrades sit under the list. Talos is already installed applies a config to every saved address and does not power the machines. After that job succeeds, Deploy from infrastructure starts OpenStack and does not run Talos bootstrap again. `environment_platform.js` and `environment_servers.js`. |
+| Ubuntu | Ubuntu machines in the same list. Status is up, running, connect, and authenticated. Already have an OS only records them. Deploy over SSH starts at the hosts stage. |
 | Kubernetes | Nodes, namespaces, and pods. `environment_cluster.js`. |
 | OpenStack | The cloud services and the instances. `environment_openstack.js` and `environment_cloud.js`. |
 

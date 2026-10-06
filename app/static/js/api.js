@@ -23,6 +23,16 @@ export function setUnauthorizedHandler(fn) {
   unauthorizedHandler = fn;
 }
 
+// Set while this console is replacing its own binary. In-flight calls die
+// when the process restarts. Callers should say "restarting", not "unreachable".
+let consoleRestarting = false;
+export function setConsoleRestarting(on) {
+  consoleRestarting = !!on;
+}
+export function isConsoleRestarting() {
+  return consoleRestarting;
+}
+
 export function getKey() {
   return sessionStorage.getItem(KEY_STORAGE) || "";
 }
@@ -157,6 +167,9 @@ async function authedFetch(path, opts = {}) {
       res = await fetch(path, { ...rest, headers });
     }
   } catch (e) {
+    if (consoleRestarting) {
+      throw new ApiError(0, "Console is restarting.", { isNetwork: true, isRestarting: true });
+    }
     if (e.name === "AbortError" || String(e.message).includes("abort")) {
       throw new ApiError(0, "Request timed out. Check your connection and try again.", { isTimeout: true });
     }
@@ -239,6 +252,10 @@ export function esc(s) {
     '"': "&quot;",
     "'": "&#39;",
   })[c]);
+}
+
+export function loadingHtml(label = "Loading…") {
+  return `<div class="gsc-loading" role="status"><span class="gsc-spin" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
 }
 
 export function fmtTime(v) {

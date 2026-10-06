@@ -4,7 +4,7 @@
 // not power the machines. After that job succeeds, Deploy from infrastructure
 // starts OpenStack and does not run Talos bootstrap again.
 // Already have an OS only records Ubuntu that is already there.
-import { api, esc, toast } from "../api.js";
+import { api, esc, loadingHtml, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { ROLES, ROLE_LABELS } from "../roles.js";
 import { clearOvhPoll } from "../ovh.js";
@@ -63,6 +63,7 @@ export function serversCardHtml() {
 #srv-card .card-empty p { font-size:.78rem; margin:.15rem 0; }
 #srv-card .card-empty .empty-hint { font-size:.7rem; color:var(--fg-muted, #555); margin-top:.3rem; }
 #srv-card .hint-row { display:flex; align-items:center; gap:.5rem; padding:.3rem 0; margin-bottom:.3rem; font-size:.72rem; color:var(--fg-muted, #666); }
+#srv-card .hint-row[hidden] { display:none !important; }
 #srv-card .pill { display:inline-flex; align-items:center; padding:.15rem .45rem; border-radius:.2rem; font-size:.72rem; font-weight:500; }
 #srv-card .os-name { display:inline-flex; align-items:center; gap:.28rem; }
 #srv-card .os-mark { width:1rem; height:1rem; flex:none; display:block; }
@@ -124,11 +125,32 @@ export function serversCardHtml() {
 </style>
 <div class="card span-12" id="srv-card" data-os-view="talos">
   <div class="toolbar">
-    <h2 id="srv-title">Add a machine</h2>
-    <span class="muted" id="srv-kicker">Hostname and IP. Saving does not boot the machine.</span>
+    <h2 id="srv-title">Machines</h2>
+    <span class="muted" id="srv-kicker">The list is these computers. Add a machine does not boot them.</span>
+    <button class="btn-sm" id="srv-add-open" type="button" ${gate(canRun(), "operator")}>Add a machine</button>
     <button class="secondary btn-sm" id="srv-refresh" type="button">Refresh</button>
     <span id="srv-msg" class="muted"></span>
   </div>
+  <p class="hint-row" id="srv-os-empty" hidden></p>
+  <table>
+    <thead><tr>
+      <th style="width:2rem"><input type="checkbox" id="srv-select-all" class="srv-pick" aria-label="Select all hosts"></th>
+      <th>Hostname</th><th>IP</th><th>Status</th><th>SSH user</th><th>Source</th><th>OS</th><th>Roles</th><th></th>
+    </tr></thead>
+    <tbody id="srv-tbody"><tr><td colspan="9">${loadingHtml("Loading machines…")}</td></tr></tbody>
+  </table>
+  <p class="hint-row" id="srv-os-other" hidden></p>
+  <div id="srv-become" class="srv-become hidden">
+    <strong id="srv-become-count">0 servers</strong>
+    <label><input type="radio" name="srv-become" value="ubuntu"> ${osNameHtml("ubuntu")}</label>
+    <label><input type="radio" name="srv-become" value="talos"> ${osNameHtml("talos")}</label>
+    <button class="btn-sm" id="srv-become-apply" type="button">Apply</button>
+    <button class="secondary btn-sm" id="srv-adapt" type="button">Already have an OS</button>
+    <button class="secondary btn-sm" id="srv-adapt-clear" type="button">Clear that record</button>
+    <span id="srv-become-msg" class="muted"></span>
+    <p class="srv-become-note">Installs the selected rows. Already have an OS only records them.</p>
+  </div>
+  <div id="cluster-status-bar"></div>
   <div data-os-show="talos" id="srv-talos-actions">
     <p class="hint-row" id="srv-hint">Talos is already installed applies the config to every saved address. It does not power the machines.</p>
     <div class="srv-flow-actions">
@@ -149,40 +171,38 @@ export function serversCardHtml() {
   <div id="srv-ovh-banner"></div>
   <div id="srv-vrack"></div>
   <div id="srv-err"></div>
+  <div id="srv-discovered"></div>
   <details id="srv-bmc-wall">
     <summary>Management ports</summary>
     <p class="muted">Loading…</p>
   </details>
-  <div class="add-host-section" id="srv-add-host"></div>
-  <details id="srv-roles" open>
-    <summary>Addresses and roles</summary>
-  <div id="srv-become" class="srv-become hidden">
-    <strong id="srv-become-count">0 servers</strong>
-    <label><input type="radio" name="srv-become" value="ubuntu"> ${osNameHtml("ubuntu")}</label>
-    <label><input type="radio" name="srv-become" value="talos"> ${osNameHtml("talos")}</label>
-    <button class="btn-sm" id="srv-become-apply" type="button">Apply</button>
-    <button class="secondary btn-sm" id="srv-adapt" type="button">Already have an OS</button>
-    <button class="secondary btn-sm" id="srv-adapt-clear" type="button">Clear that record</button>
-    <span id="srv-become-msg" class="muted"></span>
-    <p class="srv-become-note">Installs the selected rows. Already have an OS only records them.</p>
-  </div>
-  <p class="hint-row" id="srv-os-empty" hidden></p>
-  <table>
-    <thead><tr>
-      <th style="width:2rem"><input type="checkbox" id="srv-select-all" class="srv-pick" aria-label="Select all hosts"></th>
-      <th>Hostname</th><th>IP</th><th>SSH user</th><th>Source</th><th>OS</th><th>Roles</th><th></th>
-    </tr></thead>
-    <tbody id="srv-tbody"><tr><td colspan="8">
-      <div class="card-empty">
-        <div class="empty-icon">⬡</div>
-        <p>No machines yet</p>
-        <p class="empty-hint">Add a hostname and IP</p>
+  <div id="srv-add-modal" class="gsc-modal" hidden>
+    <div class="gsc-modal-card" role="dialog" aria-modal="true" aria-labelledby="srv-add-title">
+      <div class="toolbar">
+        <h2 id="srv-add-title">Add a machine</h2>
+        <button type="button" class="secondary btn-sm" data-srv-add-close>Close</button>
       </div>
-    </td></tr></tbody>
-  </table>
-  </details>
-  <div id="srv-discovered"></div>
+      <p class="muted">Hostname and IP. Saving does not boot the machine.</p>
+      <div id="srv-add-err"></div>
+      <div class="add-host-section" id="srv-add-host"></div>
+    </div>
+  </div>
 </div>`;
+}
+
+let addModalKeyHandler = null;
+
+function openAddMachine() {
+  const modal = document.getElementById("srv-add-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  const input = document.getElementById("srv-add-hostname");
+  if (input) input.focus();
+}
+
+function closeAddMachine() {
+  const modal = document.getElementById("srv-add-modal");
+  if (modal) modal.hidden = true;
 }
 
 export function wireServersCard(getEnvId) {
@@ -190,10 +210,27 @@ export function wireServersCard(getEnvId) {
 
   document.getElementById("srv-refresh").addEventListener("click", () => loadServersCard(getEnvId()));
 
+  if (!addModalKeyHandler) {
+    addModalKeyHandler = (e) => {
+      if (e.key !== "Escape") return;
+      const modal = document.getElementById("srv-add-modal");
+      if (modal && !modal.hidden) closeAddMachine();
+    };
+    document.addEventListener("keydown", addModalKeyHandler);
+  }
+
   // Event delegation: the add-host hint buttons are re-injected on every
   // loadServersCard render, so direct listeners (wired once at page mount)
   // would never land on them.
   card?.addEventListener("click", async (e) => {
+    if (e.target.closest("#srv-add-open")) {
+      openAddMachine();
+      return;
+    }
+    if (e.target.closest("[data-srv-add-close]") || e.target.id === "srv-add-modal") {
+      closeAddMachine();
+      return;
+    }
     const deployBtn = e.target.closest("[data-srv-talos-deploy]");
     if (deployBtn && !deployBtn.disabled) {
       await deployFromInfrastructure(getEnvId());
@@ -522,6 +559,64 @@ function hostMachineOs(server, boot, metalPath) {
   }
   if (next === "talos" || stage === "talos") return "talos";
   return metalPath === "kubespray" ? "ubuntu" : "talos";
+}
+
+function statusPill(kind, label) {
+  return `<span class="pill ${kind}">${esc(label)}</span>`;
+}
+
+function checkingHtml() {
+  return `<span class="gsc-loading gsc-loading-inline" role="status"><span class="gsc-spin" aria-hidden="true"></span><span>Checking…</span></span>`;
+}
+
+function reachCellHtml(row, os) {
+  if (!row) return checkingHtml();
+  if (row.authenticated && row.running) {
+    return [
+      statusPill("ok", "Up"),
+      statusPill("ok", "Running"),
+      statusPill("ok", "Connect"),
+      statusPill("ok", "Authenticated"),
+    ].join(" ");
+  }
+  if (row.connect || row.up) {
+    const auth = row.authenticated ? statusPill("ok", "Authenticated") : statusPill("bad", "Auth failed");
+    const extra = row.detail && row.detail !== "authentication failed"
+      ? ` <span class="muted">${esc(row.detail)}</span>`
+      : "";
+    return `${statusPill("ok", "Up")} ${statusPill("ok", "Connect")} ${auth}${extra}`;
+  }
+  if (os === "talos") {
+    return `<span class="pill">Talos</span> <span class="muted">${esc(row.detail || "no SSH")}</span>`;
+  }
+  return `<span class="pill bad">Down</span> <span class="muted">${esc(row.detail || "no route")}</span>`;
+}
+
+let reachGen = 0;
+
+function loadReach(envId) {
+  const gen = ++reachGen;
+  const cells = () => document.querySelectorAll("#srv-tbody [data-srv-reach]");
+  if (!envId || !cells().length) return;
+  api(`/api/v1/environments/${encodeURIComponent(envId)}/servers/reach`, { timeout: 40000 })
+    .then((data) => {
+      if (gen !== reachGen || serversLoadedEnvId !== envId) return;
+      const byName = new Map();
+      for (const row of (data && data.hosts) || []) {
+        if (row && row.hostname) byName.set(String(row.hostname), row);
+      }
+      cells().forEach((cell) => {
+        const os = cell.closest("tr") && cell.closest("tr").dataset.machineOs;
+        cell.innerHTML = reachCellHtml(byName.get(cell.dataset.srvReach), os || "");
+      });
+    })
+    .catch((e) => {
+      if (gen !== reachGen) return;
+      const note = e && e.message ? e.message : "Status unavailable";
+      cells().forEach((cell) => {
+        cell.innerHTML = `<span class="muted">${esc(note)}</span>`;
+      });
+    });
 }
 
 function hostOsLabel(server, bootByName, clusterIps, metalPath) {
@@ -1286,8 +1381,16 @@ export function syncOsView(os) {
       ? "No Ubuntu machines. Add a hostname and IP, or record one with Already have an OS."
       : "No Talos machines in this list. Add a hostname and IP.";
   }
-  const roles = document.getElementById("srv-roles");
-  if (roles && rows.length) roles.open = view === "ubuntu";
+  const other = view === "ubuntu" ? "talos" : "ubuntu";
+  const otherCount = document.querySelectorAll(`#srv-tbody tr[data-machine-os="${other}"]`).length;
+  const otherEl = document.getElementById("srv-os-other");
+  if (otherEl) {
+    const name = other === "ubuntu" ? "Ubuntu" : "Talos";
+    otherEl.hidden = otherCount === 0;
+    otherEl.textContent = otherCount === 1
+      ? `1 ${name} machine is on the ${name} tab.`
+      : `${otherCount} ${name} machines are on the ${name} tab.`;
+  }
   paintPathMismatch();
   if (typeof syncBecomeBar === "function") syncBecomeBar();
 }
@@ -1669,7 +1772,7 @@ export async function loadServersCard(envId) {
   if (!envId) {
     msg.textContent = "";
     renderBmcWall("", [], "Select an environment.");
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">Select an environment.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="muted">Select an environment.</td></tr>`;
     return;
   }
   msg.textContent = "Loading…";
@@ -1699,7 +1802,7 @@ export async function loadServersCard(envId) {
   } catch (e) {
     msg.textContent = "";
     renderBmcWall(envId, [], "BMC list unavailable");
-    tbody.innerHTML = `<tr><td colspan="8" class="muted">Unavailable</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="muted">Unavailable</td></tr>`;
     err.innerHTML = `<div class="error">${esc(e.message)}</div>`;
     return;
   }
@@ -1711,11 +1814,11 @@ export async function loadServersCard(envId) {
   const title = document.getElementById("srv-title");
   const kicker = document.getElementById("srv-kicker");
   const hint = document.getElementById("srv-hint");
-  if (title) title.textContent = ovhBound ? "OVH" : "Add a machine";
+  if (title) title.textContent = "Machines";
   if (kicker) {
     kicker.textContent = ovhBound
-      ? "Dedicated servers on the bound account."
-      : "Hostname and IP. Saving does not boot the machine.";
+      ? "Dedicated servers on the bound account. Add a machine does not boot them."
+      : "The list is these computers. Add a machine does not boot them.";
   }
   if (hint) {
     hint.textContent = ovhBound
@@ -1822,6 +1925,7 @@ export async function loadServersCard(envId) {
             <td><input type="checkbox" class="srv-pick" data-srv-pick="${i}" aria-label="Select ${esc(s.hostname || "host")}"></td>
             <td><strong>${esc(s.hostname || "?")}</strong>${sub}${ilo}</td>
             <td class="muted">${ipCell}</td>
+            <td data-srv-reach="${esc(s.hostname || "")}">${checkingHtml()}</td>
             <td class="muted">${esc(s.ssh_user || "—")}</td>
             <td><span class="pill ${sourceCls}">${esc(source)}</span></td>
             <td>${hostOsLabel(s, bootByName, clusterIps, metalPath)}</td>
@@ -1835,7 +1939,7 @@ export async function loadServersCard(envId) {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="8" class="muted">No servers in inventory yet.</td></tr>`;
+    : `<tr><td colspan="9" class="muted">No servers in inventory yet.</td></tr>`;
 
   tbody.querySelectorAll("input[data-os]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -1884,8 +1988,6 @@ export async function loadServersCard(envId) {
   });
 
   const addHostHtml = `
-    <div id="srv-add-host">
-      <div id="cluster-status-bar" style="margin:.3rem 0 .5rem"></div>
       <div class="sshkey-auth-section" style="margin-bottom:.4rem">
         <label style="font-size:.8rem;display:flex;align-items:center;gap:.4rem">
           <input type="radio" name="srv-auth-method" value="key" checked /> SSH Key (environment default)
@@ -1919,8 +2021,7 @@ export async function loadServersCard(envId) {
         <div id="srv-add-quick" style="margin-top:.5rem">
           <button class="btn-sm" id="srv-add-btn-quick" type="button" ${gate(canRun(), "operator")}>Add</button>
         </div>
-      </div>
-    </div>`;
+      </div>`;
   document.getElementById("srv-add-host").innerHTML = addHostHtml;
   // Render cluster status bar
   renderClusterStatus(clusterStatus);
@@ -2015,6 +2116,7 @@ export async function loadServersCard(envId) {
     ? `<p class="muted" style="margin:.3rem 0">Import dedicated servers from the bound OVH account, or add a machine by hostname and IP.</p>`
     : "";
   syncOsView(osView());
+  loadReach(envId);
 }
 
 async function saveInventoryRow(envId, server, rowIdx) {
@@ -2303,14 +2405,20 @@ export function destroyServersCard() {
   clearOvhPoll();
   adoptingOvh = false;
   talosFlowGen += 1;
+  reachGen += 1;
   clearTalosFlowTimer();
+  closeAddMachine();
+  if (addModalKeyHandler) {
+    document.removeEventListener("keydown", addModalKeyHandler);
+    addModalKeyHandler = null;
+  }
 }
 
 async function addHost(envId, addBtn = null) {
   const card = document.getElementById("srv-card");
   const authMethod = card?.querySelector('input[name="srv-auth-method"]:checked')?.value || "key";
-  const err = document.getElementById("srv-err");
-  err.innerHTML = "";
+  const err = document.getElementById("srv-add-err");
+  if (err) err.innerHTML = "";
   const hostname = (document.getElementById("srv-add-hostname") || {}).value || "";
   const ip = (document.getElementById("srv-add-ip") || {}).value || "";
   const sshUser = (document.getElementById("srv-add-ssh-user") || {}).value || "";
@@ -2325,7 +2433,7 @@ async function addHost(envId, addBtn = null) {
     roles = preset ? preset.roles : ["k8s_control_plane", "etcd", "control"];
   }
   if (!hostname.trim()) {
-    err.innerHTML = `<div class="error">Hostname is required. Make sure it's unique and valid.</div>`;
+    if (err) err.innerHTML = `<div class="error">Hostname is required. Make sure it's unique and valid.</div>`;
     return;
   }
   if (addBtn) { addBtn.disabled = true; addBtn.textContent = "Adding…"; }
@@ -2347,13 +2455,14 @@ async function addHost(envId, addBtn = null) {
     toast(`${hostname.trim()}: added to inventory`, "ok");
     const passField = document.getElementById("srv-add-ssh-pass");
     if (passField) passField.value = "";
+    closeAddMachine();
     await loadServersCard(envId);
   } catch (e) {
     let msg = e.message;
     if (e.status === 409) msg = `Hostname "${esc(hostname.trim())}" already exists. Choose a unique name.`;
     else if (e.isNetwork || e.isTimeout) msg = `Failed to add server. Check your connection and try again.`;
     else msg = `Failed to add server: ${msg}`;
-    err.innerHTML = `<div class="error">${esc(msg)}</div>`;
+    if (err) err.innerHTML = `<div class="error">${esc(msg)}</div>`;
     toast(`Failed to add server: ${e.message}`, "error");
     if (e.status === 403) toast("Insufficient role: operator required", "bad");
   } finally {

@@ -309,6 +309,20 @@ def list_servers(
     }
 
 
+@router.get("/servers/reach")
+def server_reach(
+    db: Session = Depends(get_db),
+    env: Environment = Depends(get_env_scoped("viewer")),
+) -> dict[str, Any]:
+    """Whether each saved address is up, reachable, and authenticated.
+
+    Read-only. It does not install, reboot, or change the inventory.
+    """
+    from app.services import host_reach
+
+    return host_reach.probe_environment(db, env)
+
+
 @router.post("/servers/assign", status_code=status.HTTP_201_CREATED)
 def assign_server(
     body: ServerAssign,

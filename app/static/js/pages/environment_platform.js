@@ -1,5 +1,5 @@
 // pages/environment_platform.js — Omni-class Talos cluster: overview, machines, inspector.
-import { api, downloadAuth, esc, toast } from "../api.js";
+import { api, downloadAuth, esc, loadingHtml, toast } from "../api.js";
 import { canRun, envName, gate, store } from "../store.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
 import { bindLiveLog, resetLiveLog } from "../logview.js";
@@ -573,7 +573,7 @@ export function platformCardHtml() {
     </div>
     <div id="pf-overview"></div>
     <div id="pf-filters"></div>
-    <div id="pf-body" class="muted">Select an environment.</div>
+    <div id="pf-body">${loadingHtml("Loading Talos…")}</div>
     <div id="pf-inspector"></div>
   </div>`;
 }
@@ -1081,7 +1081,11 @@ export async function loadPlatformCard(envId, { silent = false } = {}) {
     if (inspector) inspector.innerHTML = "";
     return;
   }
-  if (!silent && msg) msg.textContent = "Loading…";
+  if (!silent && msg) msg.textContent = "";
+  if (!silent && !cache) {
+    body.classList.remove("muted");
+    body.innerHTML = loadingHtml("Loading Talos…");
+  }
   if (inflight) {
     try {
       await inflight;

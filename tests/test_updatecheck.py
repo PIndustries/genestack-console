@@ -43,6 +43,42 @@ def test_source_checkout_does_not_apply():
     assert updatecheck.can_apply_here() is False
 
 
+def test_nuitka_compiled_module_is_installed(monkeypatch):
+    from app import paths
+
+    monkeypatch.delattr(paths.sys, "frozen", raising=False)
+    monkeypatch.setitem(paths.__dict__, "__compiled__", object())
+    assert paths.frozen() is True
+    assert updatecheck.can_apply_here() is True
+
+
+def test_restart_is_scheduled_outside_this_process(monkeypatch):
+    calls = []
+
+    def which(name):
+        if name in {"systemctl", "systemd-run"}:
+            return f"/usr/bin/{name}"
+        return None
+
+    def run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(updatecheck.shutil, "which", which)
+    monkeypatch.setattr(updatecheck.subprocess, "run", run)
+    monkeypatch.setattr(updatecheck.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(updatecheck.Path, "is_file", lambda _self: True)
+    restarted, message, ok = updatecheck._restart_services()
+    assert restarted is True
+    assert ok is True
+    assert message == "binary replaced; restarting"
+    assert calls
+    assert calls[0][0] == "/usr/bin/systemd-run"
+    assert "genestack-console.service" in calls[0]
+    assert "genestack-console-worker.service" in calls[0]
+    assert calls[0][0] != "/usr/bin/systemctl"
+
+
 def test_watch_loop_returns_when_stopped():
     import asyncio
 

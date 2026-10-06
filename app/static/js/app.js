@@ -1,5 +1,5 @@
 // app.js — portal shell: login, whoami, hash router, topbar.
-import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clearRefresh, esc, toast, fmtAge } from "./api.js";
+import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clearRefresh, esc, toast, fmtAge, setConsoleRestarting, isConsoleRestarting } from "./api.js";
 import { store, loadEnvs, applyEnvLifecycle, refreshEnvSelects } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
@@ -10,7 +10,7 @@ import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls33";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls35";
 import * as envWizard from "./pages/env_wizard.js?v=ls27";
 import * as admin from "./pages/admin.js";
 
@@ -176,6 +176,12 @@ async function refreshTopbar() {
     }
   } catch {
     if (seq !== topbarSeq) return;
+    if (isConsoleRestarting()) {
+      setPill($("health-pill"), "health: restarting", "warn");
+      const hl = $("user-health-line");
+      if (hl) hl.textContent = "Console is restarting";
+      return;
+    }
     setPill($("health-pill"), "health: unreachable", "bad");
     const hl = $("user-health-line");
     if (hl) hl.textContent = "Console unreachable";
@@ -196,14 +202,79 @@ async function checkUpdateBanner() {
         return;
       }
       if (!confirm("Install Console " + u.latest + " and restart this hub?")) return;
-      try {
-        const r = await api("/api/v1/update/apply", { method: "POST", body: "{}" });
-        toast(r.message || "Update applied");
-      } catch (err) {
-        toast(err.message || "Update failed");
-      }
+      await installConsoleUpdate(u.latest);
     };
   } catch { /* channel optional */ }
+}
+
+function replaceStarted(result) {
+  if (!result || typeof result !== "object") return false;
+  if (result.applied) return true;
+  return String(result.message || "").startsWith("binary replaced");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// The binary replace restarts this process. The socket drops for a few
+// seconds. That gap is the restart, not a failed replace.
+async function waitForConsole(previous) {
+  const deadline = Date.now() + 45000;
+  let sawGap = false;
+  while (Date.now() < deadline) {
+    await sleep(1000);
+    try {
+      const h = await api("/health", { timeout: 2500 });
+      const version = h && h.version ? String(h.version) : "";
+      if (!version) continue;
+      if (sawGap || (previous && version !== previous)) {
+        location.reload();
+        return "back";
+      }
+    } catch (err) {
+      if (err && (err.isNetwork || err.isTimeout || err.isRestarting)) sawGap = true;
+    }
+  }
+  return sawGap ? "down" : "same";
+}
+
+async function installConsoleUpdate(latest) {
+  let previous = bootedVersion;
+  try {
+    const h = await api("/health");
+    if (h && h.version) previous = String(h.version);
+  } catch {
+    /* the apply call still reports whether the file was replaced */
+  }
+  setConsoleRestarting(true);
+  toast("Installing " + (latest || "the update") + ". This console will restart.", "ok");
+  let result = null;
+  try {
+    result = await api("/api/v1/update/apply", { method: "POST", body: "{}", timeout: 180000 });
+  } catch (err) {
+    if (!(err && (err.isNetwork || err.isTimeout || err.isRestarting))) {
+      setConsoleRestarting(false);
+      toast(err && err.message ? err.message : "Update failed", "bad");
+      return;
+    }
+    result = { applied: true, message: "binary replaced; restarting" };
+  }
+  if (!replaceStarted(result)) {
+    setConsoleRestarting(false);
+    const message = (result && result.message) || "Already current";
+    toast(message, result && result.ok === false ? "bad" : "ok");
+    return;
+  }
+  toast("Restarting. This page will come back on the new build.", "ok");
+  const outcome = await waitForConsole(previous);
+  if (outcome === "back") return;
+  setConsoleRestarting(false);
+  if (outcome === "down") {
+    toast("The console did not come back yet. Refresh in a moment.", "bad");
+    return;
+  }
+  toast((result && result.message) || "The new build did not come up.", "bad");
 }
 
 // The page remembers the build it loaded. A newer process reloads the page

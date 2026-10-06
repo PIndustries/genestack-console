@@ -1,6 +1,6 @@
 // Overview as an xyflow-style canvas: HTML card nodes, bezier edges,
 // dotted grid, pan/zoom, controls, minimap. Not Cytoscape.
-import { api, esc, toast } from "../api.js";
+import { api, esc, loadingHtml, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { connect } from "../stream.js";
 import {
@@ -6337,20 +6337,22 @@ function renderCacheCard() {
     .join("")}</tbody></table>`;
 }
 
-function refreshRegistry(id) {
-  if (!id) return;
+function refreshRegistry(id, opts) {
+  if (!id) return Promise.resolve();
   const gen = ++registryGen;
-  api(`/api/v1/environments/${encodeURIComponent(id)}/registry`, { timeout: 12000 })
+  const cardOnly = !!(opts && opts.cardOnly);
+  return api(`/api/v1/environments/${encodeURIComponent(id)}/registry`, { timeout: 12000 })
     .then((regRes) => {
       if (gen !== registryGen || envId !== id || !regRes || typeof regRes !== "object") return;
       snap = Object.assign({}, snap || {}, { registry: regRes });
       if (!envName && regRes.environment_name) envName = regRes.environment_name;
-      renderAll();
+      if (cardOnly) renderCacheCard();
+      else renderAll();
     })
     .catch(() => {});
 }
 
-export function deployMapHtml() {
+export function imageCacheHtml() {
   return `
   <div class="card reg-cache" id="reg-cache-card">
     <div class="toolbar">
@@ -6358,14 +6360,25 @@ export function deployMapHtml() {
       <button type="button" class="btn-sm" id="reg-cache-warm" ${gate(canAdmin(), "admin")}>Cache images and charts</button>
     </div>
     <p class="muted">Registries, container images, and Helm charts on this console. Nodes pull from here.</p>
-    <p class="muted" id="reg-cache-meta">Loading the registries…</p>
+    <div class="muted" id="reg-cache-meta">${loadingHtml("Loading the registries…")}</div>
     <div id="reg-cache-regs"></div>
     <details id="reg-cache-charts">
       <summary>Helm charts</summary>
       <p class="muted">OCI charts sit in the registry cache. The others are Helm repos.</p>
       <div id="reg-cache-chart-list"></div>
     </details>
-  </div>
+  </div>`;
+}
+
+export function loadImageCache(id) {
+  const next = id || "";
+  if (!next) return Promise.resolve();
+  if (!envId) envId = next;
+  return refreshRegistry(next, { cardOnly: true });
+}
+
+export function deployMapHtml() {
+  return `
   <div id="dm-card" class="sf-shell">
     <div class="sf-chrome">
       <div class="sf-next-tools">
