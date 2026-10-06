@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.06.1
+
+Inventory is one list of hostname and IP.
+
+- Guided setup adds each machine by hostname and IP. A virtual machine and a physical server are the same row. On Machines, record Talos or Ubuntu, then Deploy.
+- A provider account or a network sighting stays under Import or discover and writes that same list.
+- A cluster that is already running is Settings, Access, Adopt Kubespray. Paste the kubeconfig. Dry run must be off or the file is not stored.
+- The summary opens Machines.
+
 ## 2026.10.05.6
 
 The console follows the latest build, and the page uses the whole window.
