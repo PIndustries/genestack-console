@@ -90,7 +90,27 @@ def test_methods_oidc_enabled_but_no_issuer_stays_off(client, monkeypatch):
 def test_methods_reflects_enabled_config(client, monkeypatch):
     _enable_oidc(monkeypatch, oidc_label="Corp SSO")
     body = client.get("/api/v1/auth/methods").json()
-    assert body == {"local": True, "oidc": True, "oidc_label": "Corp SSO"}
+    assert body == {
+        "local": True,
+        "oidc": True,
+        "oidc_label": "Corp SSO",
+        "portal_host": "",
+    }
+
+
+def test_methods_names_the_genestack_portal_host(client, monkeypatch):
+    """The portal button is decided in the browser. The API names the host."""
+    _enable_oidc(
+        monkeypatch,
+        oidc_issuer_url="https://my.genestack.dev",
+        oidc_redirect_url="https://my.genestack.dev/api/v1/auth/oidc/callback",
+        oidc_label="Genestack",
+    )
+    body = client.get("/api/v1/auth/methods").json()
+    assert body["local"] is True
+    assert body["oidc"] is True
+    assert body["oidc_label"] == "Genestack"
+    assert body["portal_host"] == "my.genestack.dev"
 
 
 # ---------------------------------------------------------------------------

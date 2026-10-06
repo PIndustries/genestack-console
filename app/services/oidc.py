@@ -104,6 +104,20 @@ def native_cookie_origin(settings: Settings) -> str | None:
     return issuer
 
 
+def portal_host(settings: Settings) -> str:
+    """Hostname of the Genestack portal, when this OIDC config is that door.
+
+    Empty for a site's own identity provider. The sign-in page shows the
+    portal button only when the browser is already on this host. A deploy
+    console keeps its local account. my.genestack.dev does not open a
+    session there.
+    """
+    origin = native_cookie_origin(settings)
+    if not origin:
+        return ""
+    return (urlsplit(origin).hostname or "").lower()
+
+
 def fetch_metadata(settings: Settings) -> dict[str, Any]:
     """OIDC discovery document for the configured issuer (cached per issuer)."""
     issuer = settings.oidc_issuer_url.rstrip("/")

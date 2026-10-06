@@ -263,6 +263,9 @@ def auth_methods() -> dict:
         "local": True,
         "oidc": enabled,
         "oidc_label": settings.oidc_label if enabled else "SSO",
+        # Set only when the issuer is the Genestack portal. The page shows
+        # that button on the portal host and leaves it off a deploy console.
+        "portal_host": oidc.portal_host(settings) if enabled else "",
     }
 
 

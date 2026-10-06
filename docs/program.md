@@ -86,7 +86,7 @@ Three roles, and one emergency key.
 
 An API key in `config.yaml` is a platform admin. It is the login you use when the user accounts cannot be used. It is not a tenant role. The server refuses to bind a non-loopback address while the secret key and the API keys are still the built-in examples.
 
-A company login is optional. It is off until `oidc.enabled` is set. The account page at `https://my.genestack.dev` is a separate program. People on the deploy host can sign in with a local user and never open it.
+A company login is optional. It is off until `oidc.enabled` is set. The account page at `https://my.genestack.dev` is a separate program. Sign in with Genestack is that page. A deploy host does not show it. People there sign in with a local account. my.genestack.dev does not open a session on that host. A site that points `oidc.issuer_url` at its own provider still shows that provider on the deploy host.
 
 ## What the collector and the alerts do
 

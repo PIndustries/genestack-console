@@ -143,6 +143,7 @@ The web UI reads this endpoint at boot and shows/hides the SSO button accordingl
 - The console owns the environment. Portal-provisioned users have no local password unless an admin sets one.
 
 ### Direct console sign-in
+- The sign-in page on a deploy host does not offer my.genestack.dev. That button is shown when the browser is on the portal host named by `portal_host`. A local account signs in on the deploy host.
 - The Console owns the user database and password hashes (bcrypt).
 - Static API keys in `config.yaml` grant platform-admin privileges; rotate them and keep the file mode `0600`.
 - When enabling your own OIDC, users provisioned via SSO have no password hash and cannot use local login until an admin sets one.

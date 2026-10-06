@@ -829,6 +829,16 @@ function consumeOidcToken() {
   history.replaceState(null, "", location.pathname + location.search + "#/fleet");
 }
 
+// The portal button is for my.genestack.dev. A deploy console signs in with
+// its local account. A site's own identity provider has no portal_host, so
+// that button still shows there.
+function portalButtonHere(methods) {
+  if (!methods || !methods.oidc) return false;
+  const portalHost = String(methods.portal_host || "").toLowerCase();
+  if (!portalHost) return true;
+  return location.hostname.toLowerCase() === portalHost;
+}
+
 // Ask the server which login methods are on and reveal the SSO button when the
 // oidc: config section enables it. Unauthenticated endpoint; failures just mean
 // local-only login.
@@ -837,7 +847,7 @@ async function loadAuthMethods() {
     const res = await fetch("/api/v1/auth/methods");
     if (!res.ok) return;
     const methods = await res.json();
-    if (methods.oidc) {
+    if (portalButtonHere(methods)) {
       $("btn-login-sso").textContent = `Sign in with ${methods.oidc_label || "SSO"}`;
       show($("login-sso"), true);
     }
