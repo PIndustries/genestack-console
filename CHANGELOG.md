@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.06.2
+
+Live logs follow the newest line.
+
+- Job, deploy, pod, node, and serial logs open on the newest line and stay there while output arrives. Scrolling up holds the view. Latest jumps back.
+- The scrollbar on those boxes stays visible.
+
 ## 2026.10.06.1
 
 Inventory is one list of hostname and IP.
