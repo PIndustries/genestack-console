@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.06.3
+
+The remote console shows the machine, and Machines lists the computers first.
+
+- The iLO console picture connects. The socket script parses, and the KVM stays on this console.
+- Machines shows the list first. Talos and Ubuntu filter it. Add a machine is a dialog. Each row shows up, running, connect, and authenticated. A Talos machine with no SSH stays marked Talos.
+- A tab shows a spinner until its first load finishes.
+- Image cache is its own tab. Overview stays the install map. Maintenance on the map still caches images and charts.
+- An update replaces the binary and restarts after the request returns. The open page waits and reloads. A published binary installs the next release on its own.
+
 ## 2026.10.06.2
 
 Live logs follow the newest line.
