@@ -4,6 +4,7 @@
 import { api, esc, fmtTime, statusPill, dryRunPill, toast } from "../api.js";
 import { store, loadEnvs, envName, envOptionsHtml, canRun, canAdmin, gate } from "../store.js";
 import { connect } from "../stream.js";
+import { bindLiveLog, resetLiveLog } from "../logview.js";
 
 export const title = "Jobs";
 
@@ -41,6 +42,7 @@ let pollTimer = null;
 let selectedId = null;
 let streamHandle = null;
 let sseLive = false;
+let showSeq = 0;
 
 // Transport hint derived from the job log. The backend records no structured
 // transport field, so v1 reads the markers the executor already writes:
@@ -132,6 +134,10 @@ export async function render(root, { param }) {
 function onJobEvent(payload) {
   if (!payload || payload.id == null) return;
   const id = String(payload.id);
+  if (payload.type === "job_log") {
+    if (selectedId === id) showJob(id, { silent: true });
+    return;
+  }
   const row = document.querySelector(`#jobs-tbody tr[data-job="${CSS.escape(id)}"]`);
   if (!row) {
     // Not in the current list (filters) — refresh once to pick it up.
@@ -204,6 +210,8 @@ async function loadJobs() {
 }
 
 async function showJob(id, { silent = false } = {}) {
+  const seq = ++showSeq;
+  if (!silent) resetLiveLog("job-log");
   selectedId = id;
   history.replaceState(null, "", "#/activity?tab=jobs&job=" + encodeURIComponent(id));
   document.querySelectorAll("#jobs-tbody tr[data-job]").forEach((tr) =>
@@ -216,9 +224,11 @@ async function showJob(id, { silent = false } = {}) {
   try {
     job = await api(`/api/v1/jobs/${encodeURIComponent(id)}`);
   } catch (e) {
+    if (seq !== showSeq) return;
     body.innerHTML = `<div class="error">${esc(e.message)}</div>`;
     return;
   }
+  if (seq !== showSeq || !body.isConnected) return;
 
   body.innerHTML = `
     <div class="detail-grid">
@@ -241,8 +251,13 @@ async function showJob(id, { silent = false } = {}) {
     </div>
     <h2>Params</h2>
     <pre>${esc(JSON.stringify(job.params || {}, null, 2))}</pre>
-    <h2 style="margin-top:1rem">Log</h2>
-    <pre class="log-tall">${esc(job.log_text || "(no log)")}</pre>`;
+    <div class="log-head">
+      <h2>Log</h2>
+      <button class="secondary btn-sm" id="btn-log-latest" type="button">Latest</button>
+    </div>
+    <pre class="log-tall" id="job-log">${esc(job.log_text || "(no log)")}</pre>`;
+  if (!silent) resetLiveLog("job-log");
+  bindLiveLog(document.getElementById("job-log"), document.getElementById("btn-log-latest"));
 
   document.getElementById("btn-job-retry").addEventListener("click", () => retryJob(job));
   const resumeBtn = document.getElementById("btn-job-resume");

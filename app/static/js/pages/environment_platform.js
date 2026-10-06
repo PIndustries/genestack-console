@@ -2,6 +2,7 @@
 import { api, downloadAuth, esc, toast } from "../api.js";
 import { canRun, envName, gate, store } from "../store.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
+import { bindLiveLog, resetLiveLog } from "../logview.js";
 
 const REFRESH_MS = 20000;
 
@@ -417,6 +418,7 @@ function inspLogs() {
   return `<div class="om-insp-toolbar">
       <label>Service <select id="pf-log-svc">${opts}</select></label>
       <button type="button" class="secondary btn-sm" data-talos-logs-load data-name="${esc(selected)}">Load</button>
+      <button type="button" class="secondary btn-sm" id="pf-log-latest">Latest</button>
     </div>
     <pre class="lc-logs-pre om-logs" id="pf-dmesg">${esc(text)}</pre>`;
 }
@@ -657,6 +659,7 @@ function render() {
   const err = cache.error ? `<div class="hint muted">${esc(cache.error)}</div>` : "";
   body.innerHTML = rowsHtml(nodes) + err;
   if (inspector) inspector.innerHTML = inspectorHtml(nodes);
+  bindLiveLog(document.getElementById("pf-dmesg"), document.getElementById("pf-log-latest"));
 }
 
 async function copyText(text) {
@@ -713,6 +716,7 @@ function nodePath(envId, name, suffix) {
 }
 
 async function loadLogsForService(envId, name, service) {
+  if (name !== logsFor) resetLiveLog("pf-dmesg");
   logService = service || logService || "kubelet";
   logsFor = name;
   logsText = `Loading ${logService}…`;

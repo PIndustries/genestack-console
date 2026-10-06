@@ -9,6 +9,7 @@ import { api, downloadAuth, esc, fmtAge, toast } from "../api.js";
 import { canRun, gate } from "../store.js";
 import { connect } from "../stream.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
+import { bindLiveLog, resetLiveLog, stickLiveLog } from "../logview.js";
 
 const PROBLEM_POD_LIMIT = 15;
 const WARN_MSG_LIMIT = 96;
@@ -1723,6 +1724,7 @@ export function clusterCardHtml() {
         <h3 class="lc-title" style="margin:0">Pod logs</h3>
         <span id="kc-logs-meta" class="muted"></span>
         <label class="muted"><input type="checkbox" id="kc-logs-previous"> previous</label>
+        <button class="secondary btn-sm" type="button" id="kc-logs-latest">Latest</button>
         <button class="secondary btn-sm" type="button" id="kc-logs-refresh">Reload</button>
         <button class="secondary btn-sm" type="button" id="kc-logs-close">Close</button>
       </div>
@@ -1781,6 +1783,10 @@ export function wireClusterCard(getEnvId, opts = {}) {
     card.addEventListener("click", onClusterClick);
     card.addEventListener("input", onClusterInput);
   }
+  bindLiveLog(
+    document.getElementById("kc-logs-body"),
+    document.getElementById("kc-logs-latest")
+  );
   const logsClose = document.getElementById("kc-logs-close");
   if (logsClose && !logsClose.dataset.wired) {
     logsClose.dataset.wired = "1";
@@ -1827,6 +1833,7 @@ function hidePodLogs() {
 }
 
 async function openPodLogs(ns, pod) {
+  resetLiveLog("kc-logs-body");
   logsTarget = { ns: ns || "default", pod: pod || "" };
   const panel = document.getElementById("kc-logs");
   if (panel) panel.hidden = false;
@@ -1913,6 +1920,7 @@ async function loadPodLogs(ns, pod) {
     const data = d && typeof d === "object" ? d : {};
     if (body) {
       body.textContent = data.error ? data.error : data.text || "(empty)";
+      stickLiveLog(body);
     }
   } catch (e) {
     if (body) body.textContent = e && e.message ? e.message : "unavailable";

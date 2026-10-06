@@ -9,6 +9,7 @@
 import { api, esc, toast } from "../api.js";
 import { canRun, gate } from "../store.js";
 import { connect } from "../stream.js";
+import { bindLiveLog, resetLiveLog, stickLiveLog } from "../logview.js";
 
 export const title = "Hosts";
 
@@ -322,6 +323,7 @@ function openSerial(vmId) {
   const card = document.getElementById("hv-serial-card");
   if (!card) return;
   const vm = lastVms.find((v) => String(v.id || "") === vmId);
+  resetLiveLog("hv-serial-pre");
   card.classList.remove("hidden");
   const titleEl = document.getElementById("hv-serial-title");
   if (titleEl) titleEl.textContent = `Serial console — ${(vm && vm.name) || vmId}`;
@@ -354,7 +356,7 @@ async function loadSerial() {
   if (serialVmId !== vmId) return; // panel switched/closed mid-flight
   const lines = Array.isArray(data && data.lines) ? data.lines : [];
   pre.textContent = lines.length ? lines.join("\n") : "(serial log is empty)";
-  pre.scrollTop = pre.scrollHeight; // tail: show the newest lines
+  stickLiveLog(pre);
 }
 
 // ---------- public API ----------
@@ -404,6 +406,7 @@ export async function render(root) {
           <option value="500">500</option>
         </select>
       </label>
+      <button class="secondary btn-sm" id="btn-hv-serial-latest" type="button">Latest</button>
       <button class="secondary btn-sm" id="btn-hv-serial-refresh" type="button">Refresh</button>
       <button class="secondary btn-sm" id="btn-hv-serial-close" type="button">Close</button>
     </div>
@@ -411,6 +414,10 @@ export async function render(root) {
     <pre class="hv-serial" id="hv-serial-pre"></pre>
   </div>`;
 
+  bindLiveLog(
+    document.getElementById("hv-serial-pre"),
+    document.getElementById("btn-hv-serial-latest")
+  );
   document.getElementById("btn-hv-refresh").addEventListener("click", () => loadVms());
   document.getElementById("btn-hv-serial-refresh").addEventListener("click", () => loadSerial());
   document.getElementById("btn-hv-serial-close").addEventListener("click", () => closeSerial());

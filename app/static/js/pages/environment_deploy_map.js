@@ -5578,6 +5578,7 @@ async function openPodLogs(ns, pod) {
     `<div class="dm-log-toolbar">
       <label class="muted"><input type="checkbox" id="dm-log-follow" checked> Follow</label>
       <span id="dm-log-status" class="muted">following</span>
+      <button type="button" class="secondary btn-sm" id="dm-log-latest">Latest</button>
     </div>
     <pre class="dm-log dm-tool-pre" id="dm-log-pre">Loading…</pre>`
   );
@@ -5607,6 +5608,19 @@ async function openPodLogs(ns, pod) {
         const st = document.getElementById("dm-log-status");
         if (st) st.textContent = "paused";
       }
+    });
+  }
+  const latest = document.getElementById("dm-log-latest");
+  if (latest) {
+    latest.addEventListener("click", () => {
+      if (logFollow !== sess) return;
+      sess.follow = true;
+      sess.jumpOnce = true;
+      if (box) box.checked = true;
+      const st = document.getElementById("dm-log-status");
+      if (st) st.textContent = "following";
+      scrollLogToEnd(pre);
+      startLogFollowTimer(sess);
     });
   }
   if (pre) {

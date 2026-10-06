@@ -300,6 +300,45 @@ pre, .log {
   margin: 0;
 }
 pre.log-tall { max-height: 480px; }
+.log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.log-head h2 { margin: 0; }
+.log-head-end { justify-content: flex-end; margin-top: 0.6rem; }
+.dp-log-wrap,
+.lc-logs-pre,
+.om-logs,
+.hv-serial,
+pre.log-tall,
+pre.log-inline,
+.dm-tool-pre {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+.dp-log-wrap::-webkit-scrollbar,
+.lc-logs-pre::-webkit-scrollbar,
+.om-logs::-webkit-scrollbar,
+.hv-serial::-webkit-scrollbar,
+pre.log-tall::-webkit-scrollbar,
+pre.log-inline::-webkit-scrollbar,
+.dm-tool-pre::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.dp-log-wrap::-webkit-scrollbar-thumb,
+.lc-logs-pre::-webkit-scrollbar-thumb,
+.om-logs::-webkit-scrollbar-thumb,
+.hv-serial::-webkit-scrollbar-thumb,
+pre.log-tall::-webkit-scrollbar-thumb,
+pre.log-inline::-webkit-scrollbar-thumb,
+.dm-tool-pre::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 999px;
+}
 .log-inline { max-height: 200px; margin-top: 0.4rem; }
 
 .error {

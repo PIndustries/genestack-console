@@ -8,6 +8,7 @@
 // Inert when the workflow's deploy step has no active job.
 import { api, esc, statusPill } from "../api.js";
 import { connect } from "../stream.js";
+import { bindLiveLog, resetLiveLog } from "../logview.js";
 
 const POLL_MS = 3000;
 const IDLE_RECHECK_MS = 15000; // picks up a deploy started from the Config card
@@ -16,6 +17,7 @@ const RECENT_DONE_MS = 60000; // show the final strip for jobs that just finishe
 const ACTIVE = new Set(["queued", "running"]);
 
 let timer = null;
+let shownJobId = "";
 let stages = null; // cached /genestack/pipeline catalog
 let activeEnvId = ""; // guards against stale DOM after navigation/env switch
 let jobsStreamHandle = null;
@@ -320,13 +322,20 @@ function showCard(job, parsed, { final = false } = {}) {
       : `Deploy in progress — job <a href="#/activity?tab=jobs&job=${esc(String(job.id || ""))}">${esc(String(job.id || "").slice(0, 8))}…</a> ${statusPill(job.status)}${dryRun}`;
   }
   card.classList.remove("hidden");
+  const jobId = String(job.id || "");
+  if (jobId !== shownJobId) {
+    shownJobId = jobId;
+    resetLiveLog("dp-log");
+  }
   const strip = stripHtml(parsed, job);
   const logHtml = renderStructuredLog(job.log_text, job);
   const finalSection = final ? finalHtml(job, parsed) : "";
-  body.innerHTML = strip + `<div class="dp-log-wrap" id="dp-log">${logHtml}</div>` + finalSection;
-  // Auto-scroll log to bottom
-  const logEl = document.getElementById("dp-log");
-  if (logEl) logEl.scrollTop = logEl.scrollHeight;
+  body.innerHTML =
+    strip +
+    `<div class="log-head log-head-end"><button class="secondary btn-sm" id="dp-log-latest" type="button">Latest</button></div>` +
+    `<div class="dp-log-wrap" id="dp-log">${logHtml}</div>` +
+    finalSection;
+  bindLiveLog(document.getElementById("dp-log"), document.getElementById("dp-log-latest"));
   return true;
 }
 
