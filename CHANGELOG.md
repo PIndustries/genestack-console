@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.06.4
+
+The deploy host signs in with a local account.
+
+- Sign in with Genestack stays on my.genestack.dev. A deploy console does not show that button. my.genestack.dev does not open a session on that host.
+- A site that points the console at its own identity provider still shows that provider.
+
 ## 2026.10.06.3
 
 The remote console shows the machine, and Machines lists the computers first.
