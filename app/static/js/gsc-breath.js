@@ -61,6 +61,10 @@
     const job = meadow(page, { cols: 18, rows: 10, sp: 1.05, amp: 1.7, lift: 2.8, dot: 2, alpha: 0.14, full: true });
     if (job) jobs.push(job);
   }
+  document.querySelectorAll(".login-meadow").forEach(function (canvas) {
+    const job = meadow(canvas, { cols: 42, rows: 26, sp: 1.02, amp: 2.6, lift: 7, dot: 2.4, alpha: 0.62, full: true });
+    if (job) jobs.push(job);
+  });
   document.querySelectorAll(".brand-breath canvas").forEach(function (canvas) {
     const job = meadow(canvas, { cols: 10, rows: 4, sp: 1.15, amp: 1.6, lift: 2.2, dot: 2, alpha: 0.45, full: false });
     if (job) jobs.push(job);

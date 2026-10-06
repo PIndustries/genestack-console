@@ -129,6 +129,64 @@ button.danger { background: #da3633; color: #fff; }
 .login-card .gsc-mark { width: 4.15rem; height: 4.15rem; }
 .login-card .brand-title { font-size: 1.35rem; text-align: center; }
 .login-card .brand-breath { width: 10rem; height: 4.6rem; left: 50%; top: -0.2rem; transform: translateX(-50%); }
+.login-card { position: relative; z-index: 1; }
+.login-field {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.login-meadow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.login-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(46px);
+  opacity: 0.7;
+  will-change: transform;
+  animation: login-drift 22s ease-in-out infinite;
+}
+.login-glow-a {
+  width: 46vw;
+  height: 46vw;
+  min-width: 18rem;
+  min-height: 18rem;
+  left: -12vw;
+  top: -18vh;
+  background: radial-gradient(circle, rgba(52, 199, 89, 0.42), transparent 68%);
+}
+.login-glow-b {
+  width: 40vw;
+  height: 40vw;
+  min-width: 16rem;
+  min-height: 16rem;
+  right: -14vw;
+  bottom: -16vh;
+  background: radial-gradient(circle, rgba(16, 92, 48, 0.72), transparent 70%);
+  animation-duration: 28s;
+  animation-delay: -9s;
+}
+.login-glow-c {
+  width: 28vw;
+  height: 28vw;
+  min-width: 12rem;
+  min-height: 12rem;
+  left: 38%;
+  top: 58%;
+  background: radial-gradient(circle, rgba(141, 240, 106, 0.28), transparent 70%);
+  animation-duration: 18s;
+  animation-delay: -14s;
+}
+@keyframes login-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(6vw, -4vh, 0) scale(1.12); }
+}
 .sidebar .brand-lockup {
   flex-direction: column;
   align-items: center;
@@ -183,7 +241,8 @@ button.danger { background: #da3633; color: #fff; }
     border-color: var(--border);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   }
-  #gsc-breath, .brand-breath { display: none; }
+  #gsc-breath, .brand-breath, .login-meadow { display: none; }
+  .login-glow { animation: none; opacity: 0.28; }
 }
 
 /* Alerts entry points read as alert-red, never brand-red. */

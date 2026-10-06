@@ -6,7 +6,7 @@
   <title>Genestack Console</title>
   <link rel="icon" href="/static/brand/genestack-console.svg" />
   <link rel="stylesheet" href="/static/css/portal.css?v=ls35" />
-  <link rel="stylesheet" href="/static/css/theme.css" />
+  <link rel="stylesheet" href="/static/css/theme.css?v=ls36" />
   <style>
     .tab-panel { display: none; padding: .75rem 0; }
     .tab-panel.active { display: block; }
@@ -135,6 +135,12 @@
   <canvas id="gsc-breath" aria-hidden="true"></canvas>
   <!-- Login screen (shown when no session token / API key in localStorage) -->
   <div id="login-view" class="login-wrap hidden">
+    <div class="login-field" aria-hidden="true">
+      <canvas class="login-meadow"></canvas>
+      <span class="login-glow login-glow-a"></span>
+      <span class="login-glow login-glow-b"></span>
+      <span class="login-glow login-glow-c"></span>
+    </div>
     <div class="card login-card">
       <div class="brand brand-lockup" style="margin-bottom:1rem">
         <span class="brand-breath" aria-hidden="true"><canvas></canvas></span>
@@ -265,7 +271,7 @@
     var _s=document.querySelector('script[src*="app.js"]');
     if(_s){var _h=_s.getAttribute('src');if(_h.indexOf('?')===-1)_s.setAttribute('src',_h+'?v='+_v)}
   </script>
-  <script src="/static/js/gsc-breath.js"></script>
+  <script src="/static/js/gsc-breath.js?v=ls36"></script>
   <script type="module" src="/static/js/app.js?v=ls36"></script>
 </body>
 </html>
