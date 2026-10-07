@@ -40,6 +40,16 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "enabled = true" in container
     assert "ostree-boot" in container
     assert "podman" in container
+    assert "v0.3.2" in container
+    assert "make install-all" in container
+    assert "grub-efi-amd64-bin" in container
+    assert "grub-efi-amd64-signed" in container
+    assert "shim-signed" in container
+    assert "blsuki" in container
+    assert "shimx64.efi" in container
+    assert "bootupctl backend generate-update-metadata" in container
+    assert "test ! -e /usr/sbin/grub2-install" in container
+    assert "rm -f /usr/sbin/grub2-install" in container
     assert 'add_dracutmodules+=" ostree bootc "' in container
     assert "btrfs-progs" not in container
     assert "xfsprogs" not in container
@@ -95,6 +105,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "ubuntu26.04" in docs
     assert "genestack-console-appliance-<version>-amd64.iso" in docs
     assert "not as small as Talos" in docs
+    assert "bootupd" in docs
     assert "centos" not in docs.lower()
 
 
