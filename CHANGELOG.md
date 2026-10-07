@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.8
+
+The appliance image enables the Ubuntu 26.04 resolver and cloud-init units.
+
+- systemd-resolved is installed. cloud-init uses cloud-init-main and cloud-init-network.
+- The kernel dependency is satisfied by linux-firmware-minimal, so the full firmware set stays off the disk and the ISO.
+
 ## 2026.10.07.7
 
 The release includes an installer ISO, and the appliance build can finish.
