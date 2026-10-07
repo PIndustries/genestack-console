@@ -6,7 +6,8 @@
 #
 # The operating system is Ubuntu 26.04 LTS. That release has the ostree
 # bootc 1.16.14 links against. This file installs the kernel, OpenSSH,
-# cloud-init, and bootc. It is a boot appliance, not a server image.
+# cloud-init, bootc, and podman. bootc install and upgrade open the
+# container store by running podman. It is a boot appliance, not a server image.
 ARG BASE=docker.io/library/ubuntu:26.04
 ARG BOOTC_VERSION=v1.16.14
 FROM ${BASE} AS builder
@@ -57,6 +58,7 @@ RUN printf '%s\n' \
         ostree-boot \
         zstd \
         skopeo \
+        podman \
         systemd \
         systemd-resolved \
         policycoreutils \

@@ -39,6 +39,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "[composefs]" in container
     assert "enabled = true" in container
     assert "ostree-boot" in container
+    assert "podman" in container
     assert 'add_dracutmodules+=" ostree bootc "' in container
     assert "btrfs-progs" not in container
     assert "xfsprogs" not in container
