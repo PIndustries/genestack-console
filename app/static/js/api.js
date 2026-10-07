@@ -258,6 +258,11 @@ export function loadingHtml(label = "Loading…") {
   return `<div class="gsc-loading" role="status"><span class="gsc-spin" aria-hidden="true"></span><span>${esc(label)}</span></div>`;
 }
 
+export function skeletonHtml(rows = 4) {
+  const bars = Array.from({ length: Math.max(1, rows) }, () => `<div class="gsc-sk"></div>`).join("");
+  return `<div class="gsc-skeleton" role="status" aria-label="Loading">${bars}</div>`;
+}
+
 export function fmtTime(v) {
   if (!v) return "";
   try {

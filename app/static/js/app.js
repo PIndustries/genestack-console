@@ -3,14 +3,15 @@ import { api, setUnauthorizedHandler, getKey, setKey, clearKey, setRefresh, clea
 import { store, loadEnvs, applyEnvLifecycle, refreshEnvSelects } from "./store.js";
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
-import * as fleet from "./pages/fleet.js?v=ls30";
+import * as fleet from "./pages/fleet.js?v=ls39";
 import * as hosts from "./pages/hosts.js";
 import * as environments from "./pages/environments.js?v=ls30";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls35";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls43";
+import { mountQuake, destroyAllSessions } from "./pages/environment_terminal.js?v=ls40";
 import * as envWizard from "./pages/env_wizard.js?v=ls27";
 import * as admin from "./pages/admin.js";
 
@@ -161,17 +162,17 @@ async function refreshTopbar() {
       }
     }
     if (seq !== topbarSeq) return;
-    setPill($("dryrun-pill"), logging ? "dry-run ON" : "dry-run OFF", logging ? "warn" : "ok");
+    setPill($("dryrun-pill"), logging ? "Look around" : "Apply", logging ? "warn" : "ok");
     const dl = $("user-dryrun-line");
     if (dl) {
       if (envScoped) {
         dl.textContent = logging
-          ? "This environment only logs. Jobs do not change the machines."
-          : "This environment applies. Jobs from here change the machines.";
+          ? "Look around. Jobs from here only write a log."
+          : "Apply. Jobs from here change the machines.";
       } else {
         dl.textContent = h.dry_run
-          ? "Console default is a dry run. Each environment applies from its own switch."
-          : "Console default applies. An environment can still look around only.";
+          ? "Console default is Look around. Each environment can Apply from its own switch."
+          : "Console default is Apply. An environment can still Look around.";
       }
     }
   } catch {
@@ -668,6 +669,7 @@ function logout(msg) {
     try { current.destroy(); } catch { /* ignore */ }
     current = null;
   }
+  destroyAllSessions();
   stopAlertsBadge();
   stopEnvLifecycle();
   stopVersionWatch();
@@ -1032,6 +1034,7 @@ window.addEventListener("gsc-envs", (ev) => {
 });
 
 (async function boot() {
+  mountQuake();
   consumeOidcToken(); // SSO handoff must run before the getKey() check below
   loadAuthMethods();
   loadVersionLines(); // /health is unauthenticated — fills the login card too

@@ -476,6 +476,8 @@ def get_jobs(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     ns = _check_namespace(namespace, allow_empty=True)
+    if is_demo_env(env):
+        return {"ok": True, "namespace": ns, "jobs": [], "error": None, "demo": True}
     return k8s_ops.list_jobs(env, settings, namespace=ns)
 
 

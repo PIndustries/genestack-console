@@ -1,5 +1,5 @@
 // pages/environment_platform.js — Omni-class Talos cluster: overview, machines, inspector.
-import { api, downloadAuth, esc, loadingHtml, toast } from "../api.js";
+import { api, downloadAuth, esc, skeletonHtml, toast } from "../api.js";
 import { canRun, envName, gate, store } from "../store.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
 import { bindLiveLog, resetLiveLog } from "../logview.js";
@@ -183,33 +183,13 @@ function filteredNodes(nodes) {
   });
 }
 
-function overviewHtml(data) {
+function statsHtml(data) {
   const c = clusterFrom(data);
   const nodes = data.nodes || [];
   const talos = (c.talos_versions || []).join(" · ") || "—";
   const k8s = (c.kubernetes_versions || []).join(" · ") || "—";
   const readyOk = c.machines > 0 && c.ready === c.machines && c.talos_reachable === c.machines;
-  const env = (store.envs || []).find((e) => e.id === activeEnvId) || {};
-  const title = c.name || env.name || envName(activeEnvId);
-  const run = canRun();
   return `
-  <div class="om-overview">
-    <div class="om-overview-head">
-      <div>
-        <div class="om-kicker">Talos</div>
-        <h2 class="om-title">${esc(title)}</h2>
-        <div class="muted om-sub">Versions, Ready, logs, and upgrades for these machines.</div>
-      </div>
-      <div class="om-overview-actions">
-        <button type="button" class="secondary btn-sm" data-pf-dl="kubeconfig">Kubeconfig</button>
-        <button type="button" class="secondary btn-sm" data-pf-dl="talosconfig">Talosconfig</button>
-        ${
-          run
-            ? `<button type="button" class="secondary btn-sm" data-pf-upgrade-all ${gate(canRun(), "operator")}>Upgrade Talos</button>`
-            : ""
-        }
-      </div>
-    </div>
     <div class="om-stats">
       <div class="om-stat">
         <div class="om-stat-k">Ready</div>
@@ -234,6 +214,31 @@ function overviewHtml(data) {
       <div class="om-stat">
         <div class="om-stat-k">Reachable</div>
         <div class="om-stat-v">${esc(String(c.talos_reachable || 0))}/${esc(String(nodes.length))}</div>
+      </div>
+    </div>`;
+}
+
+function overviewHtml(data) {
+  const c = clusterFrom(data);
+  const env = (store.envs || []).find((e) => e.id === activeEnvId) || {};
+  const title = c.name || env.name || envName(activeEnvId);
+  const run = canRun();
+  return `
+  <div class="om-overview">
+    <div class="om-overview-head">
+      <div>
+        <div class="om-kicker">Talos</div>
+        <h2 class="om-title">${esc(title)}</h2>
+        <div class="muted om-sub">Versions, Ready, logs, and upgrades for these machines.</div>
+      </div>
+      <div class="om-overview-actions">
+        <button type="button" class="secondary btn-sm" data-pf-dl="kubeconfig">Kubeconfig</button>
+        <button type="button" class="secondary btn-sm" data-pf-dl="talosconfig">Talosconfig</button>
+        ${
+          run
+            ? `<button type="button" class="secondary btn-sm" data-pf-upgrade-all ${gate(canRun(), "operator")}>Upgrade Talos</button>`
+            : ""
+        }
       </div>
     </div>
   </div>`;
@@ -573,8 +578,16 @@ export function platformCardHtml() {
     </div>
     <div id="pf-overview"></div>
     <div id="pf-filters"></div>
-    <div id="pf-body">${loadingHtml("Loading Talos…")}</div>
-    <div id="pf-inspector"></div>
+    <div id="pf-body">${skeletonHtml(5)}</div>
+    <div id="pf-host-modal" class="gsc-modal" hidden>
+      <div class="gsc-modal-card gsc-modal-wide" role="dialog" aria-modal="true" aria-labelledby="pf-host-title">
+        <div class="toolbar">
+          <h2 id="pf-host-title">Machine</h2>
+          <button type="button" class="secondary btn-sm" data-pf-close>Close</button>
+        </div>
+        <div id="pf-inspector"></div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -592,6 +605,16 @@ export function wirePlatformCard(getEnvId) {
   if (card && !card.dataset.wired) {
     card.dataset.wired = "1";
     card.addEventListener("click", onClick);
+  }
+  if (!document.body.dataset.pfEscWired) {
+    document.body.dataset.pfEscWired = "1";
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const modal = document.getElementById("pf-host-modal");
+      if (!modal || modal.hidden || !selected) return;
+      selected = "";
+      render();
+    });
   }
   if (!document.body.dataset.pfMenuWired) {
     document.body.dataset.pfMenuWired = "1";
@@ -655,10 +678,16 @@ function render() {
   const view = Object.assign({}, cache, { nodes, cluster: null });
   body.classList.remove("muted");
   if (overview) overview.innerHTML = overviewHtml(view);
+  const fleet = document.getElementById("fleet-stats");
+  if (fleet) fleet.innerHTML = statsHtml(view);
   if (filters) filters.innerHTML = filterHtml(nodes);
   const err = cache.error ? `<div class="hint muted">${esc(cache.error)}</div>` : "";
   body.innerHTML = rowsHtml(nodes) + err;
-  if (inspector) inspector.innerHTML = inspectorHtml(nodes);
+  const modal = document.getElementById("pf-host-modal");
+  if (inspector) inspector.innerHTML = selected ? inspectorHtml(nodes) : "";
+  if (modal) modal.hidden = !selected;
+  const title = document.getElementById("pf-host-title");
+  if (title && selected) title.textContent = selected;
   bindLiveLog(document.getElementById("pf-dmesg"), document.getElementById("pf-log-latest"));
 }
 
@@ -861,6 +890,11 @@ async function onClick(e) {
     const name = menuBtn.dataset.pfMenu || "";
     menuOpen = menuOpen === name ? "" : name;
     e.stopPropagation();
+    render();
+    return;
+  }
+  if (e.target.closest("[data-pf-close]") || e.target.id === "pf-host-modal") {
+    selected = "";
     render();
     return;
   }
@@ -1079,12 +1113,14 @@ export async function loadPlatformCard(envId, { silent = false } = {}) {
     if (overview) overview.innerHTML = "";
     if (filters) filters.innerHTML = "";
     if (inspector) inspector.innerHTML = "";
+    const fleet = document.getElementById("fleet-stats");
+    if (fleet) fleet.innerHTML = "";
     return;
   }
   if (!silent && msg) msg.textContent = "";
   if (!silent && !cache) {
     body.classList.remove("muted");
-    body.innerHTML = loadingHtml("Loading Talos…");
+    body.innerHTML = skeletonHtml(5);
   }
   if (inflight) {
     try {
@@ -1123,9 +1159,6 @@ export async function loadPlatformCard(envId, { silent = false } = {}) {
   if (nextN || !prevN) cache = next;
   bindLiveEnv(activeEnvId);
   applyLive({ platform: cache });
-  if (!selected && Array.isArray(cache.nodes) && cache.nodes[0] && cache.nodes[0].name) {
-    selected = cache.nodes[0].name;
-  }
   render();
 }
 

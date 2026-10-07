@@ -467,6 +467,7 @@ def set_next_boot(
         seeded = _ensure_ubuntu_seed(env, node, settings, log)
         if not seeded.get("ok"):
             return seeded
+        _remember_ubuntu_login(db, env, node.name, log)
     if choice == "commission":
         return begin_commission(
             db, env, node, log=log, settings=settings, boot_now=boot_now
@@ -514,6 +515,18 @@ def set_next_boot(
         "next_boot": choice,
         "message": f"{node.name} next boot is {choice}",
     }
+
+
+def _remember_ubuntu_login(db: Session, env: Environment, hostname: str, log: LogFn) -> None:
+    """The Ubuntu seed logs in as ubuntu with this environment's key."""
+    try:
+        from app.services import envconfig as envconfig_service
+
+        envconfig_service.ensure_server_ssh_user(
+            db, env, None, hostname=hostname, ssh_user="ubuntu"
+        )
+    except Exception:
+        log(f"[baremetal] {hostname} Ubuntu login stayed unset")
 
 
 def _ensure_ubuntu_seed(

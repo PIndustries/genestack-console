@@ -50,7 +50,7 @@ A route that names an environment checks your membership in that environment's t
 | `app/routers/auth.py` | Login, refresh, logout, whoami, and the optional company login. |
 | `app/routers/oauth.py` | OAuth 2 authorize, token, revoke, introspect, and the discovery document. |
 | `app/routers/tenants.py` | Tenants and memberships. |
-| `app/routers/environments.py` | Create and list environments. An environment is one cloud. `GET /api/v1/environments/{id}/registry` lists the pull-through caches and Helm charts. A viewer can read it. It does not start a job. |
+| `app/routers/environments.py` | Create and list environments. An environment is one cloud. `GET /api/v1/environments/{id}/registry` lists the pull-through caches and Helm charts. A viewer can read it. `PUT` on that path saves the pull address and the registry list. An operator can save it. Saving does not start a job. |
 | `app/routers/envconfig.py` | The settings document for one environment, and its older versions. Saving does not edit `/etc/genestack` by itself. A job copies the document onto the deploy host. |
 | `app/routers/overlays.py` | Network overlays saved on the environment. |
 | `app/routers/operations.py` | `GET /api/v1/operations`, the catalog. |
@@ -106,7 +106,7 @@ The boot order, and why the console is the DHCP server, is on the [install chapt
 | `app/routers/apps.py` | Applications the console can deploy onto the cloud. |
 | `app/routers/app_hooks.py` | Hooks those applications call back. |
 | `app/routers/hostvms.py` | Virtual machines on the console host. Not OpenStack instances. |
-| `app/routers/terminal.py` | A shell on the deploy host, or on a host the environment can SSH to. |
+| `app/routers/terminal.py` | A shell on the deploy host, or on a host the environment can SSH to. Ubuntu installed from here uses the `ubuntu` login and this environment's key. |
 | `app/routers/native.py` | The API the Apple apps use, once the account page has opened this console. |
 | `app/routers/native_kubernetes.py` | The Kubernetes calls in that same shape. |
 | `app/routers/native_consoles.py` | The console sessions in that same shape. |

@@ -499,26 +499,34 @@ the env spine; "Discovery" tab on the Hardware page).
 ## Deploy-host terminal
 
 `WS /api/v1/terminal` (`app/routers/terminal.py`) gives operators an
-interactive ssh shell on the env's deploy host without leaving the console UI.
-The server spawns a pty running `ssh -o BatchMode=yes -o ConnectTimeout=10
-<deployer_ssh_user=root>@<deployer_ssh_host>` and bridges frames:
+interactive ssh shell on the env's deploy host, or on an inventory machine,
+without leaving the console UI. The server spawns a pty running
+`ssh -o BatchMode=yes -o ConnectTimeout=10` to that host and bridges frames:
 `input`/`resize` client → server (pty stdin / TIOCSWINSZ), `output`/`exit`
 server → client.
 
-Guardrails: **operator role minimum** (auth via `?token=` or standard
+Guardrails: **admin role** for a shell (auth via a single-use ticket or standard
 headers — browsers can't set WebSocket headers; tenant-checked); **one
-session per (user, environment)** — a second connect replaces the first
-(close code 4000); **15-minute idle timeout**; the pty is killed when the
-socket closes; **no free-form command** — the v1 target is always the env's
-deploy host (no deployer configured → close 4400). Opens and closes are
-audited on their own DB session (the WS outlives any request session).
-`terminal.command_override` in config.yaml replaces the ssh argv wholesale —
-a test hook (CI points it at `/bin/cat`), not a feature.
+session per (user, environment) for the deploy host** — a second connect
+replaces that one (close code 4000). An optional `?machine=` opens a separate
+session for one inventory hostname. The address is that row's recorded
+private IP or IP. The login is the row's `ssh_user`. A machine this console
+installed as Ubuntu, with no login recorded yet, uses `ubuntu` and the
+environment key. A name that is not in inventory closes 4404. There is no
+arbitrary host and no local shell. **15-minute idle timeout**; the pty is
+killed when the socket closes; **no free-form command**. No deploy host
+closes 4400. Opens and closes are audited on their own DB session (the WS
+outlives any request session). `terminal.command_override` in config.yaml
+replaces the ssh argv wholesale — a test hook (CI points it at `/bin/cat`),
+not a feature.
 
-The frontend (`pages/environment_terminal.js`, mounted in the workflow's
-connect step) lazy-loads the **vendored** xterm.js assets from
-`app/static/vendor/xterm/` (no CDN) with the fit addon, clipboard shortcuts,
-fullscreen, and complete key handling; role-gated to operator+.
+The frontend (`pages/environment_terminal.js`) is a drawer on the shell.
+Backtick or tilde opens it and lists the machines. Shell starts the xterm
+ssh. Console opens that machine's management port in the same drawer. Esc
+hides it. It lazy-loads the **vendored** xterm.js assets from
+`app/static/vendor/xterm/` (no CDN) with the fit addon and clipboard
+shortcuts. A shell is admin only. A management-port console is operator or
+admin. Sessions stay up across environment pages.
 
 ## Guided workflow and fleet board
 
@@ -713,7 +721,7 @@ of plain ES modules under `app/static/js/` (no build step).
 | `pages/hosts.js` | `#/hosts` (under More): QEMU host VMs with operator-gated power actions |
 | `pages/environment_detail.js` | Environment page: the workflow spine **is** the page — one step expanded at a time, cards rendered once into the hidden `#wf-mod-park` and moved into the expanded step's mount slot. At the bottom, ONE "Expert" `<details>` block: raw descriptor, `environment_components.js`, helm/kustomize/gateway file views |
 | `pages/environment_workflow.js` | Workflow spine from `GET …/workflow` — six steps with what/why explainers and per-step how-tos; Prepare host, agent status pill + create-token modal (connect); verify buttons + result pill, day-2 buttons (operate) |
-| `pages/environment_terminal.js` | Deploy-host terminal card (connect step): lazy-loads vendored xterm.js from `/static/vendor/xterm/`, bridges `WS /api/v1/terminal` frames; clipboard/fullscreen/key handling; operator-gated |
+| `pages/environment_terminal.js` | Shell drawer: backtick opens it, tabs are the deploy host and inventory machines with an address, admin-gated `WS /api/v1/terminal` |
 | `pages/environment_discovery.js` | Hardware discovery card (inventory step): PXE/DHCP sightings with per-row Claim…, BMC finds with per-row Credentials…; reads `GET …/discovery` |
 | `pages/environment_config.js` | Config editor (config step): versioned YAML doc, history, render preview, push + Deploy buttons; secret values stay masked |
 | `pages/environment_servers.js`, `environment_baremetal.js` | Inventory-step cards: servers saved by address, with role assignment; console-managed bare-metal registry (register, power, boot, provision) |
@@ -805,7 +813,7 @@ Service enablement is **allow-listed** (e.g. `placement` ok; `rm` rejected).
 | Redfish BMC access | per-node creds | Basic auth, `verify=False` (self-signed BMC certs), 10 s timeouts; creds stored encrypted, never returned by the API |
 | PXE/DHCP | in-process | Console-owned DHCP and boot HTTP on the provisioning L2; files under `data_dir/pxe/`; a remote site uses the dial-out agent |
 | Agent channel | hash-only tokens | Raw `gsca_` token shown once, sha256 stored; HMAC-SHA256 challenge/proof (raw token on the wire once — use `wss://`); one credential per env, replace-on-create; commands fixed-allowlist only; file_write confined agent-side to `GSC_ALLOWED_ROOT` |
-| Deploy-host terminal | operator+ | One session per (user, env), 15-min idle timeout, pty killed on close, no free-form command (always the env's deploy host), open/close audited |
+| Deploy-host terminal | admin for a shell, operator+ for a management-port console | One deploy-host session per (user, env), separate sessions for inventory machines, 15-min idle timeout, pty killed on close, no free-form command, open/close audited |
 | SSE stream | capped | `?token=` auth (session token or API key), env topics gated by tenant membership at connect, `stream.max_subscribers` (default 100) caps concurrent subscribers |
 | Audit log | on | Who ran what, when, against which env |
 

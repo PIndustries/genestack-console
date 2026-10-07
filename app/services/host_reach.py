@@ -15,9 +15,12 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from app.models import Environment
+from sqlalchemy import select
+
+from app.models import BaremetalNode, Environment
 from app.services.crypto import decrypt_secret
 from app.services.env_field_guards import refuse_dangerous_ssh_host, refuse_dangerous_ssh_user
+from app.services.ssh_access import login_for_server
 from app.services.ssh_keys import get_decrypted_private_key
 
 _MAX_HOSTS = 40
@@ -247,13 +250,20 @@ def probe_environment(db: Any, env: Environment) -> dict[str, Any]:
         key_text = get_decrypted_private_key(env)
     except Exception:
         key_text = None
-    default_user = str(getattr(env, "deployer_ssh_user", None) or "root")
+    stages: dict[str, str] = {}
+    try:
+        for node in db.scalars(
+            select(BaremetalNode).where(BaremetalNode.environment_id == env.id)
+        ).all():
+            stages[str(node.name)] = str(node.boot_stage or "")
+    except Exception:
+        stages = {}
     work: list[tuple[str, str, str, str | None]] = []
     for hostname, entry in servers.items():
         if not isinstance(entry, dict):
             continue
         ip = str(entry.get("private_ip") or entry.get("ip") or "").strip()
-        user = str(entry.get("ssh_user") or default_user or "root").strip() or "root"
+        user = login_for_server(entry, env, stages.get(str(hostname), ""))
         work.append((str(hostname), ip, user, _saved_password(entry)))
         if len(work) >= _MAX_HOSTS:
             break

@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -288,6 +290,9 @@ def get_environment_registry(
     try:
         return image_registry.for_environment(db, env, get_settings())
     except Exception as exc:  # noqa: BLE001
+        from app.services.image_registry import default_upstream_rows
+
+        defaults = default_upstream_rows()
         return {
             "environment_id": env.id,
             "environment_name": env.name,
@@ -300,8 +305,64 @@ def get_environment_registry(
             "image_count": 0,
             "last_mirror": None,
             "charts": [],
+            "host_source": "",
+            "configured_host": "",
+            "upstreams": defaults,
+            "defaults": defaults,
             "error": str(exc)[:240],
         }
+
+
+class RegistryUpstreamIn(BaseModel):
+    name: str
+    remote: str
+    port: int
+    enabled: bool = True
+
+
+class RegistryConfigIn(BaseModel):
+    host: str = ""
+    upstreams: list[RegistryUpstreamIn] = Field(default_factory=list)
+
+
+@router.put("/{environment_id}/registry")
+def put_environment_registry(
+    body: RegistryConfigIn,
+    db: Session = Depends(get_db),
+    principal: Principal = Depends(require_operator),
+    env: Environment = Depends(get_env_scoped("operator")),
+) -> dict[str, Any]:
+    """Save the image-cache address and which registries are mirrored.
+
+    An operator can save it. Saving does not start a container or pull an
+    image. Starting the caches is the registry.mirror job.
+    """
+    from app.services import image_registry
+
+    host = body.host or ""
+    upstreams = [row.model_dump() for row in body.upstreams]
+    try:
+        image_registry.save_registry_config(
+            db, env, principal.username, host, upstreams
+        )
+    except envconfig_service.ConfigValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (envconfig_service.ConfigConflictError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Configuration changed; reload before saving"
+        ) from exc
+    names = [row["name"] for row in upstreams]
+    JobRunner(db).write_audit(
+        actor=principal.username,
+        action="env.registry.configure",
+        resource_type="environment",
+        resource_id=env.id,
+        environment_id=env.id,
+        details={"host": host.strip(), "registries": names},
+    )
+    db.commit()
+    return image_registry.for_environment(db, env, get_settings())
 
 
 def _key_fingerprint(public_key: str) -> Optional[str]:

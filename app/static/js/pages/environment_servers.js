@@ -1,14 +1,15 @@
 // pages/environment_servers.js — add a machine and edit its address and roles.
-// The Machines page has Talos and Ubuntu tabs. This card is that list.
+// The Machines page lists every computer. All is the default. Talos and Ubuntu filter that list.
 // Talos is already installed applies a config to every saved address and does
 // not power the machines. After that job succeeds, Deploy from infrastructure
 // starts OpenStack and does not run Talos bootstrap again.
 // Already have an OS only records Ubuntu that is already there.
-import { api, esc, loadingHtml, toast } from "../api.js";
+import { api, esc, skeletonHtml, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
+import { openShell } from "./environment_terminal.js?v=ls40";
 import { ROLES, ROLE_LABELS } from "../roles.js";
 import { clearOvhPoll } from "../ovh.js";
-import { clusterOsHtml, fetchMetalPath, osNameHtml } from "../metal_path.js";
+import { fetchMetalPath, osNameHtml } from "../metal_path.js";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
@@ -123,7 +124,7 @@ export function serversCardHtml() {
   padding: .2rem .35rem;
 }
 </style>
-<div class="card span-12" id="srv-card" data-os-view="talos">
+<div class="card span-12" id="srv-card" data-os-view="all">
   <div class="toolbar">
     <h2 id="srv-title">Machines</h2>
     <span class="muted" id="srv-kicker">The list is these computers. Add a machine does not boot them.</span>
@@ -131,13 +132,14 @@ export function serversCardHtml() {
     <button class="secondary btn-sm" id="srv-refresh" type="button">Refresh</button>
     <span id="srv-msg" class="muted"></span>
   </div>
+  <div id="cluster-status-bar"></div>
   <p class="hint-row" id="srv-os-empty" hidden></p>
   <table>
     <thead><tr>
       <th style="width:2rem"><input type="checkbox" id="srv-select-all" class="srv-pick" aria-label="Select all hosts"></th>
-      <th>Hostname</th><th>IP</th><th>Status</th><th>SSH user</th><th>Source</th><th>OS</th><th>Roles</th><th></th>
+      <th>Host</th><th>Address</th><th>OS</th><th>Cluster</th><th>Reach</th><th>Roles</th><th></th>
     </tr></thead>
-    <tbody id="srv-tbody"><tr><td colspan="9">${loadingHtml("Loading machines…")}</td></tr></tbody>
+    <tbody id="srv-tbody"><tr><td colspan="8">${skeletonHtml(6)}</td></tr></tbody>
   </table>
   <p class="hint-row" id="srv-os-other" hidden></p>
   <div id="srv-become" class="srv-become hidden">
@@ -150,7 +152,6 @@ export function serversCardHtml() {
     <span id="srv-become-msg" class="muted"></span>
     <p class="srv-become-note">Installs the selected rows. Already have an OS only records them.</p>
   </div>
-  <div id="cluster-status-bar"></div>
   <div data-os-show="talos" id="srv-talos-actions">
     <p class="hint-row" id="srv-hint">Talos is already installed applies the config to every saved address. It does not power the machines.</p>
     <div class="srv-flow-actions">
@@ -187,6 +188,15 @@ export function serversCardHtml() {
       <div class="add-host-section" id="srv-add-host"></div>
     </div>
   </div>
+  <div id="srv-machine-modal" class="gsc-modal" hidden>
+    <div class="gsc-modal-card gsc-modal-wide" role="dialog" aria-modal="true" aria-labelledby="srv-machine-title">
+      <div class="toolbar">
+        <h2 id="srv-machine-title">Machine</h2>
+        <button type="button" class="secondary btn-sm" data-machine-close>Close</button>
+      </div>
+      <div id="srv-machine-body"></div>
+    </div>
+  </div>
 </div>`;
 }
 
@@ -205,6 +215,58 @@ function closeAddMachine() {
   if (modal) modal.hidden = true;
 }
 
+function closeMachineDetail() {
+  const modal = document.getElementById("srv-machine-modal");
+  if (modal) modal.hidden = true;
+}
+
+function openMachineConsole(row) {
+  if (!row || !row.bmcHost) return;
+  openBmcWall(row.envId, lastBmNodes);
+  const idx = bmcWallNodes.findIndex(
+    (n) => n && (String(n.name || "") === row.hostname || String(n.bmc_host || "") === row.bmcHost)
+  );
+  if (idx >= 0 && !bmcWallOn.has(bmcNodeKey(bmcWallNodes[idx], idx))) toggleBmc(idx);
+}
+
+function openMachineDetail(index) {
+  const row = lastMachineRows[index];
+  const modal = document.getElementById("srv-machine-modal");
+  const body = document.getElementById("srv-machine-body");
+  const title = document.getElementById("srv-machine-title");
+  if (!row || !modal || !body) return;
+  if (title) title.textContent = row.hostname || "Machine";
+  const reachCell = document.querySelector(`[data-srv-reach="${CSS.escape(row.hostname || "")}"]`);
+  const reach = reachCell ? reachCell.textContent.trim() : "";
+  const roles = (row.roles || []).map((r) => ROLE_LABELS[r] || r);
+  const address = row.private_ip || row.ip || "—";
+  const facts = [
+    ["Address", address],
+    ["OS", row.os === "ubuntu" ? "Ubuntu" : "Talos"],
+    ["Cluster", row.cluster || "—"],
+    ["Reach", reach || "—"],
+    ["Roles", roles.length ? roles.join(", ") : "No role"],
+    ["SSH user", row.ssh_user || "—"],
+    ["Source", row.source || "—"],
+    ["Management port", row.bmcHost || "—"],
+  ];
+  const shell = !row.address
+    ? `<button type="button" class="secondary btn-sm" disabled>No address for a shell</button>`
+    : !canAdmin()
+      ? `<button type="button" class="secondary btn-sm" disabled title="Requires admin role">Open shell</button>`
+      : `<button type="button" class="btn-sm" data-machine-shell="${index}">Open shell</button>`;
+  const consoleBtn = row.bmcHost
+    ? `<button type="button" class="secondary btn-sm" data-machine-console="${index}">Open console</button>`
+    : `<button type="button" class="secondary btn-sm" disabled>No management port</button>`;
+  body.innerHTML = `
+    <dl class="gsc-facts">${facts
+      .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`)
+      .join("")}</dl>
+    <div class="row" style="gap:.5rem">${shell}${consoleBtn}</div>
+    <p class="muted">Install, Save, and Remove stay on the row.</p>`;
+  modal.hidden = false;
+}
+
 export function wireServersCard(getEnvId) {
   const card = document.getElementById("srv-card");
 
@@ -213,6 +275,11 @@ export function wireServersCard(getEnvId) {
   if (!addModalKeyHandler) {
     addModalKeyHandler = (e) => {
       if (e.key !== "Escape") return;
+      const machine = document.getElementById("srv-machine-modal");
+      if (machine && !machine.hidden) {
+        closeMachineDetail();
+        return;
+      }
       const modal = document.getElementById("srv-add-modal");
       if (modal && !modal.hidden) closeAddMachine();
     };
@@ -223,6 +290,31 @@ export function wireServersCard(getEnvId) {
   // loadServersCard render, so direct listeners (wired once at page mount)
   // would never land on them.
   card?.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-machine-close]") || e.target.id === "srv-machine-modal") {
+      closeMachineDetail();
+      return;
+    }
+    const consoleBtn = e.target.closest("[data-machine-console]");
+    if (consoleBtn) {
+      openMachineConsole(lastMachineRows[Number(consoleBtn.dataset.machineConsole)]);
+      return;
+    }
+    const shellBtn = e.target.closest("[data-machine-shell]");
+    if (shellBtn) {
+      const row = lastMachineRows[Number(shellBtn.dataset.machineShell)];
+      if (row) openShell({ envId: row.envId, machine: row.hostname, label: `${row.hostname}` });
+      return;
+    }
+    const named = e.target.closest("[data-machine-open]");
+    if (named) {
+      openMachineDetail(Number(named.dataset.machineOpen));
+      return;
+    }
+    const rowEl = e.target.closest("#srv-tbody tr[data-row]");
+    if (rowEl && !e.target.closest("button, input, a, select, label, .om-menu")) {
+      openMachineDetail(Number(rowEl.dataset.row));
+      return;
+    }
     if (e.target.closest("#srv-add-open")) {
       openAddMachine();
       return;
@@ -266,7 +358,7 @@ export function wireServersCard(getEnvId) {
     const t = e.target;
     if (!(t instanceof HTMLInputElement)) return;
     if (t.id === "srv-select-all") {
-      card.querySelectorAll("input[data-srv-pick]").forEach((cb) => {
+      card.querySelectorAll("#srv-tbody tr:not([hidden]) input[data-srv-pick]").forEach((cb) => {
         cb.checked = t.checked;
       });
       syncBecomeBar();
@@ -303,17 +395,25 @@ export function wireServersCard(getEnvId) {
 
 function assignedRoleChips(roles) {
   const on = ROLES.filter((r) => roles.includes(r));
-  if (!on.length) return `<span class="muted">no cluster role</span>`;
+  if (!on.length) return `<span class="muted">No role</span>`;
   return on.map((r) => `<span class="pill ok">${esc(ROLE_LABELS[r] || r)}</span>`).join(" ");
 }
 
-function roleEditor(scope, rowIdx, roles) {
+function roleEditor(scope, rowIdx, roles, sshUser) {
+  const ssh = sshUser == null
+    ? ""
+    : `<label class="muted" style="display:block;margin-top:.4rem;font-size:.75rem">SSH user
+        <input type="text" data-ssh-user="${rowIdx}" value="${esc(sshUser || "")}" style="margin-left:.35rem" ${gate(canRun(), "operator")} />
+      </label>`;
   return `<div class="srv-roles">${assignedRoleChips(roles)}
     <details class="srv-role-edit"><summary>Edit</summary>
       <div class="row" style="gap:0;margin-top:.3rem">${roleBoxes(scope, rowIdx, roles)}</div>
+      ${ssh}
     </details></div>`;
 }
 
+let lastMachineRows = [];
+let lastBmNodes = [];
 let bmcWallNodes = [];
 let bmcWallEnv = "";
 let bmcWallOn = new Set();
@@ -619,27 +719,19 @@ function loadReach(envId) {
     });
 }
 
-function hostOsLabel(server, bootByName, clusterIps, metalPath) {
-  const name = String((server && server.hostname) || "");
+function hostClusterText(server, clusterIps) {
   const ip = String((server && (server.private_ip || server.ip)) || "");
-  const boot = bootByName.get(name) || {};
-  const next = String(boot.next_boot || "");
-  const stage = String(boot.boot_stage || "");
-  const inCluster = !!(ip && clusterIps.has(ip));
-  if (String((server && server.adopt) || "") === "kubespray" && !inCluster) {
-    const ubuntuBoot = next === "ubuntu" || stage === "ubuntu";
-    return `<span class="pill ok">${osNameHtml("ubuntu")}</span> <span class="muted">recorded${ubuntuBoot ? ", next boot" : ""}</span>`;
-  }
-  if (next === "ubuntu" || stage === "ubuntu") {
-    return inCluster
-      ? `<span class="pill warn">${osNameHtml("ubuntu")}</span> <span class="muted">also in the cluster</span>`
-      : `<span class="pill ok">${osNameHtml("ubuntu")}</span> <span class="muted">not in the cluster</span>`;
-  }
-  if (inCluster) return clusterOsHtml(metalPath);
-  if ((Array.isArray(server && server.roles) ? server.roles : []).length) {
-    return `<span class="muted">recorded, not in the cluster</span>`;
-  }
-  return `<span class="muted">not in the cluster</span>`;
+  if (ip && clusterIps.has(ip)) return "In cluster";
+  const roles = Array.isArray(server && server.roles) ? server.roles : [];
+  if (!roles.length) return "No role";
+  return "Not joined";
+}
+
+function hostClusterCell(server, clusterIps) {
+  const text = hostClusterText(server, clusterIps);
+  if (text === "In cluster") return `<span class="pill ok">In cluster</span>`;
+  if (text === "No role") return `<span class="muted">No role</span>`;
+  return `<span class="pill bad">Not joined</span>`;
 }
 
 function roleBoxes(scope, rowIdx, roles) {
@@ -1325,7 +1417,9 @@ function gateInstalled() {
 
 function osView() {
   const card = document.getElementById("srv-card");
-  return card && card.dataset.osView === "ubuntu" ? "ubuntu" : "talos";
+  const view = card && card.dataset.osView;
+  if (view === "ubuntu" || view === "talos") return view;
+  return "all";
 }
 
 function paintPathMismatch() {
@@ -1333,6 +1427,11 @@ function paintPathMismatch() {
   const btn = document.getElementById("srv-path-use");
   if (!line || !btn) return;
   const view = osView();
+  if (view === "all") {
+    line.hidden = true;
+    btn.hidden = true;
+    return;
+  }
   const want = view === "ubuntu" ? "kubespray" : "talos";
   const mismatch = !!savedMetalPath && savedMetalPath !== want;
   line.hidden = !mismatch;
@@ -1355,7 +1454,7 @@ function rememberMetalPath(provider) {
 }
 
 export function syncOsView(os) {
-  const view = os === "ubuntu" ? "ubuntu" : "talos";
+  const view = os === "ubuntu" ? "ubuntu" : os === "talos" ? "talos" : "all";
   const card = document.getElementById("srv-card");
   if (card) card.dataset.osView = view;
   document.querySelectorAll("#panel-platform [data-os-show]").forEach((el) => {
@@ -1365,7 +1464,7 @@ export function syncOsView(os) {
     el.hidden = el.dataset.osPanel !== view;
   });
   document.querySelectorAll("#srv-tbody tr[data-machine-os]").forEach((tr) => {
-    const show = tr.dataset.machineOs === view;
+    const show = view === "all" || tr.dataset.machineOs === view;
     tr.hidden = !show;
     if (!show) {
       const cb = tr.querySelector("input[data-srv-pick]");
@@ -1373,16 +1472,20 @@ export function syncOsView(os) {
     }
   });
   const rows = document.querySelectorAll("#srv-tbody tr[data-machine-os]");
-  const shown = document.querySelectorAll(`#srv-tbody tr[data-machine-os="${view}"]:not([hidden])`).length;
+  const shown = view === "all"
+    ? rows.length
+    : document.querySelectorAll(`#srv-tbody tr[data-machine-os="${view}"]:not([hidden])`).length;
   const empty = document.getElementById("srv-os-empty");
   if (empty) {
     empty.hidden = !rows.length || shown > 0;
     empty.textContent = view === "ubuntu"
       ? "No Ubuntu machines. Add a hostname and IP, or record one with Already have an OS."
-      : "No Talos machines in this list. Add a hostname and IP.";
+      : view === "talos"
+        ? "No Talos machines in this list. Add a hostname and IP."
+        : "No machines yet. Add a hostname and IP.";
   }
   const other = view === "ubuntu" ? "talos" : "ubuntu";
-  const otherCount = document.querySelectorAll(`#srv-tbody tr[data-machine-os="${other}"]`).length;
+  const otherCount = view === "all" ? 0 : document.querySelectorAll(`#srv-tbody tr[data-machine-os="${other}"]`).length;
   const otherEl = document.getElementById("srv-os-other");
   if (otherEl) {
     const name = other === "ubuntu" ? "Ubuntu" : "Talos";
@@ -1772,7 +1875,7 @@ export async function loadServersCard(envId) {
   if (!envId) {
     msg.textContent = "";
     renderBmcWall("", [], "Select an environment.");
-    tbody.innerHTML = `<tr><td colspan="9" class="muted">Select an environment.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">Select an environment.</td></tr>`;
     return;
   }
   msg.textContent = "Loading…";
@@ -1802,11 +1905,12 @@ export async function loadServersCard(envId) {
   } catch (e) {
     msg.textContent = "";
     renderBmcWall(envId, [], "BMC list unavailable");
-    tbody.innerHTML = `<tr><td colspan="9" class="muted">Unavailable</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">Unavailable</td></tr>`;
     err.innerHTML = `<div class="error">${esc(e.message)}</div>`;
     return;
   }
   renderBmcWall(envId, bmNodes);
+  lastBmNodes = bmNodes;
 
   // Contract is an object envelope ({servers, ovh_bound, ...}); tolerate a bare array.
   const servers = Array.isArray(data) ? data : data && Array.isArray(data.servers) ? data.servers : [];
@@ -1899,6 +2003,23 @@ export async function loadServersCard(envId) {
     }
     loadVrackPanel(envId, { seed: fabric });
   }
+  lastMachineRows = invRows.map((s) => {
+    const boot = bootByName.get(String(s.hostname || "")) || {};
+    const machineOs = hostMachineOs(s, boot, metalPath);
+    return {
+      hostname: String(s.hostname || ""),
+      ip: s.ip || "",
+      private_ip: s.private_ip || "",
+      address: s.private_ip || s.ip || "",
+      ssh_user: s.ssh_user || "",
+      source: s.source || "static",
+      roles: Array.isArray(s.roles) ? s.roles : [],
+      os: machineOs,
+      cluster: hostClusterText(s, clusterIps),
+      bmcHost: boot.bmc_host || "",
+      envId,
+    };
+  });
   tbody.innerHTML = invRows.length
     ? invRows
         .map((s, i) => {
@@ -1910,7 +2031,9 @@ export async function loadServersCard(envId) {
               ? `<div class="muted" style="font-size:.75rem">${esc(s.service_name)}</div>`
               : "";
           const removeBtn = `<button class="secondary btn-sm" type="button" data-remove="${i}" ${gate(canRun(), "operator")}>Remove</button>`;
-          const sourceCls = source === "ovh" || source === "static" || source === "terraform" ? "ok" : "";
+          const sourceNote = source === "ovh" || source === "terraform"
+            ? `<div class="muted" style="font-size:.75rem">${esc(source)}</div>`
+            : "";
           const ipCell = s.private_ip
             ? `${esc(s.private_ip)} <span style="font-size:.7rem">priv</span>` +
               (s.public_ip ? `<div style="font-size:.7rem">${esc(s.public_ip)} pub</div>` : "") +
@@ -1923,13 +2046,12 @@ export async function loadServersCard(envId) {
             : "";
           return `<tr data-row="${i}" data-machine-os="${machineOs}">
             <td><input type="checkbox" class="srv-pick" data-srv-pick="${i}" aria-label="Select ${esc(s.hostname || "host")}"></td>
-            <td><strong>${esc(s.hostname || "?")}</strong>${sub}${ilo}</td>
+            <td><button type="button" class="linkish" data-machine-open="${i}"><strong>${esc(s.hostname || "?")}</strong></button>${sub}${ilo}${sourceNote}</td>
             <td class="muted">${ipCell}</td>
+            <td>${osNameHtml(machineOs)}</td>
+            <td>${hostClusterCell(s, clusterIps)}</td>
             <td data-srv-reach="${esc(s.hostname || "")}">${checkingHtml()}</td>
-            <td class="muted">${esc(s.ssh_user || "—")}</td>
-            <td><span class="pill ${sourceCls}">${esc(source)}</span></td>
-            <td>${hostOsLabel(s, bootByName, clusterIps, metalPath)}</td>
-            <td>${roleEditor("inv", i, roles)}</td>
+            <td>${roleEditor("inv", i, roles, s.ssh_user || "")}</td>
             <td class="srv-os-cell">
               ${osControlHtml(i, s, bootByName, becomeTargets[i], metalPath)}
               <button class="secondary btn-sm" type="button" data-save="${i}" ${gate(canRun(), "operator")}>Save</button>
@@ -1939,7 +2061,7 @@ export async function loadServersCard(envId) {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="9" class="muted">No servers in inventory yet.</td></tr>`;
+    : `<tr><td colspan="8" class="muted">No servers in inventory yet.</td></tr>`;
 
   tbody.querySelectorAll("input[data-os]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -2125,12 +2247,14 @@ async function saveInventoryRow(envId, server, rowIdx) {
   const msgSpan = document.querySelector(`[data-save-msg="${rowIdx}"]`);
   err.innerHTML = "";
   const roles = checkedRoles("inv", rowIdx);
+  const sshInput = document.querySelector(`#srv-card input[data-ssh-user="${rowIdx}"]`);
+  const sshUser = sshInput ? String(sshInput.value || "").trim() : info.ssh_user || "";
   if (msgSpan) msgSpan.textContent = "saving…";
   const url = `/api/v1/environments/${encodeURIComponent(envId)}/servers/static`;
   const body = {
     hostname: info.hostname || "",
     ip: info.ip || null,
-    ssh_user: info.ssh_user || null,
+    ssh_user: sshUser || null,
     roles,
     source: info.source || "static",
     service_name: info.service_name || null,
@@ -2192,12 +2316,19 @@ async function removeRow(envId, server) {
 function renderClusterStatus(statuses) {
   const bar = document.getElementById("cluster-status-bar");
   if (!bar) return;
+  const short = {
+    "K8s control plane": "Control plane",
+    etcd: "etcd",
+    "OpenStack control": "OpenStack control",
+    "Worker (compute)": "Compute",
+    Storage: "Storage",
+  };
   bar.innerHTML = statuses
     .map((s) => {
       const ok = s.count >= s.min;
-      const icon = ok ? "\u2705" : "\u26A0";
-      const cls = ok ? "ok" : "warn";
-      return `<span class="pill ${cls}" style="margin:0 .2rem">${icon} ${esc(s.label)}: ${s.count}/${s.min}</span>`;
+      const label = short[s.label] || s.label;
+      const text = ok ? `${label} ${s.count}` : `${label} ${s.count}, need ${s.min}`;
+      return `<span class="pill ${ok ? "ok" : "warn"}" style="margin:0 .2rem">${esc(text)}</span>`;
     })
     .join("");
 }

@@ -111,10 +111,10 @@ def test_warm_for_deploy_skips_unknown_upstream(monkeypatch):
     real = image_registry._upstream_for
     calls = {"n": 0}
 
-    def selective_upstream(registry):
+    def selective_upstream(registry, doc=None):
         if registry == "docker.io":
             return None
-        return real(registry)
+        return real(registry, doc)
 
     def fake_warm_one(bind, registry, repo, tag, port):
         calls["n"] += 1

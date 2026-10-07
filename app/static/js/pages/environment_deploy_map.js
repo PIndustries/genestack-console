@@ -1,7 +1,7 @@
 // Overview as an xyflow-style canvas: HTML card nodes, bezier edges,
 // dotted grid, pan/zoom, controls, minimap. Not Cytoscape.
-import { api, esc, loadingHtml, toast } from "../api.js";
-import { canAdmin, canRun, gate } from "../store.js";
+import { api, esc, loadingHtml, skeletonHtml, toast } from "../api.js";
+import { canAdmin, canRun, envName as envNameById, gate } from "../store.js";
 import { connect } from "../stream.js";
 import {
   mountSpace3d,
@@ -116,6 +116,7 @@ let snap = null;
 let registryGen = 0;
 let cacheCardSig = "";
 let platform = null;
+let inventoryServers = [];
 let workloads = null;
 let workloadsError = "";
 let osVms = [];
@@ -174,7 +175,6 @@ let lastMetalAt = 0;
 
 const LAYER_COPY = {
   env: "This environment. Registry is this env’s image cache on Console; Infrastructure is the metal.",
-  infra: "Every host is its own card. Kubernetes hangs off that host, then each namespace, then each live container. Nova compute pods show the guest VMs they hypervisor.",
   registry: "This environment’s pull-through registry on Console. Nodes pull from here instead of the internet. Warm it before a greenfield.",
   tests: "Functional proof. Helm up is not enough — Tempest and genestack verify say whether the cloud actually works.",
 };
@@ -208,6 +208,7 @@ function writeCache() {
         catalog,
         workloads,
         platform,
+        inventoryServers,
         osVms,
       })
     );
@@ -227,6 +228,7 @@ function applyCache(d) {
   if (Array.isArray(d.catalog) && d.catalog.length) catalog = d.catalog;
   if (d.workloads) workloads = d.workloads;
   if (d.platform) platform = d.platform;
+  if (Array.isArray(d.inventoryServers)) inventoryServers = d.inventoryServers;
   if (Array.isArray(d.osVms)) osVms = d.osVms;
   if (d.osCloud && (d.osCloud.available || (d.osCloud.networks || []).length)) osCloud = d.osCloud;
   if (Array.isArray(d.k8sIngress)) k8sIngress = d.k8sIngress;
@@ -296,30 +298,6 @@ function metalFailedAt(j) {
   const err = String((j && (j.error || j.failed_at)) || "");
   const at = String((pipe && pipe.failed_at) || "");
   return /maintenance|PXE|iso|greenfield\/(pxe|maintenance)|timed out waiting/i.test(`${err} ${at}`);
-}
-
-function metalJobPending() {
-  const list = recentJobs || [];
-  for (const j of list) {
-    if (!j) continue;
-    const op = String(j.operation || "");
-    const st = String(j.status || "");
-    if (/greenfield/i.test(op)) {
-      if (st === "success") return false;
-      if (ACTIVE.has(st) || st === "failed") return true;
-      continue;
-    }
-    if (/iso_boot|pxe_boot/i.test(op)) {
-      if (ACTIVE.has(st) || st === "success" || st === "failed") return true;
-      continue;
-    }
-    if (/genestack\.deploy/i.test(op) && st === "success") return false;
-    if (/genestack\.deploy/i.test(op) && ACTIVE.has(st)) {
-      const act = parseActivity((job && job.id === j.id && job.log_text) || "");
-      return !act.stage || /^(hosts|talos|infrastructure)$/i.test(act.stage);
-    }
-  }
-  return false;
 }
 
 function applyWorkloads(wl) {
@@ -661,8 +639,93 @@ function osInstalled() {
   return stageState("core") === "done" && stageState("compute-network") === "done";
 }
 
-function machineRows() {
+function normHost(v) {
+  return String(v || "").trim().toLowerCase();
+}
+
+function hostIp(n) {
+  return String((n && (n.private_ip || n.ip || n.public_ip)) || "").trim();
+}
+
+function bootSaysUbuntu(node) {
+  const next = String((node && node.next_boot) || "");
+  const stage = String((node && node.boot_stage) || "");
+  return next === "ubuntu" || stage === "ubuntu";
+}
+
+function mergeFleetRows() {
+  const byName = new Map();
+  const ipToName = new Map();
+  const remember = (row) => {
+    const key = normHost(row && row.name);
+    if (!key) return;
+    const prev = byName.get(key);
+    if (!prev) byName.set(key, { ...row, name: row.name });
+    else Object.assign(prev, row, { name: prev.name });
+    const ip = hostIp(byName.get(key));
+    if (ip) ipToName.set(ip, key);
+  };
+  const findKey = (n) => {
+    const key = normHost(n && n.name);
+    if (byName.has(key)) return key;
+    const ip = hostIp(n);
+    if (ip && ipToName.has(ip)) return ipToName.get(ip);
+    return "";
+  };
+  for (const s of inventoryServers) {
+    if (!s || s.assigned === false) continue;
+    const name = String(s.hostname || "").trim();
+    if (!name) continue;
+    remember({
+      name,
+      private_ip: s.private_ip || s.ip || "",
+      public_ip: s.public_ip || "",
+      roles: Array.isArray(s.roles) ? s.roles : [],
+      os: "",
+      source: s.source || "",
+    });
+  }
+  for (const n of bmLive) {
+    if (!n || !n.name) continue;
+    const key = findKey(n);
+    if (!key) continue;
+    const prev = byName.get(key);
+    if (bootSaysUbuntu(n)) prev.os = "ubuntu";
+    if (n.state && !prev.bm_state) prev.bm_state = n.state;
+  }
+  const overlay = (n) => {
+    if (!n || !n.name) return;
+    const key = findKey(n);
+    if (!key) {
+      remember({ ...n });
+      return;
+    }
+    const prev = byName.get(key);
+    const patch = { ...n };
+    delete patch.name;
+    if (!roleList(n.roles).length) delete patch.roles;
+    if (!patch.os) delete patch.os;
+    if (!patch.private_ip) delete patch.private_ip;
+    if (!patch.public_ip) delete patch.public_ip;
+    Object.assign(prev, patch);
+    const ip = hostIp(prev);
+    if (ip) ipToName.set(ip, key);
+  };
+  const fromSnap = (snap && Array.isArray(snap.nodes) ? snap.nodes : []) || [];
   const fromPlat = platform && Array.isArray(platform.nodes) ? platform.nodes : [];
+  for (const n of fromSnap) overlay(n);
+  for (const n of fromPlat) overlay(n);
+  let rows = [...byName.values()];
+  if (!rows.length) {
+    rows = (fromPlat.length ? fromPlat : fromSnap).map((n) => ({ ...n }));
+  }
+  for (const row of rows) {
+    if (row && !row.os) row.os = "talos";
+  }
+  return rows;
+}
+
+function machineRows() {
   const fromSnap = (snap && Array.isArray(snap.nodes) ? snap.nodes : []) || [];
   const pxeBy = new Map();
   const bmBy = new Map();
@@ -692,7 +755,7 @@ function machineRows() {
   for (const name of logBoot) {
     if (!bmBy.has(name) || String(bmBy.get(name)).toLowerCase() === "talos-ready") bmBy.set(name, "booting");
   }
-  const rows = fromPlat.length ? fromPlat : fromSnap;
+  const rows = mergeFleetRows();
   if (!pxeBy.size && !bmBy.size) return rows;
   return rows.map((n) => {
     if (!n) return n;
@@ -751,6 +814,46 @@ function machineState(m) {
     cpu: kn.cpu_capacity || m.cpu_capacity || "",
     memGi: kn.mem_gi != null ? kn.mem_gi : m.mem_gi,
   };
+}
+
+function osWord(m) {
+  return String((m && m.os) || "").toLowerCase() === "ubuntu" ? "Ubuntu" : "Talos";
+}
+
+function fleetMembership(m, st) {
+  const osName = osWord(m);
+  const roles = st && Array.isArray(st.roles) ? st.roles : [];
+  if (st && st.k8sReady) return { label: `${osName} · Ready`, state: "ok" };
+  if (roles.length) return { label: `${osName} · Not joined`, state: "warn" };
+  return { label: `${osName} · Recorded`, state: "wait" };
+}
+
+function rememberEnvName() {
+  if (snap && snap.name) {
+    envName = snap.name;
+    return;
+  }
+  const named = envNameById(envId);
+  if (named && named !== envId) envName = named;
+}
+
+function applyFleetSources(platRes, srvRes) {
+  if (platRes && Array.isArray(platRes.nodes)) platform = platRes;
+  if (srvRes && Array.isArray(srvRes.servers)) inventoryServers = srvRes.servers;
+  rememberEnvName();
+}
+
+function fleetLine(machines) {
+  const list = Array.isArray(machines) ? machines : [];
+  let ready = 0;
+  let notJoined = 0;
+  for (const m of list) {
+    const st = machineState(m);
+    if (st.k8sReady) ready += 1;
+    else if ((st.roles || []).length) notJoined += 1;
+  }
+  const noun = list.length === 1 ? "machine" : "machines";
+  return `${list.length} ${noun} · ${ready} ready · ${notJoined} not joined`;
 }
 
 function parseActivity(logText) {
@@ -864,6 +967,8 @@ function isGreenfieldLive() {
 }
 
 function isMetalRebuild() {
+  // A remembered failed greenfield job does not keep the map in a rebuild.
+  // The line is on only while a metal job is queued or running.
   if (isGreenfieldLive()) {
     const act = parseActivity(job && job.log_text);
     const cur = pipe && pipe.current && typeof pipe.current === "object" ? pipe.current : {};
@@ -871,12 +976,15 @@ function isMetalRebuild() {
     if (sid && !/^(hosts|talos)$/i.test(sid)) return false;
     return true;
   }
-  if (metalJobPending()) return true;
-  const op = String((job && job.operation) || "");
-  if (/greenfield/i.test(op) && String((job && job.status) || "") === "failed" && metalFailedAt(job)) {
-    return true;
+  for (const j of recentJobs || []) {
+    if (!j || !ACTIVE.has(String(j.status || ""))) continue;
+    const op = String(j.operation || "");
+    if (/greenfield|iso_boot|pxe_boot/i.test(op)) return true;
+    if (/genestack\.deploy/i.test(op)) {
+      const act = parseActivity((job && job.id === j.id && job.log_text) || "");
+      if (!act.stage || /^(hosts|talos|infrastructure)$/i.test(act.stage)) return true;
+    }
   }
-  if (pipe && /greenfield\//i.test(String(pipe.failed_at || ""))) return true;
   return false;
 }
 
@@ -957,6 +1065,7 @@ function machinePhase(m, st) {
     if (bm === "booting") return { label: "PXE / BIOS", state: "run" };
     return { label: "queued", state: "run" };
   }
+  if (!live) return fleetMembership(m, st);
   if (pxe && pxe.phase && (pxeHot(pxe) || live || !st.k8sReady)) {
     return { label: pxe.phase, state: "run" };
   }
@@ -1818,6 +1927,9 @@ function registryInfo() {
   else if (total) state = "bad";
   return {
     bind: r.bind || "",
+    hostSource: r.host_source || "",
+    configuredHost: r.configured_host || "",
+    loaded: !!(snap && snap.registry),
     ready,
     total,
     state,
@@ -1958,11 +2070,11 @@ function buildGraph() {
     title: envName || "Environment",
     subtitle: metal
       ? serving
-        ? `metal rebuild stuck · ${ready}/${machines.length} still on old OS`
-        : `metal rebuild · ${metalBooting}/${machines.length} booting`
+        ? `${ready} still ready, rebuild in progress`
+        : `Metal rebuild · ${metalBooting} booting`
       : isLive()
         ? `deploying · ${machines.length} machines`
-        : `${machines.length} machines`,
+        : fleetLine(machines),
     childCount: 6,
   });
 
@@ -1977,10 +2089,15 @@ function buildGraph() {
         ? "run"
         : reg.state,
       title: "Registry",
-      subtitle: reg.bind
-        ? `${reg.bind} · ${reg.ready}/${reg.total || 0} up · ${reg.images} images`
-        : `${reg.ready}/${reg.total || 0} caches`,
+      subtitle: !reg.loaded
+        ? "Reading address"
+        : reg.bind
+          ? `${reg.bind} · ${reg.ready}/${reg.total || 0} up · ${reg.images} images`
+          : `${reg.ready}/${reg.total || 0} caches`,
       bind: reg.bind,
+      hostSource: reg.hostSource,
+      configuredHost: reg.configuredHost,
+      registryLoaded: reg.loaded,
       images: reg.images,
       caches: reg.caches,
       lastMirror: reg.last,
@@ -2054,8 +2171,10 @@ function buildGraph() {
       state: metal ? infraState : isLive() && talosN < machines.length ? "run" : infraState,
       title: "Infrastructure",
       subtitle: metal
-        ? `${maintenanceFromLog().size} Talos maintenance · ${machines.filter((x) => machineState(x).k8sReady).length} still on old OS`
-        : `${talosN}/${machines.length} Talos · ${ready}/${machines.length} Ready`,
+        ? serving
+          ? `${ready} still ready, rebuild in progress`
+          : `${maintenanceFromLog().size} in Talos maintenance · ${metalBooting} booting`
+        : fleetLine(machines),
       childCount: machines.length,
     });
     link("env", "infra");
@@ -2509,7 +2628,7 @@ function sparklineMini(points, color) {
 
 function liveStrip(n) {
   const live = liveForGraphNode(n);
-  if (!live) return livePack() ? `<div class="sf-live" data-live><span class="muted">no metrics</span></div>` : `<div class="sf-live" data-live></div>`;
+  if (!live) return `<div class="sf-live" data-live></div>`;
   if (live.kind === "cluster") {
     const c = live.cluster || {};
     return `<div class="sf-live" data-live data-kind="cluster">
@@ -2553,9 +2672,10 @@ function liveStrip(n) {
 function liveDetailHtml(id) {
   const n = lastGraph.byId.get(id);
   const live = liveForGraphNode(n);
-  if (!liveMetrics) return `<p class="muted">Live metrics loading…</p>`;
-  if (liveMetrics.error && !live) return `<p class="muted">${esc(liveMetrics.error)}</p>`;
-  if (!live) return `<p class="muted">No live series for this node.</p>`;
+  if (metricsMissing) return "";
+  if (!liveMetrics) return "";
+  if (liveMetrics.error && !live) return "";
+  if (!live) return "";
   const histCluster = liveHist.cluster || [];
   if (live.kind === "cluster") {
     const c = live.cluster || {};
@@ -2653,9 +2773,9 @@ function healthMetrics(n) {
       sfChip(
         metal
           ? ready
-            ? `${ready}/${machines.length} still Ready · rebuild stuck`
-            : `${machines.length} metal rebuild`
-          : `${ready}/${machines.length} Ready`,
+            ? `${ready} still ready, rebuild in progress`
+            : `Metal rebuild · ${machines.length} booting`
+          : fleetLine(machines),
         metal ? (ready ? "run" : "bad") : machines.length && ready === machines.length ? "ok" : ready ? "run" : "wait"
       )
     );
@@ -2663,7 +2783,7 @@ function healthMetrics(n) {
     if (blocked) chips.push(sfChip(`${blocked} blocked`, "bad"));
     else chips.push(sfChip(healthWord(n.state), n.state));
   } else if (n.kind === "group") {
-    chips.push(sfChip(n.subtitle || healthWord(n.state), n.state));
+    chips.push(sfChip(healthWord(n.state), n.state));
   } else if (n.kind === "registry") {
     chips.push(sfChip(`${n.caches ? n.caches.filter((c) => c.running).length : 0}/${(n.caches || []).length} up`, n.state));
     chips.push(sfChip(`${n.images || 0} images`, n.images ? "ok" : "wait"));
@@ -2683,19 +2803,12 @@ function healthMetrics(n) {
   } else if (n.kind === "machine") {
     const m = findMachine(n.machineName);
     const st = m ? machineState(m) : {};
-    const phase = machinePhase(m || { name: n.machineName }, st);
     const metal = isMetalRebuild();
     const dhcpWait = /^waiting for DHCP$/i.test(String((m && m.pxe && m.pxe.phase) || ""));
-    chips.push(sfChip(phase.label, phase.state));
-    if (!metal) {
-      chips.push(sfChip(n.talosOk ? `Talos ${n.talosVer || "up"}` : "Talos down", n.talosOk ? "ok" : "bad"));
-      chips.push(sfChip(n.k8sReady ? "K8s Ready" : "K8s not Ready", n.k8sReady ? "ok" : "run"));
-      if (n.cpu) chips.push(sfChip(`${n.cpu} CPU`, "ok"));
-      if (n.memGi != null && n.memGi !== "") chips.push(sfChip(`${n.memGi} Gi`, "ok"));
-      if (n.podCount) chips.push(sfChip(`${n.podCount} pods`, n.state === "bad" ? "bad" : ""));
-    } else if (dhcpWait && st.k8sReady) {
-      chips.push(sfChip("old OS still up", "run"));
-    }
+    if (metal && dhcpWait && st.k8sReady) chips.push(sfChip("still ready, rebuild in progress", "run"));
+    if (n.cpu) chips.push(sfChip(`${n.cpu} CPU`, "ok"));
+    if (n.memGi != null && n.memGi !== "") chips.push(sfChip(`${n.memGi} Gi`, "ok"));
+    if (n.podCount) chips.push(sfChip(`${n.podCount} pods`, n.state === "bad" ? "bad" : ""));
   } else if (n.kind === "k8s") {
     chips.push(sfChip(n.state === "ok" ? "Ready" : "not Ready", n.state === "ok" ? "ok" : n.state));
     if (n.podCount != null) chips.push(sfChip(`${n.podCount} pods`, n.state === "bad" ? "bad" : ""));
@@ -3290,25 +3403,14 @@ function nextAction() {
   if (isMetalRebuild()) {
     const isoN = (recentJobs || []).filter((j) => /iso_boot/i.test(String((j && j.operation) || ""))).length;
     const err = String((job && job.error) || failed || "").replace(/\s+/g, " ").trim();
-    const short =
-      /Talos maintenance/i.test(err)
-        ? "timed out waiting for Talos maintenance"
-        : err
-          ? err.slice(0, 96)
-          : "metal rebuild stopped";
-    const extra = isoN ? ` ISO retry on ${isoN} host${isoN === 1 ? "" : "s"}.` : "";
+    const stageName = stageSpec("hosts").name || "Host Setup";
+    const detail = err ? `${err.slice(0, 96)}. ` : "";
+    const extra = isoN ? `ISO retry on ${isoN} host${isoN === 1 ? "" : "s"}. ` : "";
     const ready = readyMachineCount();
-    const n = machineRows().length;
-    if (ready) {
-      return {
-        kind: "warn",
-        text: `Not an outage. ${ready}/${n} hosts still run Kubernetes on the old OS. Rebuild stopped (${short}). PXE is waiting for DHCP — nodes were not rebooted.${extra} Next is Host Setup.`,
-        stage: "hosts",
-      };
-    }
+    const progress = ready ? `${ready} still ready, rebuild in progress. ` : "";
     return {
-      kind: "bad",
-      text: `Stopped at ${short}.${extra} Next is Host Setup, not Testing.`,
+      kind: ready ? "warn" : "bad",
+      text: `${progress}${detail}${extra}Next is ${stageName}.`,
       stage: "hosts",
     };
   }
@@ -3413,22 +3515,38 @@ function inspectorFor(id) {
     const lastLine = last
       ? `${esc(last.status || "")} ${esc(String(last.id || "").slice(0, 8))}`
       : "never warmed";
+    const where =
+      node.hostSource === "registry"
+        ? "saved on this environment"
+        : node.hostSource === "pxe"
+          ? "the PXE next-server"
+          : node.hostSource === "console"
+            ? "this console"
+            : "";
+    const lead = !node.registryLoaded
+      ? "Reading the address machines pull from."
+      : node.bind
+        ? `Machines pull container images from <code>${esc(node.bind)}</code>${
+            where ? ` (${esc(where)})` : ""
+          }. Configure sets that address and which registries are mirrored.`
+        : "This console has no pull address yet. Configure sets the address machines use and which registries are mirrored.";
     return wrapDetail(
       node,
       `<div class="dm-insp-head"><h3>Registry · ${esc(envName || node.envName || "env")}</h3>
         <span class="pill ${node.state === "ok" ? "ok" : node.state === "run" ? "warn" : ""}">${esc(
           `${node.images || 0} images`
         )}</span></div>
-      <p class="muted">This environment pulls container images from Console at <code>${esc(
-        node.bind || ""
-      )}</code>. Warm the cache before a greenfield so nodes do not hit the internet.</p>
+      <p class="muted">${lead}</p>
       <table class="dm-check"><tbody>${rows}</tbody></table>
       <p class="muted">Last warm: ${lastLine}</p>
-      <div class="dm-insp-actions">${
-        canAdmin()
-          ? `<button type="button" class="secondary btn-sm" data-dm-warm>Cache images and charts</button>`
-          : ""
-      }</div>`
+      <div class="dm-insp-actions">
+        <button type="button" class="btn-sm" data-dm-reg-config ${gate(canRun(), "operator")}>Configure</button>
+        ${
+          canAdmin()
+            ? `<button type="button" class="secondary btn-sm" data-dm-warm>Cache images and charts</button>`
+            : ""
+        }
+      </div>`
     );
   }
   if (node.kind === "regcache") {
@@ -3775,8 +3893,8 @@ function renderPipe() {
   const head = metal
     ? `<div class="dm-pipe-head">${
         serving
-          ? "metal rebuild stuck · cluster still serving on old OS"
-          : "metal rebuild · Host Setup not finished"
+          ? `${readyMachineCount()} still ready, rebuild in progress`
+          : "Metal rebuild · Host Setup in progress"
       }${elapsed ? ` · ${esc(elapsed)}` : ""}</div>`
     : total
       ? `<div class="dm-pipe-head">${done}/${total} complete${left ? ` · ${left} left` : ""}${
@@ -3938,44 +4056,35 @@ function renderEnvHealth() {
   if (!el) return;
   const machines = machineRows();
   const metal = isMetalRebuild();
-  const serving = oldOsStillServing();
   const ready = machines.filter((m) => machineState(m).k8sReady).length;
-  const blocked = serving
-    ? 0
-    : metal
-      ? 0
-      : (lastGraph.nodes || []).filter(
-          (n) => (n.kind === "pod" || n.kind === "vm") && n.state === "bad"
-        ).length;
+  const notJoined = machines.filter((m) => {
+    const st = machineState(m);
+    return !st.k8sReady && (st.roles || []).length;
+  }).length;
   const live = isLive() || !!(pipe && pipe.running);
   let health = "unknown";
   if (machines.length) {
-    if (metal && serving) health = live ? "provisioning" : "blocked";
-    else if (metal) health = live ? "provisioning" : "blocked";
-    else if (live) health = "provisioning";
-    else if (blocked) health = "degraded";
-    else if (ready === machines.length) health = "ok";
-    else health = "pending";
+    if (live || metal) health = "working";
+    else if (notJoined) health = "attention";
+    else health = "ok";
   }
-  const cl = liveMetrics && liveMetrics.cluster;
+  const noun = machines.length === 1 ? "machine" : "machines";
   const bits = [
     `<span>health: ${esc(health)}</span>`,
-    `<span>live-store 0908</span>`,
-    `<span>${
-      metal
-        ? serving
-          ? `${ready}/${machines.length} still Ready`
-          : `${machines.length} metal rebuild`
-        : `${ready}/${machines.length} Ready`
-    }</span>`,
+    `<span>${esc(envName || "Environment")}</span>`,
+    `<span>${machines.length} ${noun}</span>`,
+    `<span>${ready} ready</span>`,
+    `<span>${notJoined} not joined</span>`,
   ];
-  if (!metal || serving) {
-    if (cl && cl.cpu && cl.cpu.pct != null) bits.push(`<span>CPU ${Number(cl.cpu.pct).toFixed(0)}%</span>`);
-    if (cl && cl.mem && cl.mem.pct != null) bits.push(`<span>RAM ${Number(cl.mem.pct).toFixed(0)}%</span>`);
-    if (cl && cl.disk && cl.disk.pct != null) bits.push(`<span>Disk ${Number(cl.disk.pct).toFixed(0)}%</span>`);
+  if (metal) {
+    const booting = machines.filter(
+      (m) =>
+        String(m.bm_state || "").toLowerCase() === "booting" ||
+        pxeHot(m.pxe) ||
+        maintenanceFromLog().has(m.name)
+    ).length;
+    bits.push(`<span>Metal rebuild · ${booting} booting</span>`);
   }
-  if (live) bits.push("<span>deploying</span>");
-  if (blocked) bits.push(`<span>${blocked} blocked</span>`);
   const reg = registryInfo();
   if (reg.total) bits.push(`<span>registry ${reg.ready}/${reg.total}${reg.images ? ` · ${reg.images} img` : ""}</span>`);
   const val = validationInfo();
@@ -3985,9 +4094,6 @@ function renderEnvHealth() {
   const pxeInfo = (snap && snap.pxe) || {};
   const pxeHosts = (pxeInfo.hosts || []).filter((h) => h && (pxeHot(h) || (h.phase && !/^waiting for DHCP$/i.test(h.phase)))).length;
   if (pxeHosts) bits.push(`<span>PXE ${pxeHosts} host${pxeHosts === 1 ? "" : "s"}</span>`);
-  else if (metal && serving) bits.push("<span>rebuild has not taken nodes down</span>");
-  else if (metal) bits.push("<span>waiting for nodes to leave the old OS</span>");
-  else if (live && pxeInfo.running) bits.push("<span>PXE waiting</span>");
   el.innerHTML = bits.join('<span class="env-health-sep" aria-hidden="true">·</span>');
 }
 
@@ -4040,24 +4146,39 @@ async function fetchState() {
   if (!envId || fetchInflight) return;
   fetchInflight = true;
   const id = envId;
+  let released = false;
   refreshRegistry(id);
   try {
     refreshPods(id);
-    const [snapRes, pipeCat, vmsRes, jobsRes, bmRes, cloudRes, ingRes, svcRes, gwRes, routeRes, poolRes] = await Promise.all([
-      api(`/api/v1/ops/environments/${encodeURIComponent(id)}/snapshot`, { timeout: SNAP_TIMEOUT }).catch(() => null),
-      catalog.length
-        ? Promise.resolve({ stages: catalog })
-        : api("/api/v1/genestack/pipeline", { timeout: 5000 }).catch(() => ({ stages: [] })),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/vms`, { timeout: 12000 }).catch(() => null),
-      api(`/api/v1/jobs?environment_id=${encodeURIComponent(id)}&limit=16`, { timeout: 4000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/baremetal`, { timeout: 6000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/cloud`, { timeout: 20000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/ingresses`, { timeout: 10000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/services`, { timeout: 10000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/gateways`, { timeout: 10000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/httproutes`, { timeout: 10000 }).catch(() => null),
-      api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/metallb/pools`, { timeout: 8000 }).catch(() => null),
+    const snapP = api(`/api/v1/ops/environments/${encodeURIComponent(id)}/snapshot`, { timeout: SNAP_TIMEOUT }).catch(() => null);
+    const pipeP = catalog.length
+      ? Promise.resolve({ stages: catalog })
+      : api("/api/v1/genestack/pipeline", { timeout: 5000 }).catch(() => ({ stages: [] }));
+    const vmsP = api(`/api/v1/environments/${encodeURIComponent(id)}/vms`, { timeout: 12000 }).catch(() => null);
+    const jobsP = api(`/api/v1/jobs?environment_id=${encodeURIComponent(id)}&limit=16`, { timeout: 4000 }).catch(() => null);
+    const bmP = api(`/api/v1/environments/${encodeURIComponent(id)}/baremetal`, { timeout: 6000 }).catch(() => null);
+    const cloudP = api(`/api/v1/environments/${encodeURIComponent(id)}/cloud`, { timeout: 20000 }).catch(() => null);
+    const ingP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/ingresses`, { timeout: 10000 }).catch(() => null);
+    const svcP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/services`, { timeout: 10000 }).catch(() => null);
+    const gwP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/gateways`, { timeout: 10000 }).catch(() => null);
+    const routeP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/httproutes`, { timeout: 10000 }).catch(() => null);
+    const poolP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/metallb/pools`, { timeout: 8000 }).catch(() => null);
+    const platP = api(`/api/v1/environments/${encodeURIComponent(id)}/platform`, { timeout: 20000 }).catch(() => null);
+    const srvP = api(`/api/v1/environments/${encodeURIComponent(id)}/servers`, { timeout: 8000 }).catch(() => null);
+    // Inventory is enough for the shared line. Cloud and VM calls can sit
+    // on their full timeout, and that must not leave the line at 0 machines.
+    Promise.all([platP, srvP]).then(([platEarly, srvEarly]) => {
+      if (id !== envId) return;
+      applyFleetSources(platEarly, srvEarly);
+      renderEnvHealth();
+    }).catch(() => {});
+    // Cloud and VM reads can take the full timeout. Keep them off the lock
+    // so switching environments does not sit on an empty count.
+    const [snapRes, pipeCat, jobsRes, bmRes, ingRes, svcRes, gwRes, routeRes, poolRes, platRes, srvRes] = await Promise.all([
+      snapP, pipeP, jobsP, bmP, ingP, svcP, gwP, routeP, poolP, platP, srvP,
     ]);
+    let cloudRes = null;
+    let vmsRes = null;
     if (id !== envId) return;
     const merged = mergeSnapshot(
       {
@@ -4086,9 +4207,9 @@ async function fetchState() {
       snap = nextN || !prevN ? merged.snap : { ...merged.snap, nodes: snap.nodes };
     }
     if (merged.pipe) pipe = merged.pipe;
-    if (snap && snap.name) envName = snap.name;
     if (merged.osVms && merged.osVms.length) osVms = merged.osVms;
     if (merged.bmLive && merged.bmLive.length) bmLive = merged.bmLive;
+    applyFleetSources(platRes, srvRes);
     if (merged.catalog && merged.catalog.length) catalog = merged.catalog;
     const cloudHas =
       cloudRes &&
@@ -4149,9 +4270,31 @@ async function fetchState() {
     lastFetch = Date.now();
     writeCache();
     renderAll();
-  } finally {
     fetchInflight = false;
+    released = true;
+    const [cloudLate, vmsLate] = await Promise.all([cloudP, vmsP]);
+    if (id !== envId || fetchInflight) return;
+    cloudRes = cloudLate;
+    vmsRes = vmsLate;
+    if (vmsRes && Array.isArray(vmsRes.vms) && (vmsRes.vms.length || vmsRes.source === "live")) osVms = vmsRes.vms;
+    const cloudLateHas =
+      cloudRes &&
+      (cloudRes.available ||
+        (cloudRes.servers || []).length ||
+        (cloudRes.networks || []).length ||
+        (cloudRes.projects || []).length ||
+        (cloudRes.floating_ips || []).length);
+    if (cloudLateHas) osCloud = cloudRes;
+    if ((!osVms || !osVms.length) && osCloud && Array.isArray(osCloud.servers) && osCloud.servers.length) {
+      osVms = osCloud.servers;
+    }
+    renderAll();
+  } finally {
+    if (!released) fetchInflight = false;
   }
+  // A switch during this read used to wait out the idle poll before the
+  // new environment got a count. Start that read now.
+  if (envId && envId !== id) tick();
 }
 
 function lerpNum(a, b, t) {
@@ -4432,10 +4575,11 @@ function refreshLiveMetrics() {
         metricsMissing = true;
         if (metricsTimer) clearTimeout(metricsTimer);
         metricsTimer = null;
+        return;
       }
       if (liveMetrics) return;
       liveMetrics = {
-        error: err && err.status === 404 ? "No live metrics yet." : "Live metrics unavailable",
+        error: "Live metrics unavailable",
         cluster: {},
         cpus: [],
         nodes: [],
@@ -5896,6 +6040,10 @@ function handleDetailClick(e) {
     continueFrom(cont.getAttribute("data-dm-continue"));
     return true;
   }
+  if (e.target.closest("[data-dm-reg-config]")) {
+    openRegistryConfig();
+    return true;
+  }
   if (e.target.closest("[data-dm-warm]")) {
     warmImageCache();
     return true;
@@ -6252,17 +6400,324 @@ function chartWhere(row) {
   return raw;
 }
 
+let registryCaches = [];
+
+function chartTable(rows) {
+  if (!rows.length) return `<p class="muted">None.</p>`;
+  return `<table><tbody>${rows
+    .map(
+      (c) =>
+        `<tr><td><code>${esc(c.name || "")}</code></td><td class="muted">${esc(chartWhere(c))}</td></tr>`
+    )
+    .join("")}</tbody></table>`;
+}
+
+function registryPayload() {
+  return (snap && snap.registry) || {};
+}
+
+function cacheSourceSentence(reg) {
+  const source = (reg && reg.host_source) || "";
+  const bind = (reg && reg.bind) || "";
+  if (source === "registry") {
+    return "Saved on this environment. Empty follows the PXE next-server, then this console.";
+  }
+  if (source === "pxe") return `Empty follows the PXE next-server, which is ${bind}.`;
+  if (source === "console" && bind) return `Empty uses this console at ${bind}.`;
+  return "Set the address machines use to reach this console.";
+}
+
+function configRowHtml(row, addr) {
+  const name = String((row && row.name) || "");
+  const remote = String((row && row.remote) || "");
+  const port = Number((row && row.port) || 0);
+  const on = !row || row.enabled !== false;
+  const builtin = !!(row && row.builtin);
+  const listen = addr && port ? `http://${addr}:${port}` : "";
+  const remove = builtin
+    ? ""
+    : `<button type="button" class="secondary btn-sm" data-reg-config-remove>Remove</button>`;
+  return `<tr data-builtin="${builtin ? "1" : "0"}">
+    <td><input type="checkbox" data-reg-on ${on ? "checked" : ""} aria-label="Mirror ${esc(name || "registry")}" /></td>
+    <td><input type="text" data-reg-name value="${esc(name)}" spellcheck="false" autocomplete="off" ${builtin ? "readonly" : ""} /></td>
+    <td><input type="text" data-reg-remote value="${esc(remote)}" spellcheck="false" autocomplete="off" /></td>
+    <td><input type="number" data-reg-port min="1" max="65535" value="${port || ""}" /></td>
+    <td class="reg-listen">${esc(listen)}</td>
+    <td>${remove}</td>
+  </tr>`;
+}
+
+function readConfigRows() {
+  const body = document.getElementById("reg-config-rows");
+  if (!body) return [];
+  return [...body.querySelectorAll("tr")]
+    .map((tr) => {
+      const nameEl = tr.querySelector("[data-reg-name]");
+      const remoteEl = tr.querySelector("[data-reg-remote]");
+      const portEl = tr.querySelector("[data-reg-port]");
+      const onEl = tr.querySelector("[data-reg-on]");
+      return {
+        name: nameEl ? nameEl.value : "",
+        remote: remoteEl ? remoteEl.value : "",
+        port: Number(portEl ? portEl.value : 0),
+        enabled: !!(onEl && onEl.checked),
+        builtin: tr.getAttribute("data-builtin") === "1",
+      };
+    })
+    .filter((row) => {
+      const name = String(row.name || "").trim();
+      const remote = String(row.remote || "").trim();
+      return name || (remote && remote !== "https://");
+    });
+}
+
+function paintConfigListens() {
+  const hostEl = document.getElementById("reg-config-host");
+  const reg = registryPayload();
+  const addr = (hostEl && hostEl.value.trim()) || reg.bind || "";
+  const body = document.getElementById("reg-config-rows");
+  if (!body) return;
+  body.querySelectorAll("tr").forEach((tr) => {
+    const portEl = tr.querySelector("[data-reg-port]");
+    const listen = tr.querySelector(".reg-listen");
+    const port = Number(portEl ? portEl.value : 0);
+    if (listen) listen.textContent = addr && port ? `http://${addr}:${port}` : "";
+  });
+}
+
+function paintRegistryConfig(rows) {
+  const reg = registryPayload();
+  const host = document.getElementById("reg-config-host");
+  const source = document.getElementById("reg-config-source");
+  const body = document.getElementById("reg-config-rows");
+  if (!body) return;
+  if (host && rows == null && document.activeElement !== host) {
+    host.value = reg.configured_host || "";
+    host.placeholder = reg.bind || "";
+  } else if (host && !host.placeholder) {
+    host.placeholder = reg.bind || "";
+  }
+  if (source) source.textContent = cacheSourceSentence(reg);
+  const list =
+    rows ||
+    (Array.isArray(reg.upstreams) && reg.upstreams.length ? reg.upstreams : reg.defaults || []);
+  const addr = (host && host.value.trim()) || reg.bind || "";
+  body.innerHTML = list.map((row) => configRowHtml(row, addr)).join("");
+  const save = document.getElementById("reg-config-save");
+  const start = document.getElementById("reg-config-start");
+  const warm = document.getElementById("reg-config-warm");
+  if (save) save.disabled = !canRun();
+  if (start) start.disabled = !canAdmin();
+  if (warm) warm.disabled = !canAdmin();
+}
+
+function ensureConfigModal() {
+  let modal = document.getElementById("reg-config-modal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "reg-config-modal";
+  modal.className = "gsc-modal";
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="gsc-modal-card gsc-modal-wide" role="dialog" aria-modal="true" aria-labelledby="reg-config-title">
+      <div class="toolbar">
+        <h2 id="reg-config-title">Configure image cache</h2>
+        <button type="button" class="secondary btn-sm" data-reg-config-close>Close</button>
+      </div>
+      <p class="muted">Machines on this environment pull container images from this console. A checked registry is mirrored here. This console fetches a miss from the upstream.</p>
+      <label class="field">Address
+        <input id="reg-config-host" type="text" autocomplete="off" spellcheck="false" placeholder="" />
+      </label>
+      <p id="reg-config-source" class="muted reg-config-note"></p>
+      <div class="reg-config-scroll">
+        <table class="reg-config-table">
+          <thead>
+            <tr><th>On</th><th>Registry</th><th>Upstream</th><th>Port</th><th>Listen</th><th></th></tr>
+          </thead>
+          <tbody id="reg-config-rows"></tbody>
+        </table>
+      </div>
+      <div class="dm-insp-actions">
+        <button type="button" class="secondary btn-sm" id="reg-config-add">Add a registry</button>
+        <button type="button" class="secondary btn-sm" id="reg-config-reset">Standard registries</button>
+      </div>
+      <p id="reg-config-msg" class="muted"></p>
+      <div class="dm-insp-actions">
+        <button type="button" class="btn-sm" id="reg-config-save">Save</button>
+        <button type="button" class="secondary btn-sm" id="reg-config-start">Start caches</button>
+        <button type="button" class="secondary btn-sm" id="reg-config-warm">Cache images and charts</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener("click", onConfigClick);
+  modal.addEventListener("input", () => paintConfigListens());
+  return modal;
+}
+
+function closeRegistryConfig() {
+  const modal = document.getElementById("reg-config-modal");
+  if (modal) modal.hidden = true;
+}
+
+async function openRegistryConfig() {
+  if (!canRun()) {
+    toast("An operator configures the image cache", "warn");
+    return;
+  }
+  const modal = ensureConfigModal();
+  document.body.appendChild(modal);
+  modal.hidden = false;
+  const msg = document.getElementById("reg-config-msg");
+  if (msg) msg.textContent = "";
+  if (envId) {
+    try {
+      const reg = await api(`/api/v1/environments/${encodeURIComponent(envId)}/registry`, {
+        timeout: 20000,
+      });
+      if (reg && typeof reg === "object") {
+        snap = Object.assign({}, snap || {}, { registry: reg });
+        cacheCardSig = "";
+        renderCacheCard();
+      }
+    } catch (err) {
+      if (msg) msg.textContent = (err && err.message) || "Registries unavailable.";
+    }
+  }
+  paintRegistryConfig();
+  const host = document.getElementById("reg-config-host");
+  if (host) host.focus();
+}
+
+function nextRegistryPort(rows) {
+  const used = new Set(rows.map((row) => Number(row.port) || 0));
+  let port = 5010;
+  while (used.has(port)) port += 1;
+  return port;
+}
+
+async function saveRegistryConfig() {
+  if (!envId || !canRun()) return;
+  const msg = document.getElementById("reg-config-msg");
+  const hostEl = document.getElementById("reg-config-host");
+  const host = hostEl ? hostEl.value.trim() : "";
+  const upstreams = readConfigRows().map((row) => ({
+    name: String(row.name || "").trim(),
+    remote: String(row.remote || "").trim(),
+    port: Number(row.port),
+    enabled: !!row.enabled,
+  }));
+  if (msg) msg.textContent = "Saving…";
+  try {
+    const saved = await api(`/api/v1/environments/${encodeURIComponent(envId)}/registry`, {
+      method: "PUT",
+      body: JSON.stringify({ host, upstreams }),
+    });
+    snap = Object.assign({}, snap || {}, { registry: saved });
+    cacheCardSig = "";
+    renderCacheCard();
+    if (msg) {
+      msg.textContent =
+        "Saved. Start caches brings the proxies up. Cache images and charts also pulls what this cluster is running.";
+    }
+    toast("Image cache saved", "ok");
+    renderAll();
+  } catch (err) {
+    const text = (err && err.message) || "Save failed";
+    if (msg) msg.textContent = text;
+    toast(text, "error");
+  }
+}
+
+async function startImageCaches() {
+  if (!envId || !canAdmin()) return;
+  const msg = document.getElementById("reg-config-msg");
+  try {
+    const created = await api(`/api/v1/environments/${encodeURIComponent(envId)}/jobs`, {
+      method: "POST",
+      body: JSON.stringify({ operation: "registry.mirror", params: { start_only: true } }),
+    });
+    const line = `Starting caches ${String(created.id || "").slice(0, 8)}…`;
+    if (msg) msg.textContent = line;
+    toast(line, "ok");
+    beginLive({ collapse: true });
+    await fetchState();
+    schedule();
+  } catch (err) {
+    const text = (err && err.message) || "caches failed to start";
+    if (msg) msg.textContent = text;
+    toast(text, "error");
+  }
+}
+
+function onConfigClick(e) {
+  if (e.target.id === "reg-config-modal" || e.target.closest("[data-reg-config-close]")) {
+    closeRegistryConfig();
+    return;
+  }
+  if (e.target.closest("#reg-config-save")) {
+    saveRegistryConfig();
+    return;
+  }
+  if (e.target.closest("#reg-config-start")) {
+    startImageCaches();
+    return;
+  }
+  if (e.target.closest("#reg-config-warm")) {
+    warmImageCache();
+    return;
+  }
+  if (e.target.closest("#reg-config-reset")) {
+    const defaults = registryPayload().defaults || [];
+    paintRegistryConfig(defaults);
+    const msg = document.getElementById("reg-config-msg");
+    if (msg) msg.textContent = "Standard registries are in the form. Save stores them.";
+    return;
+  }
+  if (e.target.closest("#reg-config-add")) {
+    const rows = readConfigRows();
+    rows.push({ name: "", remote: "https://", port: nextRegistryPort(rows), enabled: true, builtin: false });
+    paintRegistryConfig(rows);
+    return;
+  }
+  const remove = e.target.closest("[data-reg-config-remove]");
+  if (remove) {
+    const tr = remove.closest("tr");
+    if (tr) tr.remove();
+    paintConfigListens();
+  }
+}
+
+function openRegistryModal(name) {
+  const modal = document.getElementById("reg-cache-modal");
+  const title = document.getElementById("reg-cache-modal-title");
+  const body = document.getElementById("reg-cache-modal-body");
+  if (!modal || !body) return;
+  const row = registryCaches.find((c) => String(c.registry || "") === name) || null;
+  const repos = row && Array.isArray(row.repositories) ? row.repositories : [];
+  if (title) title.textContent = name || "Registry";
+  body.innerHTML = repos.length
+    ? `<ul>${repos.map((repo) => `<li><code>${esc(repo)}</code></li>`).join("")}</ul>`
+    : `<p class="muted">No images stored yet.</p>`;
+  modal.hidden = false;
+}
+
+function closeRegistryModal() {
+  const modal = document.getElementById("reg-cache-modal");
+  if (modal) modal.hidden = true;
+}
+
 function renderCacheCard() {
   const regs = document.getElementById("reg-cache-regs");
   const meta = document.getElementById("reg-cache-meta");
   const list = document.getElementById("reg-cache-chart-list");
-  const chartsFold = document.getElementById("reg-cache-charts");
   if (!regs) return;
   const r = (snap && snap.registry) || {};
   const caches = Array.isArray(r.caches) ? r.caches : [];
   const charts = Array.isArray(r.charts) ? r.charts : [];
   const sig = JSON.stringify([
     r.bind,
+    r.host_source,
+    r.configured_host,
     r.ready_count,
     r.cache_count,
     r.image_count,
@@ -6273,11 +6728,8 @@ function renderCacheCard() {
     charts.map((c) => c && c.name),
   ]);
   if (sig === cacheCardSig) return;
-  const open = new Set();
-  regs.querySelectorAll("details[open][data-reg]").forEach((el) => {
-    open.add(el.getAttribute("data-reg"));
-  });
   cacheCardSig = sig;
+  registryCaches = caches;
   const last = r.last_mirror;
   const lastLine = last
     ? `last cache ${last.status || ""} ${String(last.id || "").slice(0, 8)}`
@@ -6288,53 +6740,49 @@ function renderCacheCard() {
       )} images · ${lastLine}`
     : r.error
       ? String(r.error)
-      : "Loading the registries…";
-  if (meta) meta.textContent = head;
+      : "";
+  if (meta) {
+    if (!caches.length && !r.error && !head) meta.innerHTML = skeletonHtml(3);
+    else meta.textContent = head;
+  }
+  const setup = document.getElementById("reg-cache-setup");
+  if (setup) {
+    const where =
+      r.host_source === "registry"
+        ? "saved on this environment"
+        : r.host_source === "pxe"
+          ? "PXE next-server"
+          : r.host_source === "console"
+            ? "this console"
+            : "address not set";
+    setup.textContent = r.bind
+      ? `${r.bind} · ${where}. Configure sets the address and which registries are mirrored.`
+      : "Configure sets the address machines pull from, and which registries are mirrored.";
+  }
   if (!caches.length) {
     regs.innerHTML = r.error ? `<p class="muted">${esc(String(r.error))}</p>` : "";
   } else {
-    regs.innerHTML = `<table><tbody>${caches
+    regs.innerHTML = `<div class="reg-grid">${caches
       .map((c) => {
         const repos = Array.isArray(c.repositories) ? c.repositories : [];
         const name = String(c.registry || "");
-        const repoHtml = repos.length
-          ? `<ul>${repos.map((repo) => `<li><code>${esc(repo)}</code></li>`).join("")}</ul>`
-          : `<p class="muted">No images stored yet.</p>`;
-        return `<tr>
-          <td><code>${esc(name)}</code></td>
-          <td><span class="pill ${c.running ? "ok" : "bad"}">${c.running ? "up" : "down"}</span></td>
-          <td class="muted">${esc(c.endpoint || "")}</td>
-          <td>${esc(String(c.images || 0))} images</td>
-        </tr>
-        <tr><td colspan="4"><details data-reg="${esc(name)}" ${open.has(name) ? "open" : ""}>
-          <summary>${repos.length ? `${repos.length} stored` : "Nothing stored"}</summary>
-          ${repoHtml}
-        </details></td></tr>`;
+        return `<button type="button" class="reg-card" data-reg-open="${esc(name)}">
+          <strong><code>${esc(name)}</code></strong>
+          <span class="pill ${c.running ? "ok" : "bad"}">${c.running ? "up" : "down"}</span>
+          <span>${esc(String(c.images || repos.length || 0))} images</span>
+          <span class="muted">${esc(c.endpoint || "")}</span>
+        </button>`;
       })
-      .join("")}</tbody></table>`;
-  }
-  if (chartsFold) {
-    const sum = chartsFold.querySelector("summary");
-    if (sum) sum.textContent = charts.length ? `Helm charts · ${charts.length}` : "Helm charts";
+      .join("")}</div>`;
   }
   if (!list) return;
+  const onConsole = charts.filter((c) => c && c.oci).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const helm = charts.filter((c) => c && !c.oci).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   if (!charts.length) {
     list.innerHTML = `<p class="muted">${caches.length ? "No charts listed." : ""}</p>`;
     return;
   }
-  const ordered = charts.slice().sort((a, b) => {
-    const oci = Number(!!b.oci) - Number(!!a.oci);
-    if (oci) return oci;
-    return String(a.name).localeCompare(String(b.name));
-  });
-  list.innerHTML = `<table><tbody>${ordered
-    .map(
-      (c) =>
-        `<tr><td><code>${esc(c.name || "")}</code></td><td class="muted">${esc(chartWhere(c))}</td><td>${
-          c.oci ? "on this console" : "Helm repo"
-        }</td></tr>`
-    )
-    .join("")}</tbody></table>`;
+  list.innerHTML = `<h3 class="lc-title">On this console</h3>${chartTable(onConsole)}<h3 class="lc-title">Helm repo</h3>${chartTable(helm)}`;
 }
 
 function refreshRegistry(id, opts) {
@@ -6349,7 +6797,11 @@ function refreshRegistry(id, opts) {
       if (cardOnly) renderCacheCard();
       else renderAll();
     })
-    .catch(() => {});
+    .catch(() => {
+      if (gen !== registryGen || envId !== id) return;
+      const meta = document.getElementById("reg-cache-meta");
+      if (meta && cardOnly) meta.textContent = "Registries unavailable.";
+    });
 }
 
 export function imageCacheHtml() {
@@ -6357,16 +6809,27 @@ export function imageCacheHtml() {
   <div class="card reg-cache" id="reg-cache-card">
     <div class="toolbar">
       <h2>Image cache</h2>
-      <button type="button" class="btn-sm" id="reg-cache-warm" ${gate(canAdmin(), "admin")}>Cache images and charts</button>
+      <button type="button" class="btn-sm" id="reg-cache-config" ${gate(canRun(), "operator")}>Configure</button>
+      <button type="button" class="secondary btn-sm" id="reg-cache-warm" ${gate(canAdmin(), "admin")}>Cache images and charts</button>
     </div>
     <p class="muted">Registries, container images, and Helm charts on this console. Nodes pull from here.</p>
-    <div class="muted" id="reg-cache-meta">${loadingHtml("Loading the registries…")}</div>
+    <p id="reg-cache-setup" class="muted">Configure sets the address machines pull from, and which registries are mirrored.</p>
+    <div id="reg-cache-meta">${skeletonHtml(3)}</div>
     <div id="reg-cache-regs"></div>
-    <details id="reg-cache-charts">
-      <summary>Helm charts</summary>
+    <div id="reg-cache-charts">
+      <h3 class="lc-title">Helm charts</h3>
       <p class="muted">OCI charts sit in the registry cache. The others are Helm repos.</p>
       <div id="reg-cache-chart-list"></div>
-    </details>
+    </div>
+    <div id="reg-cache-modal" class="gsc-modal" hidden>
+      <div class="gsc-modal-card gsc-modal-wide" role="dialog" aria-modal="true" aria-labelledby="reg-cache-modal-title">
+        <div class="toolbar">
+          <h2 id="reg-cache-modal-title">Registry</h2>
+          <button type="button" class="secondary btn-sm" data-reg-close>Close</button>
+        </div>
+        <div id="reg-cache-modal-body"></div>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -6564,6 +7027,37 @@ export function wireDeployMap() {
     cacheWarm.dataset.wired = "1";
     cacheWarm.addEventListener("click", () => warmImageCache());
   }
+  const cacheConfig = document.getElementById("reg-cache-config");
+  if (cacheConfig && !cacheConfig.dataset.wired) {
+    cacheConfig.dataset.wired = "1";
+    cacheConfig.addEventListener("click", () => openRegistryConfig());
+  }
+  const cacheCard = document.getElementById("reg-cache-card");
+  if (cacheCard && !cacheCard.dataset.regWired) {
+    cacheCard.dataset.regWired = "1";
+    cacheCard.addEventListener("click", (e) => {
+      if (e.target.closest("[data-reg-close]") || e.target.id === "reg-cache-modal") {
+        closeRegistryModal();
+        return;
+      }
+      const open = e.target.closest("[data-reg-open]");
+      if (open) openRegistryModal(open.dataset.regOpen || "");
+    });
+  }
+  if (!window.__regCacheEsc) {
+    window.__regCacheEsc = true;
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const config = document.getElementById("reg-config-modal");
+      if (config && !config.hidden) {
+        closeRegistryConfig();
+        return;
+      }
+      const modal = document.getElementById("reg-cache-modal");
+      if (!modal || modal.hidden) return;
+      closeRegistryModal();
+    });
+  }
   const validate = document.getElementById("dm-validate");
   if (validate && !validate.dataset.wired) {
     validate.dataset.wired = "1";
@@ -6645,13 +7139,17 @@ export async function loadDeployMap(id) {
     shownLive = null;
     liveHist = { cluster: [], nodes: {}, pods: {} };
     metricsMissing = false;
+    platform = null;
+    inventoryServers = [];
   }
   if (metricsTimer) clearTimeout(metricsTimer);
   metricsTimer = null;
   stopLiveSmooth();
   if (!envId) return;
   if (!same) applyCache(readCache(envId));
-  if (snap || platform) renderAll();
+  rememberEnvName();
+  if (snap || platform || inventoryServers.length) renderAll();
+  else renderEnvHealth();
   const topics = ["jobs", "activity"];
   topics.push(`env:${envId}`);
   const onMetal = (payload) => {
@@ -6787,6 +7285,7 @@ export function destroyDeployMap() {
   cacheCardSig = "";
   registryGen += 1;
   platform = null;
+  inventoryServers = [];
   workloads = null;
   osVms = [];
   osCloud = null;

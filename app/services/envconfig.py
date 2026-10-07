@@ -35,6 +35,12 @@ Older server rows may still say ``source: maas``; they still load::
     pxe: {interface, range_start, range_end, # console-owned DHCP/PXE (services/pxe.py);
           netmask, gateway, dns,             # interface/range_start/range_end required
           next_server, http_port, image_url} # when the section is present
+    registry: {host, upstreams}            # image cache. host is the address
+                                           # nodes pull from (empty follows pxe
+                                           # next_server, then this console's
+                                           # own address). upstreams is the
+                                           # pull-through list. Not rendered
+                                           # into /etc/genestack.
     helm_overrides: {<service>: <inline yaml mapping>, global: {...}}
     kustomize_patches: {<service>: [<patch yaml docs>]}
     secrets:                                 # encrypted at rest (fernet:), masked on read
@@ -152,6 +158,7 @@ KNOWN_TOP_LEVEL_KEYS = frozenset(
         "talos",
         "pxe",
         "ovh",
+        "registry",
     }
 )
 
@@ -610,6 +617,12 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
         http_port = pxe.get("http_port")
         if http_port is not None and not isinstance(http_port, int):
             raise ConfigValidationError("pxe.http_port must be an integer")
+    registry = data.get("registry")
+    if registry is not None:
+        from app.services.image_registry import normalize_registry_section
+
+        data["registry"], registry_warnings = normalize_registry_section(registry)
+        warnings.extend(registry_warnings)
     secrets = data.get("secrets")
     if secrets is not None:
         if not isinstance(secrets, dict):
@@ -1071,6 +1084,42 @@ def upsert_static_server(
     servers[hostname] = entry
     doc["servers"] = servers
     return put_version(db, env, _dump(doc), actor)
+
+
+def ensure_server_ssh_user(
+    db: Session,
+    env: Environment,
+    actor: str | None,
+    *,
+    hostname: str,
+    ssh_user: str,
+) -> bool:
+    """Record a login when that server exists and ``ssh_user`` is empty.
+
+    Does not commit. Does not replace a login that is already set.
+    """
+    name = str(hostname or "").strip()
+    user = str(ssh_user or "").strip()
+    if not name or not user or not _HOSTNAME_KEY_RE.match(name):
+        return False
+    if user.startswith("-") or any(ch in user for ch in (" ", "\t", "@", "/")):
+        return False
+    current = get_current(db, env)
+    if not current:
+        return False
+    doc = dict(current[0])
+    servers = dict(doc.get("servers") or {})
+    entry = servers.get(name)
+    if not isinstance(entry, dict):
+        return False
+    if str(entry.get("ssh_user") or "").strip():
+        return False
+    entry = dict(entry)
+    entry["ssh_user"] = user
+    servers[name] = entry
+    doc["servers"] = servers
+    put_version(db, env, _dump(doc), actor)
+    return True
 
 
 def adopt_ovh_identity(

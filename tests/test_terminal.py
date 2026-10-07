@@ -341,3 +341,164 @@ def test_ws_rejects_unset_deployer_never_spawns_bash(client, admin_headers, monk
             ws.receive_json()
     assert exc_info.value.code == terminal.CLOSE_NO_DEPLOYER
     assert spawned == []
+
+
+def test_ws_rejects_unknown_machine(client, admin_headers, monkeypatch):
+    """A hostname that is not in inventory never spawns a shell."""
+    spawned: list[list[str]] = []
+
+    def _capture_spawn(self, argv):
+        spawned.append(list(argv))
+        raise AssertionError("spawn must not run for an unknown machine")
+
+    monkeypatch.setattr(terminal.TerminalSession, "spawn", _capture_spawn)
+    env = _create_env(client, admin_headers)
+    url = _ws_url(env["id"], _ticket(client, admin_headers)) + "&machine=not-in-inventory"
+    with client.websocket_connect(url) as ws:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_json()
+    assert exc_info.value.code == terminal.CLOSE_NOT_FOUND
+    assert spawned == []
+
+
+def test_inventory_machine_session_does_not_replace_deploy_host(
+    client, admin_headers, cat_override
+):
+    env = _create_env(client, admin_headers)
+    added = client.post(
+        f"/api/v1/environments/{env['id']}/servers/static",
+        headers=admin_headers,
+        json={
+            "hostname": "compute-01",
+            "ip": "10.30.0.8",
+            "private_ip": "10.40.0.8",
+            "ssh_user": "ops",
+        },
+    )
+    assert added.status_code == 201, added.text
+    deploy_url = _ws_url(env["id"], _ticket(client, admin_headers))
+    machine_url = (
+        _ws_url(env["id"], _ticket(client, admin_headers)) + "&machine=compute-01"
+    )
+    with client.websocket_connect(deploy_url) as deploy:
+        deploy.send_json({"type": "input", "data": "deploy"})
+        with client.websocket_connect(machine_url) as machine:
+            machine.send_json({"type": "input", "data": "machine"})
+            assert len(terminal._sessions) == 2
+            deploy.send_json({"type": "input", "data": "still-open"})
+    opened = _wait_for_audit(env["id"], "env.terminal.open")
+    targets = {row.details.get("target") for row in opened}
+    assert "ubuntu@deployer.example.com" in targets
+    assert "ops@10.40.0.8" in targets
+
+
+def test_ubuntu_install_login_defaults_to_ubuntu(client, admin_headers, db):
+    """A Genestack Ubuntu install with no recorded login uses ubuntu."""
+    from app.models import BaremetalNode, Environment
+    from app.services.crypto import encrypt_secret
+
+    env = _create_env(client, admin_headers)
+    added = client.post(
+        f"/api/v1/environments/{env['id']}/servers/static",
+        headers=admin_headers,
+        json={"hostname": "compute-01", "ip": "10.30.0.8", "private_ip": "10.40.0.8"},
+    )
+    assert added.status_code == 201, added.text
+    row = db.get(Environment, env["id"])
+    assert row is not None
+    row.deployer_ssh_user = "root"
+    db.add(
+        BaremetalNode(
+            environment_id=env["id"],
+            name="compute-01",
+            bmc_host="bmc.example.com",
+            bmc_username="root",
+            bmc_password=encrypt_secret("secret"),
+            boot_stage="ubuntu",
+        )
+    )
+    db.commit()
+    host, user = terminal._inventory_target(db, row, "compute-01")
+    assert host == "10.40.0.8"
+    assert user == "ubuntu"
+
+
+def test_explicit_ssh_user_wins_over_ubuntu_install(client, admin_headers, db):
+    from app.models import BaremetalNode, Environment
+    from app.services.crypto import encrypt_secret
+
+    env = _create_env(client, admin_headers)
+    added = client.post(
+        f"/api/v1/environments/{env['id']}/servers/static",
+        headers=admin_headers,
+        json={
+            "hostname": "compute-01",
+            "ip": "10.30.0.8",
+            "private_ip": "10.40.0.8",
+            "ssh_user": "ops",
+        },
+    )
+    assert added.status_code == 201, added.text
+    row = db.get(Environment, env["id"])
+    db.add(
+        BaremetalNode(
+            environment_id=env["id"],
+            name="compute-01",
+            bmc_host="bmc.example.com",
+            bmc_username="root",
+            bmc_password=encrypt_secret("secret"),
+            boot_stage="ubuntu",
+        )
+    )
+    db.commit()
+    _host, user = terminal._inventory_target(db, row, "compute-01")
+    assert user == "ops"
+
+
+def test_target_argv_passes_environment_key(monkeypatch):
+    settings = get_settings()
+    old = settings.terminal_command_override
+    settings.terminal_command_override = ""
+    monkeypatch.setattr(terminal, "_known_hosts_option", lambda: None)
+    try:
+        argv = terminal._target_argv("10.1.1.1", "ubuntu", "/tmp/gsc-not-a-real-key")
+    finally:
+        settings.terminal_command_override = old
+    assert argv[-1] == "ubuntu@10.1.1.1"
+    assert argv[argv.index("-i") + 1] == "/tmp/gsc-not-a-real-key"
+    assert "BatchMode=yes" in argv
+
+
+def test_override_ignores_identity_file(cat_override):
+    argv = terminal._target_argv("10.1.1.1", "ubuntu", "/tmp/gsc-not-a-real-key")
+    assert argv == ["/bin/cat"]
+
+
+def test_ensure_server_ssh_user_records_ubuntu_once(client, admin_headers, db):
+    from app.models import Environment
+    from app.services import envconfig
+
+    env = _create_env(client, admin_headers)
+    added = client.post(
+        f"/api/v1/environments/{env['id']}/servers/static",
+        headers=admin_headers,
+        json={"hostname": "compute-01", "ip": "10.30.0.8", "private_ip": "10.40.0.8"},
+    )
+    assert added.status_code == 201, added.text
+    row = db.get(Environment, env["id"])
+    assert envconfig.ensure_server_ssh_user(
+        db, row, "test", hostname="compute-01", ssh_user="ubuntu"
+    )
+    db.commit()
+    listed = client.get(
+        f"/api/v1/environments/{env['id']}/servers", headers=admin_headers
+    )
+    assert listed.status_code == 200, listed.text
+    match = next(s for s in listed.json()["servers"] if s["hostname"] == "compute-01")
+    assert match["ssh_user"] == "ubuntu"
+    assert (
+        envconfig.ensure_server_ssh_user(
+            db, row, "test", hostname="compute-01", ssh_user="ubuntu"
+        )
+        is False
+    )

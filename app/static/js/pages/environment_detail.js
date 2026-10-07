@@ -3,19 +3,18 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls35";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls40";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
 import { destroyWorkflowCard } from "./environment_workflow.js?v=ls27";
-import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=ls27";
-import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js";
+import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=ls39";
+import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls39";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap } from "./environment_deploy_map.js?v=ls35";
+import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap } from "./environment_deploy_map.js?v=ls43";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
-import { terminalCardHtml, wireTerminalCard, loadTerminalCard, destroyTerminalCard } from "./environment_terminal.js?v=ls26";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";
 import { reachCardHtml, wireReachCard, loadReachCard, destroyReachCard } from "./environment_reach.js";
@@ -28,7 +27,7 @@ export const title = "Environment Detail";
 
 let envId = "";
 let activePtab = "machines";
-let activeOs = "talos";
+let activeOs = "all";
 let osPinned = false;
 let pathListener = null;
 
@@ -192,14 +191,16 @@ const PTAB_LEAD = {
 };
 
 const OS_LEAD = {
+  all: "Every computer in this environment. Talos and Ubuntu filter the list. Add a machine records a hostname and IP. It does not boot the machine.",
   talos: "Talos machines in this list. Add a machine records a hostname and IP. It does not boot the machine.",
-  ubuntu: "Ubuntu machines in this list. Status shows whether each one is up, running, reachable, and authenticated.",
+  ubuntu: "Ubuntu machines in this list. Reach shows whether each one is up, running, reachable, and authenticated.",
 };
 
 const PANEL_LOAD_MS = 30000;
 
 function showPanelLoading(panel, label) {
   if (!panel || panel.dataset.gscReady === "1") return;
+  if (panel.querySelector("#srv-card, #kc-card, #reg-cache-card, #pf-card")) return;
   panel.classList.add("is-loading");
   let el = panel.querySelector(":scope > .gsc-loading");
   if (!el) {
@@ -240,7 +241,7 @@ function envTabHash(tabName, ptab) {
   if (tabName === "platform") {
     const id = normalizePtab(ptab || activePtab);
     q.set("ptab", id);
-    if (id === "machines") q.set("os", activeOs === "ubuntu" ? "ubuntu" : "talos");
+    if (id === "machines") q.set("os", activeOs === "ubuntu" || activeOs === "talos" ? activeOs : "all");
   } else if (tabName === "settings") {
     const id = ptab || "config";
     if (id === "config" || id === "apps" || id === "access" || id === "expert") q.set("ptab", id);
@@ -284,7 +285,7 @@ export function applyQuery({ param, query }) {
   const tab = (query && query.get("tab")) || "workflow";
   const ptab = query && query.get("ptab");
   const os = query && query.get("os");
-  if (os === "ubuntu" || os === "talos") {
+  if (os === "ubuntu" || os === "talos" || os === "all") {
     activeOs = os;
     osPinned = true;
   }
@@ -293,7 +294,7 @@ export function applyQuery({ param, query }) {
 }
 
 function switchOsTab(name, opts = {}) {
-  const id = name === "ubuntu" ? "ubuntu" : "talos";
+  const id = name === "ubuntu" ? "ubuntu" : name === "talos" ? "talos" : "all";
   if (opts.pin) osPinned = true;
   activeOs = id;
   document.querySelectorAll("[data-ostab]").forEach((t) => t.classList.toggle("active", t.dataset.ostab === id));
@@ -314,6 +315,14 @@ function switchPlatformSubtab(name) {
   panel.querySelectorAll(".ptab-panel").forEach((p) => p.classList.toggle("active", p.dataset.ppanel === id));
   if (id === "machines") switchOsTab(activeOs, { silent: true });
   loadPlatformLayer(id);
+}
+
+// The fleet line lives in #env-health. Overview loads it with the map.
+// Any other first tab still needs that same read, or the line stays on
+// "Overview loading…" until the reader opens Overview.
+function loadFleetLine() {
+  if (!envId || activeTab === "workflow") return;
+  loadDeployMap(envId);
 }
 
 function loadPlatformLayer(name) {
@@ -345,7 +354,7 @@ const tabLoads = new Map();
 // not a hardcoded one).
 let activeTab = "workflow";
 const TAB_LOADERS = {
-  workflow: [loadDeployMap, loadProgressCard, loadTerminalCard],
+  workflow: [loadDeployMap, loadProgressCard],
   cache: [loadImageCache],
   observe: [loadObserveCard],
   settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
@@ -386,8 +395,9 @@ export async function render(root, { param, query } = {}) {
   activePtab = settingsTabs.has(activeTab)
     ? (rawPtab || "config")
     : normalizePtab(rawPtab || "machines");
-  activeOs = query && query.get("os") === "ubuntu" ? "ubuntu" : "talos";
-  osPinned = !!(query && (query.get("os") === "ubuntu" || query.get("os") === "talos"));
+  const osQuery = query && query.get("os");
+  activeOs = osQuery === "ubuntu" || osQuery === "talos" || osQuery === "all" ? osQuery : "all";
+  osPinned = !!(query && (osQuery === "ubuntu" || osQuery === "talos" || osQuery === "all"));
   tabLoads.clear();
   if (!store.envs.length) await loadEnvs().catch(() => {});
   if (param) envId = param;
@@ -427,6 +437,8 @@ export async function render(root, { param, query } = {}) {
       gap: .75rem;
     }
     .env-grid.full { grid-template-columns: 1fr; }
+    #fleet-stats { margin: 0 0 .85rem; }
+    #fleet-stats .om-stats { margin-top: 0; }
     @media (max-width: 960px) {
       .env-grid { grid-template-columns: 1fr; }
     }
@@ -525,11 +537,13 @@ export async function render(root, { param, query } = {}) {
     <!-- ═══ MACHINES / KUBERNETES / OPENSTACK ═══ -->
     <div class="tab-panel" data-panel="platform" id="panel-platform">
       <div class="ptab-panel active" data-ppanel="machines">
+        <div id="fleet-stats"></div>
         <div class="ostab-bar" id="ostab-bar" role="tablist" aria-label="Operating system">
-          <button type="button" class="ostab active" data-ostab="talos" role="tab">Talos</button>
+          <button type="button" class="ostab active" data-ostab="all" role="tab">All</button>
+          <button type="button" class="ostab" data-ostab="talos" role="tab">Talos</button>
           <button type="button" class="ostab" data-ostab="ubuntu" role="tab">Ubuntu</button>
         </div>
-        <p class="ptab-lead" id="ostab-lead">${OS_LEAD.talos}</p>
+        <p class="ptab-lead" id="ostab-lead">${OS_LEAD.all}</p>
         <div class="env-grid full">
           ${serversCardHtml()}
         </div>
@@ -598,7 +612,6 @@ export async function render(root, { param, query } = {}) {
       </details>
     </div>
 
-    ${terminalCardHtml()}
     <div id="wf-mod-park" hidden></div>
   </div>`;
 
@@ -620,7 +633,7 @@ export async function render(root, { param, query } = {}) {
     pathListener = (ev) => {
       const provider = ev.detail && ev.detail.provider;
       const quiet = !!(ev.detail && ev.detail.quiet);
-      if (quiet && osPinned) return;
+      if (activeOs === "all" || (quiet && osPinned)) return;
       if (provider === "kubespray") switchOsTab("ubuntu", { silent: true, pin: true });
       else if (provider === "talos") switchOsTab("talos", { silent: true, pin: true });
     };
@@ -670,7 +683,6 @@ export async function render(root, { param, query } = {}) {
   wireReachCard(() => envId);
   wireHostsCard(() => envId);
   wireComponentsCard(() => envId);
-  wireTerminalCard(() => envId);
   wireSshKeysCard(() => envId);
   wireAppsCard(() => envId);
   wireObserveCard(() => envId, { onGoto: (ptab) => switchTab("platform", ptab) });
@@ -691,6 +703,7 @@ export async function render(root, { param, query } = {}) {
       loadDescriptor().catch(() => {});
     }
     if (activeTab === "platform") loadClusterCard(envId);
+    loadFleetLine();
   } else {
     loadComponentsCard("", null);
     loadClusterCard("");
@@ -704,7 +717,6 @@ export function destroy() {
   destroyDeployMap();
   destroyWorkflowCard();
   destroyComponentsCard();
-  destroyTerminalCard();
   destroyAgentsCard();
   destroyReachCard();
   destroyHostsCard();
@@ -753,29 +765,39 @@ async function paintEnvApply(el, env) {
     logs = health ? !!health.dry_run : true;
   }
   const text = logs
-    ? "This environment only logs. Jobs do not change the machines."
-      + (inherited ? " It follows the console default. Apply here when you mean the jobs to run." : "")
-    : "This environment applies. Jobs from here change the machines.";
-  const label = logs ? "Apply on this environment" : "Look around only";
-  const nextDry = !logs;
+    ? "Jobs from here only write a log. They do not change the machines."
+    : "Jobs from here change the machines.";
+  const note = inherited
+    ? `<p class="env-mode-note">Follows the console default until you pick one.</p>`
+    : "";
+  const locked = gate(canRun(), "operator");
   el.hidden = false;
-  el.innerHTML = `<span>${esc(text)}</span> <button class="${logs ? "btn-sm" : "secondary btn-sm"}" type="button" id="env-apply-btn" ${gate(canRun(), "operator")}>${esc(label)}</button>`;
-  const btn = document.getElementById("env-apply-btn");
-  if (!btn) return;
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    try {
-      const updated = await api(`/api/v1/environments/${encodeURIComponent(envId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ dry_run: nextDry }),
-      });
-      toast(nextDry ? "This environment only logs" : "This environment applies", "ok");
-      paintEnvApply(el, updated);
-      window.dispatchEvent(new CustomEvent("gsc-dry-run"));
-    } catch (e) {
-      toast(e.message || "Could not update this environment", "bad");
-      btn.disabled = false;
-    }
+  el.className = "env-mode";
+  el.innerHTML = `
+    <span class="env-mode-copy">${esc(text)}</span>
+    <div class="env-mode-switch" role="group" aria-label="What jobs do on this environment">
+      <button type="button" class="env-mode-seg${logs ? " is-on" : ""}" data-env-mode="look" aria-pressed="${logs ? "true" : "false"}" ${locked}>Look around</button>
+      <button type="button" class="env-mode-seg${logs ? "" : " is-on"}" data-env-mode="apply" aria-pressed="${logs ? "false" : "true"}" ${locked}>Apply</button>
+    </div>
+    ${note}`;
+  el.querySelectorAll("[data-env-mode]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const wantLogs = btn.dataset.envMode === "look";
+      if (wantLogs === logs || btn.disabled) return;
+      btn.disabled = true;
+      try {
+        const updated = await api(`/api/v1/environments/${encodeURIComponent(envId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ dry_run: wantLogs }),
+        });
+        toast(wantLogs ? "Look around. Jobs only write a log." : "Apply. Jobs change the machines.", "ok");
+        paintEnvApply(el, updated);
+        window.dispatchEvent(new CustomEvent("gsc-dry-run"));
+      } catch (e) {
+        toast(e.message || "Could not update this environment", "bad");
+        btn.disabled = false;
+      }
+    });
   });
 }
 
@@ -802,6 +824,7 @@ async function loadAll() {
     loadDescriptor().catch(() => {});
   }
   if (activeTab === "platform") loadClusterCard(envId);
+  loadFleetLine();
 }
 
 async function loadDescriptor() {

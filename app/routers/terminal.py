@@ -1,8 +1,9 @@
 """Deploy-host terminal: an interactive ssh shell pty-bridged over WebSocket.
 
-Operators open a tab in the console and get a shell on the environment's deploy
-host without leaving the app. The server spawns a pty running
-``ssh -o BatchMode=yes -o ConnectTimeout=10 <user>@<host>`` and bridges frames:
+Operators open a shell on the environment's deploy host, or on an inventory
+machine this console already manages, without leaving the app. The server
+spawns a pty running ``ssh -o BatchMode=yes -o ConnectTimeout=10 <user>@<host>``
+and bridges frames:
 
   client → server  {"type": "input", "data": "..."}        → pty stdin
                    {"type": "resize", "cols": n, "rows": n} → TIOCSWINSZ
@@ -12,16 +13,19 @@ host without leaving the app. The server spawns a pty running
 Guardrails: admin role minimum, via a single-use ``?ticket=`` (minted at
 ``POST /api/v1/auth/ticket``) or the standard headers — browsers cannot set
 headers on WebSocket, and raw ``?token=`` credentials are no longer accepted
-because query strings land in access logs; one session per
-(user, environment) — a second connect replaces the first; a 15
-minute idle timeout; the pty is killed when the socket closes; and there is
-NO free-form command and NO local-shell fallback — the v1 target is
-always the env's deploy host (``deployer_ssh_host`` +
-``deployer_ssh_user``, default root); missing deploy host closes with
-CLOSE_NO_DEPLOYER. Opens and
-closes are written to the audit log. ``settings.terminal_command_override``
-replaces the ssh argv wholesale (tests point it at ``/bin/cat`` so CI needs
-no real host).
+because query strings land in access logs. The deploy host is one session per
+(user, environment) — a second connect replaces the first. An optional
+``?machine=<hostname>`` opens a separate session for that inventory row. The
+hostname must already be in the environment config, and the address is the
+recorded ``private_ip`` or ``ip``. The login is that row's ``ssh_user``. A
+machine this console installed as Ubuntu, with no login recorded yet, uses
+``ubuntu`` and this environment's key. There is no field for an arbitrary host.
+A 15 minute idle timeout applies. The pty is killed when the socket closes.
+There is NO free-form command and NO local-shell fallback. A missing deploy
+host closes with CLOSE_NO_DEPLOYER. A machine that is not in inventory closes
+with CLOSE_NOT_FOUND. Opens and closes are written to the audit log.
+``settings.terminal_command_override`` replaces the ssh argv wholesale (tests
+point it at ``/bin/cat`` so CI needs no real host).
 """
 
 from __future__ import annotations
@@ -33,25 +37,31 @@ import fcntl
 import logging
 import os
 import pty
+import re
 import shlex
 import signal
 import struct
 import subprocess
+import tempfile
 import termios
 import time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import ROLE_RANK
 from app.config import get_settings
 from app.db import SessionLocal
 from app.deps import check_tenant_access, principal_from_token
-from app.models import Environment
+from app.models import BaremetalNode, Environment
 from app.schemas import Principal
-from app.services import tickets
+from app.services import envconfig, tickets
 from app.services.job_runner import JobRunner
+from app.services.ssh_access import login_for_server
+from app.services.ssh_keys import get_decrypted_private_key
 
 log = logging.getLogger(__name__)
 
@@ -72,8 +82,11 @@ _READ_CHUNK = 65536
 _DEFAULT_COLS = 80
 _DEFAULT_ROWS = 24
 
-# One live session per (username, environment_id); a new connect replaces.
-_sessions: dict[tuple[str, str], "TerminalSession"] = {}
+# Deploy host: one live session per (username, environment_id); a new connect
+# replaces that one. An inventory machine adds the hostname as a third part
+# and does not replace the deploy-host session.
+_sessions: dict[tuple[str, ...], "TerminalSession"] = {}
+_MACHINE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$")
 
 
 def _reset_sessions() -> None:
@@ -139,7 +152,85 @@ def _write_audit(actor: str, action: str, env_id: str, details: dict[str, Any]) 
         db.close()
 
 
-def _target_argv(env_host: str, env_user: str | None) -> list[str]:
+class _InventoryReject(Exception):
+    """The requested machine is not an allowlisted inventory SSH target."""
+
+    def __init__(self, code: int, reason: str) -> None:
+        self.code = code
+        self.reason = reason
+
+
+def _inventory_target(db: Session, env: Environment, machine: str) -> tuple[str, str]:
+    """SSH destination for one recorded server. Never a typed-in host.
+
+    The hostname has to match a ``servers`` key in the current config. The
+    address is that row's private IP, then its IP. The login is the row's
+    ``ssh_user``. Ubuntu installed from this console, with no login yet,
+    uses ``ubuntu``. Otherwise the deploy user's, then root.
+    """
+    name = (machine or "").strip()
+    if not name or not _MACHINE_RE.fullmatch(name):
+        raise _InventoryReject(CLOSE_NOT_FOUND, "host is not in this environment")
+    current = envconfig.get_current(db, env)
+    servers = (current[0].get("servers") or {}) if current else {}
+    entry = servers.get(name) if isinstance(servers, dict) else None
+    if not isinstance(entry, dict):
+        raise _InventoryReject(CLOSE_NOT_FOUND, "host is not in this environment")
+    host = str(entry.get("private_ip") or entry.get("ip") or "").strip()
+    if (
+        not host
+        or host.startswith("-")
+        or any(ch in host for ch in (" ", "\t", "@", "/"))
+        or not _MACHINE_RE.fullmatch(host)
+    ):
+        raise _InventoryReject(CLOSE_NO_DEPLOYER, "inventory host has no address")
+    stage = ""
+    node = db.scalar(
+        select(BaremetalNode).where(
+            BaremetalNode.environment_id == env.id,
+            BaremetalNode.name == name,
+        )
+    )
+    if node is not None:
+        stage = str(node.boot_stage or "")
+    user = login_for_server(entry, env, stage)
+    return host, user
+
+
+def _write_identity(key_text: str | None) -> str | None:
+    """Write the environment key for ssh -i. The caller deletes the file."""
+    text = (key_text or "").strip()
+    if not text:
+        return None
+    fd, name = tempfile.mkstemp(prefix="gsc-term-")
+    try:
+        os.write(fd, (text + "\n").encode())
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    return name
+
+
+def _drop_identity(path: str | None) -> None:
+    if not path:
+        return
+    with contextlib.suppress(OSError):
+        os.unlink(path)
+
+
+def _known_hosts_option() -> str | None:
+    try:
+        root = Path(get_settings().data_dir) / "ssh"
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "known_hosts"
+        if not path.exists():
+            path.touch(mode=0o600)
+        return f"UserKnownHostsFile={path}"
+    except OSError:
+        return None
+
+
+def _target_argv(env_host: str, env_user: str | None, identity_file: str | None = None) -> list[str]:
     """Command the pty runs: the ssh to the deploy host (or the test override).
 
     There is intentionally NO local-shell fallback: an empty deploy host must
@@ -163,14 +254,22 @@ def _target_argv(env_host: str, env_user: str | None) -> list[str]:
         or "proxycommand" in user.lower()
     ):
         raise ValueError("refusing unsafe deployer_ssh_user for terminal ssh")
-    return [
+    argv = [
         "ssh",
         "-o",
         "BatchMode=yes",
         "-o",
         "ConnectTimeout=10",
-        f"{user}@{host}",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
     ]
+    known = _known_hosts_option()
+    if known:
+        argv.extend(["-o", known])
+    if identity_file:
+        argv.extend(["-i", identity_file])
+    argv.append(f"{user}@{host}")
+    return argv
 
 
 def _set_winsize(fd: int, cols: int, rows: int) -> None:
@@ -193,6 +292,8 @@ class TerminalSession:
         self.actor = actor
         self.env_id = env_id
         self.target = target
+        self.session_key: tuple[str, ...] | None = None
+        self.identity_path: str | None = None
         self.loop = asyncio.get_running_loop()
         self.last_activity = time.monotonic()
         self.replaced = False
@@ -330,6 +431,8 @@ class TerminalSession:
         if self._done:
             return
         self._done = True
+        _drop_identity(self.identity_path)
+        self.identity_path = None
         for task in self._tasks:
             task.cancel()
         if self._master_fd is not None:
@@ -348,8 +451,9 @@ class TerminalSession:
                 # remote-end ssh session dies with it.
                 os.killpg(self._proc.pid, signal.SIGTERM)
             self.loop.run_in_executor(None, self._reap_proc)
-        if _sessions.get((self.actor, self.env_id)) is self:
-            _sessions.pop((self.actor, self.env_id), None)
+        key = self.session_key or (self.actor, self.env_id)
+        if _sessions.get(key) is self:
+            _sessions.pop(key, None)
         _write_audit(
             self.actor,
             "env.terminal.close",
@@ -380,54 +484,87 @@ async def terminal_ws(
     ws: WebSocket,
     environment_id: str = Query(default=""),
     ticket: str | None = Query(default=None),
+    machine: str | None = Query(default=None),
 ) -> None:
     await ws.accept()
 
     db = SessionLocal()
+    reject: tuple[int, str] | None = None
+    host = ""
+    user = "root"
+    env_id = ""
+    principal: Principal | None = None
+    machine_name = (machine or "").strip()
+    key_text: str | None = None
     try:
         principal = _resolve_ws_principal(ticket, ws.headers, db)
         if principal is None:
-            await _reject(ws, CLOSE_AUTH_FAILED, "missing or invalid credentials")
-            return
-        if ROLE_RANK[principal.role] < ROLE_RANK["admin"]:
-            await _reject(ws, CLOSE_FORBIDDEN, f"role '{principal.role}' insufficient")
-            return
-        env = db.get(Environment, environment_id) if environment_id else None
-        if env is None:
-            await _reject(ws, CLOSE_NOT_FOUND, "environment not found")
-            return
-        try:
-            check_tenant_access(db, principal, env.tenant_id, "admin")
-        except HTTPException:
-            await _reject(ws, CLOSE_FORBIDDEN, "no admin access to this environment")
-            return
-        host = (env.deployer_ssh_host or "").strip()
-        user = (env.deployer_ssh_user or "").strip() or "root"
-        env_id = env.id
+            reject = (CLOSE_AUTH_FAILED, "missing or invalid credentials")
+        elif ROLE_RANK[principal.role] < ROLE_RANK["admin"]:
+            reject = (CLOSE_FORBIDDEN, f"role '{principal.role}' insufficient")
+        else:
+            env = db.get(Environment, environment_id) if environment_id else None
+            if env is None:
+                reject = (CLOSE_NOT_FOUND, "environment not found")
+            else:
+                try:
+                    check_tenant_access(db, principal, env.tenant_id, "admin")
+                except HTTPException:
+                    reject = (CLOSE_FORBIDDEN, "no admin access to this environment")
+                else:
+                    env_id = env.id
+                    if machine_name:
+                        try:
+                            host, user = _inventory_target(db, env, machine_name)
+                        except _InventoryReject as exc:
+                            reject = (exc.code, exc.reason)
+                    else:
+                        host = (env.deployer_ssh_host or "").strip()
+                        user = (env.deployer_ssh_user or "").strip() or "root"
+                        if not host:
+                            reject = (
+                                CLOSE_NO_DEPLOYER,
+                                "environment has no deploy host configured",
+                            )
+                    if reject is None:
+                        try:
+                            key_text = get_decrypted_private_key(env)
+                        except Exception:
+                            key_text = None
     finally:
         db.close()
 
-    if not host:
-        await _reject(ws, CLOSE_NO_DEPLOYER, "environment has no deploy host configured")
+    if reject is not None or principal is None:
+        code, reason = reject or (CLOSE_AUTH_FAILED, "missing or invalid credentials")
+        await _reject(ws, code, reason)
         return
 
     target = f"{user}@{host}"
-    key = (principal.username, env_id)
+    key: tuple[str, ...] = (
+        (principal.username, env_id, machine_name) if machine_name else (principal.username, env_id)
+    )
 
-    # One session per (user, env): a second connect replaces the first.
+    # Deploy host: one session per (user, env). A machine key does not replace it.
     old = _sessions.pop(key, None)
     if old is not None:
         old.replaced = True
         await old.finish(reason="replaced by a new session", code=CLOSE_REPLACED, close_ws=True)
 
+    identity_path = _write_identity(key_text)
     session = TerminalSession(ws, principal.username, env_id, target)
+    session.session_key = key
+    session.identity_path = identity_path
     try:
-        argv = _target_argv(host, user)
+        argv = _target_argv(host, user, identity_path)
         session.spawn(argv)
     except ValueError as exc:
+        _drop_identity(identity_path)
+        session.identity_path = None
         await _reject(ws, CLOSE_NO_DEPLOYER, str(exc))
         return
     except (OSError, FileNotFoundError) as exc:
+        _drop_identity(identity_path)
+        session.identity_path = None
         await _reject(ws, CLOSE_SPAWN_FAILED, f"failed to spawn ssh: {exc}")
         return
     _sessions[key] = session

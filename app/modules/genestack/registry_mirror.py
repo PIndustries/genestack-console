@@ -23,6 +23,12 @@ OPERATION = {
     "backend": "internal",
     "params": [
         _p("dry_run", False, "List images without fetching", "boolean"),
+        _p(
+            "start_only",
+            False,
+            "Start the pull-through caches and do not pull images",
+            "boolean",
+        ),
     ],
     "handler": "registry_mirror",
     "mutating": True,
@@ -60,7 +66,11 @@ def run(
             "returncode": 2,
         }
     effective_dry = dry or bool(params.get("dry_run"))
-    log("[registry] warming Console image cache from live cluster")
+    start_only = bool(params.get("start_only"))
+    if start_only:
+        log("[registry] starting Console image caches")
+    else:
+        log("[registry] warming Console image cache from live cluster")
     result = image_registry_service.mirror_cluster(
         env,
         ctx.kubeconfig if ctx is not None else None,
@@ -68,6 +78,7 @@ def run(
         dry_run=effective_dry,
         settings=self.settings,
         check_cancel=check_cancel,
+        start_only=start_only,
     )
     self.write_audit(
         actor=job.created_by or "system",

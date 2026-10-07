@@ -329,8 +329,8 @@ function dryRunPillHtml(env, consoleLogs) {
   const own = env ? env.dry_run : null;
   const logs = own == null ? consoleLogs : own === true;
   return logs
-    ? `<span class="pill warn">dry-run</span>`
-    : `<span class="pill ok">applies</span>`;
+    ? `<span class="pill warn">Look around</span>`
+    : `<span class="pill ok">Apply</span>`;
 }
 
 function renderFleetCard(env, showTenant, consoleLogs) {

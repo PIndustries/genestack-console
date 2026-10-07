@@ -5,7 +5,7 @@
 // so a failed manage probe never blanks the rest of the card.
 // Defensive: the endpoint may 404, return partial payloads, or omit the
 // optional health/warnings/access keys — every path degrades, never a page break.
-import { api, downloadAuth, esc, fmtAge, loadingHtml, toast } from "../api.js";
+import { api, downloadAuth, esc, fmtAge, skeletonHtml, toast } from "../api.js";
 import { canRun, gate } from "../store.js";
 import { connect } from "../stream.js";
 import { applyLive, bindLiveEnv, live } from "./environment_live_state.js?v=ls5";
@@ -421,11 +421,34 @@ function matchesPodText(info) {
   return blob.includes(workloadsPodFilter.toLowerCase());
 }
 
+function byNamespace(rows) {
+  const groups = new Map();
+  for (const info of rows || []) {
+    const ns = String((info && info.namespace) || "default");
+    if (!groups.has(ns)) groups.set(ns, []);
+    groups.get(ns).push(info);
+  }
+  return [...groups.keys()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((ns) => ({ ns, rows: groups.get(ns) }));
+}
+
+function groupedTables(rows, headHtml, rowHtml, emptyLabel) {
+  if (!rows.length) return `<div class="muted">No ${esc(emptyLabel)}.</div>`;
+  return byNamespace(rows)
+    .map(({ ns, rows: group }) => {
+      const body = group.map(rowHtml).join("");
+      return `<section class="kc-ns"><h3 class="lc-title">${esc(ns)} <span class="muted">${group.length}</span></h3><table class="os-table"><thead><tr>${headHtml}</tr></thead><tbody>${body}</tbody></table></section>`;
+    })
+    .join("");
+}
+
 function workloadsTableHtml(rows) {
-  if (!rows.length) return '<div class="muted">No workloads.</div>';
   const run = canRun();
-  const body = rows
-    .map((info) => {
+  return groupedTables(
+    rows,
+    "<th>Kind</th><th>Name</th><th>Ready</th><th>Images</th><th></th>",
+    (info) => {
       const kind = kindPlural(info.kind);
       const ns = info.namespace || "default";
       const name = info.name || "";
@@ -453,61 +476,54 @@ function workloadsTableHtml(rows) {
       }
       return `<tr>
         <td>${esc(kindLabel(kind))}</td>
-        <td class="muted">${esc(ns)}</td>
         <td><code>${esc(name || "?")}</code></td>
         <td>${esc(readyLabel(info))}</td>
         <td class="muted kc-wl-images" title="${esc(imgs)}">${esc(trunc(imgs, 48))}</td>
         <td class="os-actions">${acts.join(" ")}</td>
       </tr>`;
-    })
-    .join("");
-  return `<table class="os-table">
-    <thead><tr><th>Kind</th><th>Namespace</th><th>Name</th><th>Ready</th><th>Images</th><th></th></tr></thead>
-    <tbody>${body}</tbody>
-  </table>`;
+    },
+    "workloads"
+  );
 }
 
 function podsTableHtml(rows) {
   const filtered = rows.filter(matchesPodText);
   const shown = filtered.slice(0, POD_ROW_LIMIT);
-  if (!shown.length) return '<div class="muted">No pods.</div>';
   const run = canRun();
-  const body = shown
-    .map((info) => {
-      const ns = info.namespace || "default";
-      const name = info.name || "";
-      const node = info.node || info.node_name || info.nodeName || "—";
-      const phase = info.phase || info.status || "";
-      const restarts = info.restarts ?? info.restart_count ?? info.restartCount ?? 0;
-      const acts = [
-        `<button type="button" class="secondary btn-sm" data-pod-logs data-ns="${esc(ns)}" data-pod="${esc(name)}">Logs</button>`,
-      ];
-      acts.push(
-        `<button type="button" class="secondary btn-sm" data-k8s-describe data-kind="pods" data-ns="${esc(ns)}" data-name="${esc(name)}">Describe</button>`
-      );
-      if (run && name) {
-        acts.push(
-          `<button type="button" class="secondary btn-sm" data-pod-del data-ns="${esc(ns)}" data-pod="${esc(name)}">Delete</button>`
-        );
-      }
-      return `<tr>
-        <td class="muted">${esc(ns)}</td>
-        <td><code>${esc(name || "?")}</code></td>
-        <td class="muted">${esc(node)}</td>
-        <td>${phasePillHtml(phase)}</td>
-        <td class="muted">${esc(restarts)}</td>
-        <td class="os-actions">${acts.join(" ")}</td>
-      </tr>`;
-    })
-    .join("");
   const more =
     filtered.length > shown.length
       ? `<div class="muted lc-more">+ ${filtered.length - shown.length} more pods not shown</div>`
       : "";
-  return `<table class="os-table">
-    <thead><tr><th>Namespace</th><th>Name</th><th>Node</th><th>Phase</th><th>Restarts</th><th></th></tr></thead>
-    <tbody>${body}</tbody>
-  </table>${more}`;
+  return (
+    groupedTables(
+      shown,
+      "<th>Name</th><th>Node</th><th>Phase</th><th>Restarts</th><th></th>",
+      (info) => {
+        const ns = info.namespace || "default";
+        const name = info.name || "";
+        const node = info.node || info.node_name || info.nodeName || "—";
+        const phase = info.phase || info.status || "";
+        const restarts = info.restarts ?? info.restart_count ?? info.restartCount ?? 0;
+        const acts = [
+          `<button type="button" class="secondary btn-sm" data-pod-logs data-ns="${esc(ns)}" data-pod="${esc(name)}">Logs</button>`,
+          `<button type="button" class="secondary btn-sm" data-k8s-describe data-kind="pods" data-ns="${esc(ns)}" data-name="${esc(name)}">Describe</button>`,
+        ];
+        if (run && name) {
+          acts.push(
+            `<button type="button" class="secondary btn-sm" data-pod-del data-ns="${esc(ns)}" data-pod="${esc(name)}">Delete</button>`
+          );
+        }
+        return `<tr>
+          <td><code>${esc(name || "?")}</code></td>
+          <td class="muted">${esc(node)}</td>
+          <td>${phasePillHtml(phase)}</td>
+          <td class="muted">${esc(restarts)}</td>
+          <td class="os-actions">${acts.join(" ")}</td>
+        </tr>`;
+      },
+      "pods"
+    ) + more
+  );
 }
 
 function setK8sPanel(id) {
@@ -588,26 +604,27 @@ function renderWorkloads() {
     workloadsError
       ? `<div class="muted">Workloads unavailable — ${esc(workloadsError)}</div>`
       : "";
-  const jobRows = jobs
-    .map((info) => {
-      const ns = info.namespace || "default";
-      const name = info.name || "";
-      const done = `${info.succeeded ?? 0}/${info.completions ?? "?"}`;
-      return `<tr>
-        <td class="muted">${esc(ns)}</td>
-        <td><code>${esc(name || "?")}</code></td>
-        <td class="muted">${esc(done)}</td>
-        <td class="muted">fail ${esc(info.failed ?? 0)} · active ${esc(info.active ?? 0)}</td>
-        <td class="os-actions"><button type="button" class="secondary btn-sm" data-k8s-describe data-kind="jobs" data-ns="${esc(ns)}" data-name="${esc(name)}">Describe</button></td>
-      </tr>`;
-    })
-    .join("");
+  const jobsMiss = !jobs.length && data.jobsError
+    ? `<h3 class="lc-title">Jobs</h3><div class="muted">Jobs unavailable — ${esc(data.jobsError)}</div>`
+    : "";
   const jobsHtml = jobs.length
-    ? `<h3 class="lc-title">Jobs</h3>
-      <table class="os-table">
-        <thead><tr><th>Namespace</th><th>Name</th><th>Completions</th><th></th><th></th></tr></thead>
-        <tbody>${jobRows}</tbody>
-      </table>`
+    ? `<h3 class="lc-title">Jobs</h3>` +
+      groupedTables(
+        jobs,
+        "<th>Name</th><th>Completions</th><th></th><th></th>",
+        (info) => {
+          const ns = info.namespace || "default";
+          const name = info.name || "";
+          const done = `${info.succeeded ?? 0}/${info.completions ?? "?"}`;
+          return `<tr>
+            <td><code>${esc(name || "?")}</code></td>
+            <td class="muted">${esc(done)}</td>
+            <td class="muted">fail ${esc(info.failed ?? 0)} · active ${esc(info.active ?? 0)}</td>
+            <td class="os-actions"><button type="button" class="secondary btn-sm" data-k8s-describe data-kind="jobs" data-ns="${esc(ns)}" data-name="${esc(name)}">Describe</button></td>
+          </tr>`;
+        },
+        "jobs"
+      )
     : "";
   body.classList.remove("muted");
   body.innerHTML =
@@ -619,7 +636,7 @@ function renderWorkloads() {
     workloadsTableHtml(wl) +
     `<h3 class="lc-title">Pods</h3>` +
     podsTableHtml(pods) +
-    jobsHtml;
+    (jobsHtml || jobsMiss);
 }
 
 function resetWorkloadsFilters() {
@@ -664,7 +681,9 @@ async function loadWorkloads() {
       const data = wl && typeof wl === "object" ? { ...wl } : {};
       const jobPayload = jobs && typeof jobs === "object" ? jobs : {};
       data.jobs = asList(jobPayload.jobs);
-      if (jobPayload.ok === false && !data.error) data.error = jobPayload.error;
+      if (jobPayload.ok === false) {
+        data.jobsError = jobPayload.error || jobPayload.message || "unavailable";
+      }
       return data;
     });
     workloadsInflight = pending;
@@ -863,8 +882,10 @@ function networkingHtml(data) {
   const svcs = asList(d.services);
   const ings = asList(d.ingresses);
   const run = canRun();
-  const svcRows = svcs
-    .map((info) => {
+  const svcHtml = groupedTables(
+    svcs,
+    "<th>Name</th><th>Type</th><th>ClusterIP</th><th>Ports</th><th></th>",
+    (info) => {
       const ns = info.namespace || "default";
       const name = info.name || "";
       const ports = Array.isArray(info.ports) ? info.ports.join(", ") : info.ports || "—";
@@ -877,22 +898,23 @@ function networkingHtml(data) {
         );
       }
       return `<tr>
-        <td class="muted">${esc(ns)}</td>
         <td><code>${esc(name || "?")}</code></td>
         <td>${esc(info.type || "ClusterIP")}</td>
         <td class="muted">${esc(info.cluster_ip || "—")}</td>
         <td class="muted">${esc(ports)}</td>
         <td class="os-actions">${acts.join(" ")}</td>
       </tr>`;
-    })
-    .join("");
-  const ingRows = ings
-    .map((info) => {
+    },
+    "services"
+  );
+  const ingHtml = groupedTables(
+    ings,
+    "<th>Name</th><th>Class</th><th>Hosts</th><th>Address</th><th>TLS</th><th></th>",
+    (info) => {
       const ns = info.namespace || "default";
       const name = info.name || "";
       const hosts = Array.isArray(info.hosts) ? info.hosts.join(", ") : info.hosts || "—";
       return `<tr>
-        <td class="muted">${esc(ns)}</td>
         <td><code>${esc(name || "?")}</code></td>
         <td class="muted">${esc(info.class || "—")}</td>
         <td>${esc(hosts)}</td>
@@ -900,12 +922,10 @@ function networkingHtml(data) {
         <td>${info.tls ? '<span class="pill ok">TLS</span>' : '<span class="muted">—</span>'}</td>
         <td class="os-actions"><button type="button" class="secondary btn-sm" data-k8s-describe data-kind="ingresses" data-ns="${esc(ns)}" data-name="${esc(name)}">Describe</button></td>
       </tr>`;
-    })
-    .join("");
-  return `<h3 class="lc-title">Services</h3>
-    ${svcs.length ? `<table class="os-table"><thead><tr><th>Namespace</th><th>Name</th><th>Type</th><th>ClusterIP</th><th>Ports</th><th></th></tr></thead><tbody>${svcRows}</tbody></table>` : emptyNote("services")}
-    <h3 class="lc-title">Ingresses</h3>
-    ${ings.length ? `<table class="os-table"><thead><tr><th>Namespace</th><th>Name</th><th>Class</th><th>Hosts</th><th>Address</th><th>TLS</th><th></th></tr></thead><tbody>${ingRows}</tbody></table>` : emptyNote("ingresses")}`;
+    },
+    "ingresses"
+  );
+  return `<h3 class="lc-title">Services</h3>${svcHtml}<h3 class="lc-title">Ingresses</h3>${ingHtml}`;
 }
 
 function storageHtml(data) {
@@ -914,8 +934,10 @@ function storageHtml(data) {
   const pvs = asList(d.persistentvolumes);
   const scs = asList(d.storageclasses);
   const run = canRun();
-  const pvcRows = pvcs
-    .map((info) => {
+  const pvcHtml = groupedTables(
+    pvcs,
+    "<th>Name</th><th>Phase</th><th>Class</th><th>Capacity</th><th>Modes</th><th></th>",
+    (info) => {
       const ns = info.namespace || "default";
       const name = info.name || "";
       const acts = [
@@ -927,7 +949,6 @@ function storageHtml(data) {
         );
       }
       return `<tr>
-        <td class="muted">${esc(ns)}</td>
         <td><code>${esc(name || "?")}</code></td>
         <td>${phasePillHtml(info.phase)}</td>
         <td class="muted">${esc(info.storage_class || "—")}</td>
@@ -935,8 +956,9 @@ function storageHtml(data) {
         <td class="muted">${esc((info.access_modes || []).join(", ") || "—")}</td>
         <td class="os-actions">${acts.join(" ")}</td>
       </tr>`;
-    })
-    .join("");
+    },
+    "PVCs"
+  );
   const pvRows = pvs
     .map((info) => `<tr>
       <td><code>${esc(info.name || "?")}</code></td>
@@ -957,7 +979,7 @@ function storageHtml(data) {
     </tr>`)
     .join("");
   return `<h3 class="lc-title">PersistentVolumeClaims</h3>
-    ${pvcs.length ? `<table class="os-table"><thead><tr><th>Namespace</th><th>Name</th><th>Phase</th><th>Class</th><th>Capacity</th><th>Modes</th><th></th></tr></thead><tbody>${pvcRows}</tbody></table>` : emptyNote("PVCs")}
+    ${pvcHtml}
     <h3 class="lc-title">PersistentVolumes</h3>
     ${pvs.length ? `<table class="os-table"><thead><tr><th>Name</th><th>Phase</th><th>Class</th><th>Capacity</th><th>Claim</th><th>Reclaim</th></tr></thead><tbody>${pvRows}</tbody></table>` : emptyNote("PVs")}
     <h3 class="lc-title">StorageClasses</h3>
@@ -994,40 +1016,43 @@ function configHtml(data) {
       </tr>`;
     })
     .join("");
-  const cmRows = cms
-    .map((info) => {
+  const cmHtml = groupedTables(
+    cms,
+    "<th>Name</th><th>Keys</th><th></th>",
+    (info) => {
       const ns = info.namespace || "default";
       const name = info.name || "";
       const keys = Array.isArray(info.keys) ? info.keys.join(", ") : "";
       return `<tr>
-        <td class="muted">${esc(ns)}</td>
         <td><code>${esc(name || "?")}</code></td>
         <td class="muted">${esc(keys || "—")}</td>
         <td class="os-actions"><button type="button" class="secondary btn-sm" data-k8s-describe data-kind="configmaps" data-ns="${esc(ns)}" data-name="${esc(name)}">Describe</button></td>
       </tr>`;
-    })
-    .join("");
-  const secretRows = secrets
-    .map((info) => {
-      const ns = info.namespace || "default";
+    },
+    "configmaps"
+  );
+  const secretHtml = groupedTables(
+    secrets,
+    "<th>Name</th><th>Type</th><th>Keys</th>",
+    (info) => {
       const name = info.name || "";
       const keys = Array.isArray(info.keys) ? `${info.keys.length} keys` : "";
       return `<tr>
-        <td class="muted">${esc(ns)}</td>
         <td><code>${esc(name || "?")}</code></td>
         <td class="muted">${esc(info.type || "Opaque")}</td>
         <td class="muted">${esc(keys || "—")}</td>
       </tr>`;
-    })
-    .join("");
+    },
+    "secrets"
+  );
   return `${nsForm}
     <h3 class="lc-title">Namespaces</h3>
     ${nss.length ? `<table class="os-table"><thead><tr><th>Name</th><th>Phase</th><th>Labels</th><th></th></tr></thead><tbody>${nsRows}</tbody></table>` : emptyNote("namespaces")}
     <h3 class="lc-title">ConfigMaps</h3>
-    ${cms.length ? `<table class="os-table"><thead><tr><th>Namespace</th><th>Name</th><th>Keys</th><th></th></tr></thead><tbody>${cmRows}</tbody></table>` : emptyNote("configmaps")}
+    ${cmHtml}
     <h3 class="lc-title">Secrets</h3>
     <p class="muted">Names and types only. Values are never shown.</p>
-    ${secrets.length ? `<table class="os-table"><thead><tr><th>Namespace</th><th>Name</th><th>Type</th><th>Keys</th></tr></thead><tbody>${secretRows}</tbody></table>` : emptyNote("secrets")}`;
+    ${secretHtml}`;
 }
 
 function helmHtml(data) {
@@ -1419,6 +1444,11 @@ async function applyYaml() {
 }
 
 function onClusterClick(e) {
+  if (e.target.id === "kc-front") {
+    hidePodLogs();
+    hideDescribe();
+    return;
+  }
   const tab = e.target.closest("[data-kc-panel]");
   if (tab) {
     setK8sPanel(tab.dataset.kcPanel);
@@ -1609,13 +1639,13 @@ function healthStripHtml(data, envId) {
 }
 
 function setHealthStrip(html) {
-  const el = document.getElementById("env-health");
+  const el = document.getElementById("kc-health");
   if (!el) return;
   el.innerHTML = html;
 }
 
 function renderHealthStrip(data, err) {
-  const el = document.getElementById("env-health");
+  const el = document.getElementById("kc-health");
   if (!el) return;
   try {
     if (!activeEnvId) {
@@ -1716,12 +1746,15 @@ export function clusterCardHtml() {
       <button class="secondary btn-sm" type="button" data-goto-tab="workflow">Deploy map</button>
       <button class="secondary btn-sm" id="kc-refresh" type="button">Refresh</button>
     </div>
+    <div id="kc-health" class="env-health"><span class="muted">Checking cluster…</span></div>
     ${apply}
     <div class="tab-bar" id="kc-tabs">${tabs}</div>
-    <div id="kc-body">${loadingHtml("Loading Kubernetes…")}</div>
+    <div id="kc-body">${skeletonHtml(6)}</div>
+    <div id="kc-front" class="gsc-modal" hidden>
+      <div class="gsc-modal-card gsc-modal-wide" role="dialog" aria-modal="true" aria-labelledby="kc-logs-title">
     <div id="kc-logs" class="lc-logs" hidden>
       <div class="toolbar">
-        <h3 class="lc-title" style="margin:0">Pod logs</h3>
+        <h3 class="lc-title" id="kc-logs-title" style="margin:0">Pod logs</h3>
         <span id="kc-logs-meta" class="muted"></span>
         <label class="muted"><input type="checkbox" id="kc-logs-previous"> previous</label>
         <button class="secondary btn-sm" type="button" id="kc-logs-latest">Latest</button>
@@ -1737,6 +1770,8 @@ export function clusterCardHtml() {
         <button class="secondary btn-sm" type="button" id="kc-describe-close">Close</button>
       </div>
       <pre class="lc-logs-pre" id="kc-describe-body"></pre>
+    </div>
+      </div>
     </div>
   </div>`;
 }
@@ -1759,7 +1794,7 @@ export function wireClusterCard(getEnvId, opts = {}) {
     });
   }
 
-  const strip = document.getElementById("env-health");
+  const strip = document.getElementById("kc-health");
   if (strip && !strip.dataset.wired) {
     strip.dataset.wired = "1";
     strip.addEventListener("click", (e) => {
@@ -1777,6 +1812,16 @@ export function wireClusterCard(getEnvId, opts = {}) {
     });
   }
 
+  if (!document.body.dataset.kcFrontEsc) {
+    document.body.dataset.kcFrontEsc = "1";
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const front = document.getElementById("kc-front");
+      if (!front || front.hidden) return;
+      hidePodLogs();
+      hideDescribe();
+    });
+  }
   const card = document.getElementById("kc-card");
   if (card && !card.dataset.logsWired) {
     card.dataset.logsWired = "1";
@@ -1824,19 +1869,33 @@ export function wireClusterCard(getEnvId, opts = {}) {
   }
 }
 
+function syncFrontModal() {
+  const front = document.getElementById("kc-front");
+  const logs = document.getElementById("kc-logs");
+  const describe = document.getElementById("kc-describe");
+  if (!front) return;
+  const logsOn = !!(logs && !logs.hidden);
+  const describeOn = !!(describe && !describe.hidden);
+  front.hidden = !(logsOn || describeOn);
+}
+
 function hidePodLogs() {
   logsTarget = null;
   const panel = document.getElementById("kc-logs");
   if (panel) panel.hidden = true;
   const body = document.getElementById("kc-logs-body");
   if (body) body.textContent = "";
+  syncFrontModal();
 }
 
 async function openPodLogs(ns, pod) {
   resetLiveLog("kc-logs-body");
   logsTarget = { ns: ns || "default", pod: pod || "" };
+  const describe = document.getElementById("kc-describe");
+  if (describe) describe.hidden = true;
   const panel = document.getElementById("kc-logs");
   if (panel) panel.hidden = false;
+  syncFrontModal();
   await loadPodLogs(logsTarget.ns, logsTarget.pod);
 }
 
@@ -1845,6 +1904,7 @@ function hideDescribe() {
   if (panel) panel.hidden = true;
   const body = document.getElementById("kc-describe-body");
   if (body) body.textContent = "";
+  syncFrontModal();
 }
 
 function formatDescribe(data) {
@@ -1879,7 +1939,10 @@ async function openDescribe(kind, ns, name) {
   const panel = document.getElementById("kc-describe");
   const meta = document.getElementById("kc-describe-meta");
   const body = document.getElementById("kc-describe-body");
+  const logs = document.getElementById("kc-logs");
+  if (logs) logs.hidden = true;
   if (panel) panel.hidden = false;
+  syncFrontModal();
   const label = [kind, ns, name].filter(Boolean).join("/");
   if (meta) meta.textContent = label;
   if (body) body.textContent = "Loading…";
@@ -1959,7 +2022,7 @@ export async function loadClusterCard(envId, { silent = false } = {}) {
   if (!silent && msg) msg.textContent = "";
   if (!silent && !clusterCache) {
     const body = document.getElementById("kc-body");
-    if (body) body.innerHTML = loadingHtml("Loading Kubernetes…");
+    if (body) body.innerHTML = skeletonHtml(6);
   }
 
   let d;

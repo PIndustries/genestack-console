@@ -1,28 +1,15 @@
-// pages/environment_terminal.js — in-browser ssh terminal on the env's deploy host.
-// The card lives in the workflow tab panel of the environment detail page.
-// "Open terminal ▸" loads the vendored xterm.js assets (no CDN —
-// /static/vendor/xterm/), fetches a single-use ticket (POST /api/v1/auth/ticket),
-// opens WS /api/v1/terminal?environment_id=..&ticket=.., and
-// bridges frames: xterm onData → {type:"input"}, {type:"output"} → term.write, fit
-// addon + ResizeObserver → {type:"resize"}. On close the panel shows a "session
-// ended" state with a Reconnect button. Role-gated: the connect button requires
-// admin+ (canAdmin), matching the backend. If the vendored assets fail to load, a
-// minimal fallback (plain <pre> + hidden input) still gives a read/write console.
-//
-// Native-terminal feel: dark full-width panel with a neutral #0c0c0c/#e6e6e6 theme
-// and green cursor/accents, blinking block cursor, ~60vh height plus a fullscreen
-// overlay toggle (Esc exits), copy-on-select, right-click / Ctrl+Shift+V / Cmd+V
-// paste, Ctrl+Shift+C copy (never sends ^C for that chord). All other keys pass
-// through xterm's own key handling, so Ctrl+C, arrows, Tab, Ctrl+L (form feed —
-// the remote shell clears) and Ctrl+D reach the pty as raw codes via onData.
+// pages/environment_terminal.js — Quake-style shell drawer.
+// Backtick or tilde opens the drawer and a list of machines this console can
+// reach. Shell is an xterm ssh. Console is that machine's management port.
+// Esc or Hide closes the drawer. A backtick typed while the terminal has
+// focus goes to the shell. Sessions stay up when the environment page changes.
+// The server refuses any host that is not in that environment's inventory.
 import { api, esc, toast } from "../api.js";
-import { canAdmin, gate } from "../store.js";
+import { canAdmin, canRun, store } from "../store.js";
 
 const VENDOR_BASE = "/static/vendor/xterm";
 const FS_CLASS = "gsc-term-fullscreen";
 
-// One consistent palette: near-black background, neutral foreground, green
-// cursor + selection accents (ANSI colors tuned to sit well on #0c0c0c).
 const TERM_THEME = {
   background: "#0c0c0c",
   foreground: "#e6e6e6",
@@ -62,18 +49,16 @@ const TERM_OPTIONS = {
   cursorStyle: "block",
   scrollback: 5000,
   fastScrollModifier: "alt",
-  bellStyle: "none", // no audible bell
+  bellStyle: "none",
   macOptionIsMeta: true,
 };
 
-let xtermLoading = null; // shared one-shot loader promise (true = usable)
-let current = null; // live session { envId, ws, term, fit, observer, fallback, sendResize }
-let loadedEnvId = ""; // env the card last rendered for
-let target = ""; // "user@host" label of the last fetched env
+let xtermLoading = null;
+let mounted = false;
+const sessions = new Map();
+let activeKey = "";
+let menuGen = 0;
 
-// Load xterm.css + the UMD bundles once (they set window.Terminal /
-// window.FitAddon). Resolves false when the vendored files are missing —
-// callers then use the fallback console instead of a dead panel.
 function loadXterm() {
   if (window.Terminal && window.FitAddon) return Promise.resolve(true);
   if (!xtermLoading) {
@@ -101,34 +86,140 @@ function loadXterm() {
   return xtermLoading;
 }
 
-function setStatus(html) {
-  const el = document.getElementById("gsc-term-status");
-  if (el) el.innerHTML = html;
+function sessionKey(envId, machine) {
+  return `${encodeURIComponent(envId)}|${encodeURIComponent(machine || "")}`;
 }
 
-function setButtons() {
-  const open = document.getElementById("gsc-term-open");
-  const close = document.getElementById("gsc-term-close");
-  const live = !!(current && current.ws && current.ws.readyState === WebSocket.OPEN);
-  if (open) {
-    open.textContent = current ? "Reconnect ▸" : "Open terminal ▸";
-    open.disabled = !canAdmin() || live;
+function currentEnvId() {
+  const match = /^#\/environment_detail\/([^?]+)/.exec(location.hash || "");
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
   }
-  if (close) close.disabled = !live;
 }
 
-// An idle card is the header only. The overview map keeps the rest of the window.
-function setTermOpen(open) {
-  const card = document.getElementById("gsc-term-card");
-  if (!card) return;
-  card.classList.toggle("gsc-term-idle", !open);
+function envTitle(id) {
+  const row = (store.envs || []).find((e) => e && e.id === id);
+  return (row && row.name) || id || "environment";
 }
 
-// ---------- clipboard (native-terminal chords) ----------
+function quakeEl() {
+  return document.getElementById("gsc-quake");
+}
 
-// Copy text via the clipboard API. Where the API is blocked (non-secure
-// context, denied permission) degrade to a toast so the user gets feedback
-// instead of silence.
+function isQuakeOpen() {
+  const el = quakeEl();
+  return !!(el && el.classList.contains("open"));
+}
+
+function frontModalOpen() {
+  return !!document.querySelector(
+    ".gsc-modal:not([hidden]), #srv-bmc-modal:not([hidden]), .os-console-modal:not([hidden])"
+  );
+}
+
+function setStatus(sess, html) {
+  if (sess) sess.statusHtml = html;
+  if (!sess || sess.key === activeKey) {
+    const el = document.getElementById("gsc-term-status");
+    if (el) el.innerHTML = html || "";
+  }
+}
+
+function renderTabs() {
+  const bar = document.getElementById("gsc-quake-tabs");
+  if (!bar) return;
+  if (!sessions.size) {
+    bar.innerHTML = `<span class="gsc-quake-hint">New lists machines</span>`;
+    setStatus(null, '<span class="pill">idle</span>');
+    paintEmpty();
+    return;
+  }
+  bar.innerHTML = [...sessions.values()]
+    .map((sess) => {
+      const on = sess.key === activeKey ? " on" : "";
+      return `<div class="gsc-quake-tab${on}" role="tab" data-quake-tab="${esc(sess.key)}" aria-selected="${on ? "true" : "false"}">
+        <span>${esc(sess.label || "shell")}</span>
+        <button type="button" data-quake-close="${esc(sess.key)}" aria-label="Close ${esc(sess.label || "shell")}">×</button>
+      </div>`;
+    })
+    .join("");
+  paintEmpty();
+}
+
+function paintEmpty() {
+  const root = document.getElementById("gsc-quake-panes");
+  if (!root) return;
+  let empty = document.getElementById("gsc-quake-empty");
+  if (sessions.size) {
+    if (empty) empty.hidden = true;
+    return;
+  }
+  if (!empty) {
+    empty = document.createElement("div");
+    empty.id = "gsc-quake-empty";
+    empty.className = "gsc-quake-empty muted";
+    empty.textContent = "Pick a machine. Shell is SSH. Console is the management port.";
+    root.appendChild(empty);
+  }
+  empty.hidden = false;
+}
+
+function focusSession(key) {
+  if (!sessions.has(key)) return;
+  activeKey = key;
+  sessions.forEach((sess) => {
+    if (sess.pane) sess.pane.classList.toggle("on", sess.key === key);
+  });
+  renderTabs();
+  const sess = sessions.get(key);
+  setStatus(sess, sess.statusHtml || "");
+  if (!isQuakeOpen()) return;
+  window.setTimeout(() => {
+    if (!isQuakeOpen() || activeKey !== key || !sess.fit || !sess.term) return;
+    try {
+      sess.fit.fit();
+    } catch {
+      return;
+    }
+    if (sess.sendResize) sess.sendResize();
+    sess.term.focus();
+  }, 180);
+}
+
+function setQuakeOpen(on) {
+  const el = quakeEl();
+  if (!el) return;
+  el.classList.toggle("open", !!on);
+  el.setAttribute("aria-hidden", on ? "false" : "true");
+  if (!on) {
+    el.classList.remove(FS_CLASS);
+    document.body.classList.remove("gsc-term-fs-lock");
+    const menu = document.getElementById("gsc-quake-menu");
+    if (menu) menu.hidden = true;
+    const focused = document.activeElement;
+    if (focused && el.contains(focused) && focused.blur) focused.blur();
+    return;
+  }
+  if (activeKey) focusSession(activeKey);
+}
+
+function setFullscreen(on) {
+  const el = quakeEl();
+  if (!el) return;
+  if (on) setQuakeOpen(true);
+  el.classList.toggle(FS_CLASS, !!on);
+  document.body.classList.toggle("gsc-term-fs-lock", !!on);
+  const btn = document.getElementById("gsc-quake-expand");
+  if (btn) {
+    btn.textContent = on ? "⤡" : "⤢";
+    btn.title = on ? "Exit fullscreen" : "Expand shell";
+  }
+  if (activeKey) focusSession(activeKey);
+}
+
 async function copyText(text) {
   if (!text) return false;
   try {
@@ -144,7 +235,6 @@ function copySelection(term) {
   return copyText(term.getSelection());
 }
 
-// Read the clipboard and push it into the pty as terminal input.
 async function pasteFromClipboard(sess) {
   let text = "";
   try {
@@ -153,27 +243,19 @@ async function pasteFromClipboard(sess) {
     toast("Paste blocked — allow clipboard access", "warn");
     return;
   }
-  if (text && sess.ws.readyState === WebSocket.OPEN) {
+  if (text && sess.ws && sess.ws.readyState === WebSocket.OPEN) {
     sess.ws.send(JSON.stringify({ type: "input", data: text }));
   }
   if (sess.term) sess.term.focus();
 }
 
-// Clipboard chords + fullscreen Esc live here; every other key returns true so
-// xterm's own key handling turns it into raw bytes (Ctrl+C → \x03, arrows →
-// escape sequences, Tab → \t, Ctrl+L → \x0c form feed, Ctrl+D → \x04) which
-// flow to the pty through onData.
 function attachKeys(sess) {
   const term = sess.term;
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== "keydown") return true;
     const key = (e.key || "").toLowerCase();
-    if (e.key === "Escape" && isFullscreen()) {
-      setFullscreen(false);
-      return false;
-    }
     if (e.ctrlKey && e.shiftKey && key === "c") {
-      copySelection(term); // copy — never send ^C for this chord
+      copySelection(term);
       return false;
     }
     if (e.ctrlKey && e.shiftKey && key === "v") {
@@ -181,69 +263,22 @@ function attachKeys(sess) {
       return false;
     }
     if (e.metaKey && key === "v") {
-      pasteFromClipboard(sess); // macOS paste
+      pasteFromClipboard(sess);
       return false;
     }
     if (e.metaKey && key === "c") {
       if (!term.hasSelection()) return true;
-      copySelection(term); // macOS copy only with a selection
+      copySelection(term);
       return false;
     }
     return true;
   });
 }
 
-// ---------- fullscreen overlay ----------
-
-function isFullscreen() {
-  const card = document.getElementById("gsc-term-card");
-  return !!(card && card.classList.contains(FS_CLASS));
-}
-
-function onFsEsc(e) {
-  if (e.key === "Escape" && isFullscreen()) {
-    e.preventDefault();
-    e.stopPropagation();
-    setFullscreen(false);
-  }
-}
-
-// Toggle the viewport-filling overlay. The card goes fixed inset:0 with the
-// header on top and the terminal filling the rest; refit + resize frame after.
-function setFullscreen(on) {
-  const card = document.getElementById("gsc-term-card");
-  if (!card) return;
-  if (on) setTermOpen(true);
-  else if (!current) setTermOpen(false);
-  card.classList.toggle(FS_CLASS, on);
-  document.body.classList.toggle("gsc-term-fs-lock", on);
-  const btn = document.getElementById("gsc-term-expand");
-  if (btn) {
-    btn.textContent = on ? "⤡" : "⤢";
-    btn.title = on ? "Exit fullscreen (Esc)" : "Expand terminal to fullscreen";
-  }
-  if (on) document.addEventListener("keydown", onFsEsc, true);
-  else document.removeEventListener("keydown", onFsEsc, true);
-  const sess = current;
-  if (sess && sess.term && sess.fit) {
-    try {
-      sess.fit.fit();
-    } catch {
-      return; // not visible right now
-    }
-    if (sess.sendResize) sess.sendResize();
-    sess.term.focus();
-  }
-}
-
-// Tear down the live session (socket, terminal, observers). Safe to call
-// repeatedly; used on env switch, page destroy, and before a reconnect.
-export function destroyTerminalCard() {
-  setFullscreen(false);
-  setTermOpen(false);
-  if (!current) return;
-  const sess = current;
-  current = null;
+function disposeSession(key) {
+  const sess = sessions.get(key);
+  if (!sess) return;
+  sessions.delete(key);
   if (sess.observer) sess.observer.disconnect();
   try {
     if (sess.ws && sess.ws.readyState <= WebSocket.OPEN) sess.ws.close(1000, "panel closed");
@@ -254,28 +289,42 @@ export function destroyTerminalCard() {
     try {
       sess.term.dispose();
     } catch {
-      /* half-initialized terminal */
+      /* half-initialized */
     }
   }
-  const body = document.getElementById("gsc-term-body");
-  if (body) body.innerHTML = "";
-  setButtons();
+  if (sess.pane) {
+    sess.pane.querySelectorAll("iframe").forEach((frame) => {
+      frame.src = "about:blank";
+    });
+    sess.pane.remove();
+  }
+  if (activeKey === key) {
+    activeKey = sessions.keys().next().value || "";
+    if (activeKey) focusSession(activeKey);
+    else renderTabs();
+  } else {
+    renderTabs();
+  }
 }
 
-function wsUrl(envId, ticket) {
+export function destroyAllSessions() {
+  setFullscreen(false);
+  setQuakeOpen(false);
+  [...sessions.keys()].forEach((key) => disposeSession(key));
+  activeKey = "";
+  renderTabs();
+}
+
+function wsUrl(envId, ticket, machine) {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  return (
+  let url =
     `${proto}//${location.host}/api/v1/terminal` +
-    `?environment_id=${encodeURIComponent(envId)}&ticket=${encodeURIComponent(ticket)}`
-  );
+    `?environment_id=${encodeURIComponent(envId)}&ticket=${encodeURIComponent(ticket)}`;
+  if (machine) url += `&machine=${encodeURIComponent(machine)}`;
+  return url;
 }
 
-// ---------- fallback console (vendored xterm unavailable) ----------
-
-// Minimal read/write terminal: a <pre> for output and a visually hidden input
-// that keeps focus so keystrokes can be forwarded. ANSI escape sequences are
-// stripped — this is a degraded path, not a full emulator.
-function startFallback(body, ws, onEnded) {
+function startFallback(body, ws) {
   body.innerHTML =
     '<pre class="gsc-term-fallback" tabindex="0"></pre>' +
     '<input class="gsc-term-hidden-input" aria-hidden="true" autocomplete="off" />';
@@ -290,64 +339,80 @@ function startFallback(body, ws, onEnded) {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
   };
   input.addEventListener("keydown", (e) => {
+    if (e.key === "`" || e.key === "~" || e.code === "Backquote") return;
+    if (e.key === "Escape") return;
     if (e.key === "Enter") send("\r");
     else if (e.key === "Backspace") send("\x7f");
     else if (e.key === "Tab") send("\t");
-    else if (e.key === "Escape") send("\x1b");
     else if (e.key === "ArrowUp") send("\x1b[A");
     else if (e.key === "ArrowDown") send("\x1b[B");
     else if (e.key === "ArrowRight") send("\x1b[C");
     else if (e.key === "ArrowLeft") send("\x1b[D");
     else if (e.ctrlKey && e.key.length === 1) {
-      const code = e.key.toLowerCase().charCodeAt(0) - 96; // Ctrl+A..Z → \x01..\x1a
+      const code = e.key.toLowerCase().charCodeAt(0) - 96;
       if (code >= 1 && code <= 26) send(String.fromCharCode(code));
     } else if (e.key.length === 1 && !e.metaKey && !e.altKey) send(e.key);
     e.preventDefault();
   });
   pre.addEventListener("click", () => input.focus());
-  input.focus();
+  if (isQuakeOpen()) input.focus();
   append("[fallback terminal — xterm.js assets unavailable]\r\n");
-  return { append, onClose: onEnded };
+  return { append };
 }
 
-// ---------- connect ----------
-
-async function connect(envId) {
-  if (!envId || (current && current.ws && current.ws.readyState === WebSocket.OPEN)) return;
-  destroyTerminalCard();
-  setTermOpen(true);
-  const body = document.getElementById("gsc-term-body");
-  if (!body) return;
-  setStatus('<span class="pill warn">connecting…</span>');
-  setButtons();
+async function connect(opts) {
+  const envId = opts && opts.envId;
+  const machine = (opts && opts.machine) || "";
+  const label = (opts && opts.label) || (machine ? machine : `${envTitle(envId)} · deploy host`);
+  if (!envId) return;
+  const key = sessionKey(envId, machine);
+  const existing = sessions.get(key);
+  if (existing && existing.ws && existing.ws.readyState <= WebSocket.OPEN) {
+    focusSession(key);
+    return;
+  }
+  if (existing) disposeSession(key);
+  if (!canAdmin()) {
+    toast("An admin opens a shell", "warn");
+    return;
+  }
+  const pane = document.createElement("div");
+  pane.className = "gsc-quake-pane";
+  const root = document.getElementById("gsc-quake-panes");
+  if (!root) return;
+  root.appendChild(pane);
+  const sess = {
+    key,
+    envId,
+    machine,
+    label,
+    ws: null,
+    term: null,
+    fit: null,
+    observer: null,
+    fallback: null,
+    sendResize: null,
+    pane,
+    statusHtml: '<span class="pill warn">connecting…</span>',
+  };
+  sessions.set(key, sess);
+  focusSession(key);
+  setStatus(sess, sess.statusHtml);
 
   const xtermOk = await loadXterm();
-  if (!document.getElementById("gsc-term-body")) return; // navigated away mid-load
+  if (!sessions.has(key)) return;
 
-  // Browsers cannot set headers on a WebSocket handshake, and a raw token in
-  // the query string would land in access logs — exchange the stored
-  // credential for a single-use ticket first.
   let ticket;
   try {
     ({ ticket } = await api("/api/v1/auth/ticket", { method: "POST" }));
   } catch (e) {
-    setStatus(`<span class="pill bad">auth failed — ${esc(e.message || "ticket error")}</span>`);
-    setButtons();
-    setTermOpen(false);
+    setStatus(sess, `<span class="pill bad">auth failed — ${esc(e.message || "ticket error")}</span>`);
     return;
   }
-  if (!document.getElementById("gsc-term-body")) return; // navigated away mid-load
+  if (!sessions.has(key)) return;
 
-  const ws = new WebSocket(wsUrl(envId, ticket));
-  const sess = { envId, ws, term: null, fit: null, observer: null, fallback: null, sendResize: null };
-  current = sess;
-
-  const onEnded = (note) => {
-    if (current !== sess) return;
-    setStatus(`<span class="pill">session ended${note ? " — " + esc(note) : ""}</span>`);
-    toast("Terminal session ended", "info");
-    setButtons();
-  };
+  const ws = new WebSocket(wsUrl(envId, ticket, machine));
+  sess.ws = ws;
 
   const sendResize = () => {
     if (!sess.fit || ws.readyState !== WebSocket.OPEN) return;
@@ -356,29 +421,30 @@ async function connect(envId) {
   };
   sess.sendResize = sendResize;
 
-  ws.onopen = async () => {
-    if (current !== sess) return;
-    setStatus(`<span class="pill ok">connected — ${esc(target || "deploy host")}</span>`);
-    setButtons();
+  ws.onopen = () => {
+    if (!sessions.has(key)) return;
+    setStatus(sess, `<span class="pill ok">connected — ${esc(label)}</span>`);
     if (xtermOk) {
-      body.innerHTML = "";
+      pane.innerHTML = "";
       const term = new window.Terminal(TERM_OPTIONS);
       const fit = new window.FitAddon.FitAddon();
       sess.term = term;
       sess.fit = fit;
       term.loadAddon(fit);
-      term.open(body);
-      fit.fit();
+      term.open(pane);
+      try {
+        fit.fit();
+      } catch {
+        /* drawer still opening */
+      }
       attachKeys(sess);
       term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "input", data }));
       });
-      // Copy-on-select, like a native terminal.
       term.onSelectionChange(() => {
         if (term.hasSelection()) copySelection(term);
       });
-      // Right-click pastes into the pty instead of a context menu.
-      body.addEventListener("contextmenu", (e) => {
+      pane.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         pasteFromClipboard(sess);
       });
@@ -387,21 +453,21 @@ async function connect(envId) {
           try {
             fit.fit();
           } catch {
-            return; // not visible right now
+            return;
           }
           sendResize();
         });
-        sess.observer.observe(body);
+        sess.observer.observe(pane);
       }
       sendResize();
-      term.focus();
+      if (activeKey === key && isQuakeOpen()) term.focus();
     } else {
-      sess.fallback = startFallback(body, ws, onEnded);
+      sess.fallback = startFallback(pane, ws);
     }
   };
 
   ws.onmessage = (ev) => {
-    if (current !== sess) return;
+    if (!sessions.has(key)) return;
     let frame;
     try {
       frame = JSON.parse(ev.data);
@@ -419,104 +485,342 @@ async function connect(envId) {
   };
 
   ws.onclose = (ev) => {
-    if (current !== sess) return;
+    if (!sessions.has(key)) return;
     const reason = ev.reason || (ev.code && ev.code !== 1000 ? `code ${ev.code}` : "");
     if (sess.term) {
       sess.term.write(`\r\n\x1b[2m[session ended${reason ? " — " + reason : ""}]\x1b[0m\r\n`);
     } else if (sess.fallback) {
       sess.fallback.append(`\r\n[session ended${reason ? " — " + reason : ""}]\r\n`);
+    } else {
+      pane.innerHTML = `<div class="muted" style="padding:.6rem">Session ended${reason ? " — " + esc(reason) : ""}.</div>`;
     }
-    onEnded(reason);
+    setStatus(sess, `<span class="pill">session ended${reason ? " — " + esc(reason) : ""}</span>`);
   };
 
   ws.onerror = () => {
-    if (current !== sess) return;
-    setStatus('<span class="pill bad">connection error</span>');
+    if (!sessions.has(key)) return;
+    setStatus(sess, '<span class="pill bad">connection error</span>');
   };
 }
 
-// ---------- card ----------
-
-export function terminalCardHtml() {
-  return `
-  <div class="card span-12 gsc-term-idle" id="gsc-term-card">
-    <div class="toolbar gsc-term-header">
-      <h2>Deploy host terminal</h2>
-      <span id="gsc-term-target" class="muted"></span>
-      <span id="gsc-term-status" class="pill">idle</span>
-      <button class="secondary btn-sm" id="gsc-term-open" type="button"
-        title="Open an ssh shell on the deploy host (admin+)">Open terminal ▸</button>
-      <button class="secondary btn-sm gsc-term-iconbtn" id="gsc-term-expand" type="button"
-        title="Expand terminal to fullscreen">⤢</button>
-      <button class="secondary btn-sm" id="gsc-term-close" type="button" disabled>Close</button>
-    </div>
-    <div id="gsc-term-body" class="gsc-term-body">
-      <div class="muted" style="padding:.5rem">No session — open a terminal to get a shell on the deploy host.</div>
-    </div>
-  </div>`;
-}
-
-export function wireTerminalCard(getEnvId) {
-  const card = document.getElementById("gsc-term-card");
-  if (!card) return;
-  card.addEventListener("click", (e) => {
-    if (e.target.closest("#gsc-term-open")) {
-      const btn = document.getElementById("gsc-term-open");
-      if (btn && !btn.disabled) connect(getEnvId());
-      return;
-    }
-    if (e.target.closest("#gsc-term-close")) {
-      destroyTerminalCard();
-      return;
-    }
-    if (e.target.closest("#gsc-term-expand")) {
-      setFullscreen(!isFullscreen());
-      return;
-    }
-    // Clicking anywhere else in the panel hands focus back to the terminal.
-    if (current && current.term) current.term.focus();
+export function openShell(opts) {
+  mountQuake();
+  setQuakeOpen(true);
+  const envId = (opts && opts.envId) || currentEnvId();
+  if (!envId) {
+    openMenu();
+    return;
+  }
+  connect({
+    envId,
+    machine: (opts && opts.machine) || "",
+    label: opts && opts.label,
   });
 }
 
-// (Re)render the card's target line for the env. The terminal needs the env's
-// deploy host; without one the backend rejects the socket, so say so up front.
-export async function loadTerminalCard(envId) {
-  const card = document.getElementById("gsc-term-card");
-  if (!card) return;
-  if ((envId || "") !== loadedEnvId) {
-    destroyTerminalCard();
-    loadedEnvId = envId || "";
-  }
-  const targetEl = document.getElementById("gsc-term-target");
-  const openBtn = document.getElementById("gsc-term-open");
-  if (!envId) {
-    target = "";
-    if (targetEl) targetEl.textContent = "";
-    if (openBtn) openBtn.disabled = true;
+function toggleQuake() {
+  mountQuake();
+  if (!isQuakeOpen()) {
+    setQuakeOpen(true);
+    openMenu();
     return;
   }
-  let env = null;
-  try {
-    env = await api(`/api/v1/environments/${encodeURIComponent(envId)}`);
-  } catch {
-    env = null;
+  const menu = document.getElementById("gsc-quake-menu");
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
+    menuGen += 1;
+    return;
   }
-  if (loadedEnvId !== envId) return; // env switched while loading
-  const host = env && env.deployer_ssh_host ? String(env.deployer_ssh_host) : "";
-  const user = env && env.deployer_ssh_user ? String(env.deployer_ssh_user) : "root";
-  target = host ? `${user}@${host}` : "";
-  if (targetEl) {
-    targetEl.innerHTML = host
-      ? `target <code>${esc(target)}</code>`
-      : '<span class="muted">no deploy host set — edit the environment to add one</span>';
-  }
-  if (openBtn) {
-    openBtn.disabled = !host || !canAdmin();
-    openBtn.title = !host
-      ? "Set deployer_ssh_host on the environment first"
-      : gate(canAdmin(), "admin")
-        ? "Requires admin role"
-        : "Open an ssh shell on the deploy host";
-  }
-  setButtons();
+  openMenu();
 }
+
+async function loadEnvTargets(envId) {
+  const [serversRes, bmRes] = await Promise.all([
+    api(`/api/v1/environments/${encodeURIComponent(envId)}/servers`).catch(() => null),
+    api(`/api/v1/environments/${encodeURIComponent(envId)}/baremetal`).catch(() => null),
+  ]);
+  const servers = ((serversRes && serversRes.servers) || []).filter(
+    (s) => s && s.hostname && (s.private_ip || s.ip)
+  );
+  const nodes = ((bmRes && bmRes.nodes) || []).filter((n) => n && n.id && n.bmc_host);
+  return { servers, nodes };
+}
+
+function menuEnvIds() {
+  const here = currentEnvId();
+  const ordered = [];
+  if (here) ordered.push(here);
+  (store.envs || []).forEach((env) => {
+    if (env && env.id && env.id !== here) ordered.push(env.id);
+  });
+  return [...new Set(ordered)].slice(0, 12);
+}
+
+async function openMenu() {
+  const menu = document.getElementById("gsc-quake-menu");
+  const btn = document.getElementById("gsc-quake-new");
+  if (!menu || !btn) return;
+  const gen = ++menuGen;
+  menu.hidden = false;
+  menu.innerHTML = `<div class="muted">Loading machines…</div>`;
+  const rect = btn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 280))}px`;
+  const ids = menuEnvIds();
+  const loaded = await Promise.all(
+    ids.map(async (id) => ({ id, ...(await loadEnvTargets(id)) }))
+  );
+  if (gen !== menuGen || menu.hidden) return;
+  const bits = [];
+  const admin = canAdmin();
+  const operate = canRun();
+  const shellDis = admin ? "" : " disabled";
+  const consoleDis = operate ? "" : " disabled";
+  loaded.forEach(({ id, servers, nodes }) => {
+    const envRow = (store.envs || []).find((e) => e && e.id === id);
+    const deployHost = envRow && String(envRow.deployer_ssh_host || "").trim();
+    const seen = new Set();
+    const rows = [];
+    if (deployHost) {
+      rows.push(
+        `<div class="gsc-quake-row">
+          <span class="gsc-quake-row-name">Deploy host <span class="muted">${esc(deployHost)}</span></span>
+          <button type="button" data-quake-env="${esc(id)}" data-quake-machine=""${shellDis}>Shell</button>
+        </div>`
+      );
+    }
+    (servers || []).forEach((s) => {
+      const name = String(s.hostname || "");
+      seen.add(name);
+      const addr = s.private_ip || s.ip || "";
+      const login = s.ssh_user ? `${s.ssh_user}@` : "";
+      const node = (nodes || []).find((n) => String(n.name || "") === name);
+      const consoleBtn = node
+        ? `<button type="button" data-quake-console="${esc(node.id)}" data-quake-env="${esc(id)}" data-quake-label="${esc(envTitle(id))} · ${esc(name)} · console"${consoleDis}>Console</button>`
+        : "";
+      rows.push(
+        `<div class="gsc-quake-row">
+          <span class="gsc-quake-row-name">${esc(name)} <span class="muted">${esc(login + addr)}</span></span>
+          <button type="button" data-quake-env="${esc(id)}" data-quake-machine="${esc(name)}"${shellDis}>Shell</button>
+          ${consoleBtn}
+        </div>`
+      );
+    });
+    (nodes || []).forEach((n) => {
+      const name = String(n.name || "");
+      if (!name || seen.has(name)) return;
+      rows.push(
+        `<div class="gsc-quake-row">
+          <span class="gsc-quake-row-name">${esc(name)} <span class="muted">${esc(n.bmc_host || "")}</span></span>
+          <button type="button" data-quake-console="${esc(n.id)}" data-quake-env="${esc(id)}" data-quake-label="${esc(envTitle(id))} · ${esc(name)} · console"${consoleDis}>Console</button>
+        </div>`
+      );
+    });
+    if (!rows.length) return;
+    bits.push(`<div class="gsc-quake-menu-label">${esc(envTitle(id))}</div>`);
+    bits.push(rows.join(""));
+  });
+  if (!bits.length) {
+    bits.push(`<div class="muted">No machines with an address or a management port.</div>`);
+  }
+  if (!admin) bits.push(`<div class="muted">An admin opens a shell.</div>`);
+  menu.innerHTML = bits.join("");
+}
+
+async function openConsole(opts) {
+  const envId = opts && opts.envId;
+  const nodeId = opts && opts.nodeId;
+  const label = (opts && opts.label) || "console";
+  if (!envId || !nodeId) return;
+  if (!canRun()) {
+    toast("An operator opens a console", "warn");
+    return;
+  }
+  mountQuake();
+  setQuakeOpen(true);
+  const key = sessionKey(envId, `console:${nodeId}`);
+  if (sessions.has(key)) {
+    focusSession(key);
+    return;
+  }
+  const pane = document.createElement("div");
+  pane.className = "gsc-quake-pane";
+  const root = document.getElementById("gsc-quake-panes");
+  if (!root) return;
+  root.appendChild(pane);
+  const sess = {
+    key,
+    envId,
+    machine: `console:${nodeId}`,
+    label,
+    ws: null,
+    term: null,
+    fit: null,
+    observer: null,
+    fallback: null,
+    sendResize: null,
+    pane,
+    statusHtml: '<span class="pill warn">opening console…</span>',
+  };
+  sessions.set(key, sess);
+  focusSession(key);
+  setStatus(sess, sess.statusHtml);
+  try {
+    const data = await api(
+      `/api/v1/environments/${encodeURIComponent(envId)}/baremetal/nodes/${encodeURIComponent(nodeId)}/console/session`,
+      { method: "POST", timeout: 25000 }
+    );
+    if (!sessions.has(key)) return;
+    const embed = data && data.embed_url ? String(data.embed_url) : "";
+    if (!data || !data.ok || !embed.startsWith("/") || embed.startsWith("//")) {
+      pane.textContent = (data && data.error) || "Console unavailable";
+      setStatus(sess, '<span class="pill bad">console unavailable</span>');
+      return;
+    }
+    const frame = document.createElement("iframe");
+    frame.title = label;
+    frame.referrerPolicy = "no-referrer";
+    frame.allow = "fullscreen";
+    frame.src = embed;
+    pane.replaceChildren(frame);
+    setStatus(sess, '<span class="pill ok">console</span>');
+  } catch (err) {
+    if (!sessions.has(key)) return;
+    pane.textContent = err && err.message ? err.message : "Console unavailable";
+    setStatus(sess, '<span class="pill bad">console unavailable</span>');
+  }
+}
+
+function onQuakeClick(e) {
+  const close = e.target.closest("[data-quake-close]");
+  if (close) {
+    e.stopPropagation();
+    disposeSession(close.dataset.quakeClose || "");
+    return;
+  }
+  const tab = e.target.closest("[data-quake-tab]");
+  if (tab) {
+    focusSession(tab.dataset.quakeTab || "");
+    return;
+  }
+  if (e.target.closest("#gsc-quake-hide")) {
+    setQuakeOpen(false);
+    return;
+  }
+  if (e.target.closest("#gsc-quake-expand")) {
+    const el = quakeEl();
+    setFullscreen(!(el && el.classList.contains(FS_CLASS)));
+    return;
+  }
+  if (e.target.closest("#gsc-quake-new")) {
+    const menu = document.getElementById("gsc-quake-menu");
+    if (menu && !menu.hidden) {
+      menu.hidden = true;
+      menuGen += 1;
+      return;
+    }
+    openMenu();
+    return;
+  }
+  const consoleBtn = e.target.closest("[data-quake-console]");
+  if (consoleBtn) {
+    const menu = document.getElementById("gsc-quake-menu");
+    if (menu) menu.hidden = true;
+    openConsole({
+      envId: consoleBtn.dataset.quakeEnv || "",
+      nodeId: consoleBtn.dataset.quakeConsole || "",
+      label: consoleBtn.dataset.quakeLabel || "console",
+    });
+    return;
+  }
+  const pick = e.target.closest("[data-quake-env]");
+  if (pick) {
+    const menu = document.getElementById("gsc-quake-menu");
+    if (menu) menu.hidden = true;
+    const envId = pick.dataset.quakeEnv || "";
+    const machine = pick.dataset.quakeMachine || "";
+    const label = machine
+      ? `${envTitle(envId)} · ${machine}`
+      : `${envTitle(envId)} · deploy host`;
+    connect({ envId, machine, label });
+    return;
+  }
+  const sess = sessions.get(activeKey);
+  if (sess && sess.term && e.target.closest("#gsc-quake-panes")) sess.term.focus();
+}
+
+function onQuakeKey(e) {
+  const shell = document.getElementById("app-shell");
+  if (!shell || shell.classList.contains("hidden")) return;
+  const tick = e.key === "`" || e.key === "~" || e.code === "Backquote";
+  if (tick) {
+    const el = quakeEl();
+    if (isQuakeOpen() && el && el.contains(document.activeElement)) return;
+    const target = e.target;
+    if (target && target.closest && target.closest("input, textarea, select, [contenteditable='true']")) return;
+    e.preventDefault();
+    toggleQuake();
+    return;
+  }
+  if (e.key === "Escape" && isQuakeOpen() && !frontModalOpen()) {
+    e.preventDefault();
+    e.stopPropagation();
+    setQuakeOpen(false);
+  }
+}
+
+function onDocClick(e) {
+  const menu = document.getElementById("gsc-quake-menu");
+  if (!menu || menu.hidden) return;
+  if (e.target.closest("#gsc-quake-menu") || e.target.closest("#gsc-quake-new")) return;
+  menu.hidden = true;
+  menuGen += 1;
+}
+
+export function mountQuake() {
+  if (mounted && quakeEl()) return;
+  mounted = true;
+  if (!quakeEl()) {
+    const el = document.createElement("div");
+    el.id = "gsc-quake";
+    el.className = "gsc-quake";
+    el.setAttribute("aria-hidden", "true");
+    el.innerHTML = `
+      <div class="gsc-quake-bar">
+        <span class="gsc-quake-title">Shell</span>
+        <div id="gsc-quake-tabs" class="gsc-quake-tabs" role="tablist"></div>
+        <button type="button" class="secondary btn-sm" id="gsc-quake-new">New</button>
+        <span id="gsc-term-status"></span>
+        <span class="gsc-quake-hint">\` lists machines · Esc hides</span>
+        <button type="button" class="secondary btn-sm" id="gsc-quake-expand" title="Expand shell">⤢</button>
+        <button type="button" class="secondary btn-sm" id="gsc-quake-hide">Hide</button>
+      </div>
+      <div id="gsc-quake-panes" class="gsc-quake-body"></div>`;
+    document.body.appendChild(el);
+    const menu = document.createElement("div");
+    menu.id = "gsc-quake-menu";
+    menu.className = "gsc-quake-menu";
+    menu.hidden = true;
+    document.body.appendChild(menu);
+  }
+  const el = quakeEl();
+  if (el && !el.dataset.wired) {
+    el.dataset.wired = "1";
+    el.addEventListener("click", onQuakeClick);
+    const menu = document.getElementById("gsc-quake-menu");
+    if (menu) menu.addEventListener("click", onQuakeClick);
+    window.addEventListener("keydown", onQuakeKey, true);
+    document.addEventListener("click", onDocClick);
+  }
+  renderTabs();
+}
+
+export function terminalCardHtml() {
+  return "";
+}
+
+export function wireTerminalCard() {}
+
+export function loadTerminalCard() {}
+
+export function destroyTerminalCard() {}
