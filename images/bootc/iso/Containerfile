@@ -25,6 +25,9 @@ RUN printf '%s\n' \
         zstd \
         dracut \
         dracut-live \
+        dmsetup \
+        parted \
+        e2fsprogs \
         grub-efi \
         grub-efi-amd64 \
         grub-pc-bin \
@@ -44,6 +47,8 @@ RUN printf '%s\n' \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sfn /usr/bin/grub-mkimage /usr/bin/grub2-mkimage
 
+# dmsquash-live will not build without dmsetup. The overlay module
+# will not build without parted.
 RUN set -eu; \
     kver=""; \
     for dir in /usr/lib/modules/*; do \

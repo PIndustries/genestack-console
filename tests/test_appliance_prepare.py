@@ -85,6 +85,9 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "centos" not in script.lower()
     installer = (IMAGE / "iso" / "Containerfile").read_text(encoding="utf-8")
     assert "dracut-live" in installer
+    assert "dmsetup" in installer
+    assert "parted" in installer
+    assert "e2fsprogs" in installer
     assert "grub-efi" in installer
     assert "anaconda" not in installer.lower()
     _keeps_firmware_minimal(installer)
