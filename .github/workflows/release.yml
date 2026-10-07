@@ -156,15 +156,17 @@ jobs:
           if not notes:
               raise SystemExit(f"CHANGELOG.md has no section for {version}")
           text = (
-              f"Genestack Console {version} for Linux.\n\n"
-              "The asset `genestack-console-linux-amd64` is the single binary.\n"
-              "`version.json` names that asset for the update check.\n"
-              "`console.sh` and `console.ps1` are the installers. "
-              "`get.genestack.dev` redirects to them.\n"
-              f"The bootc disk is `genestack-console-appliance-{version}-amd64.qcow2.xz`. "
-              "Boot it for an appliance. The binary install stays.\n"
-              f"The installer ISO is `genestack-console-appliance-{version}-amd64.iso`. "
-              "Boot that when the machine has no disk image yet.\n\n"
+              f"Genestack Console {version}.\n\n"
+              "On a machine you already have, run `console.sh` on Linux or "
+              "`console.ps1` on Windows. "
+              "https://get.genestack.dev/console.sh and "
+              "https://get.genestack.dev/console.ps1 open those files. "
+              "`genestack-console-linux-amd64` is the program the Linux installer downloads. "
+              "`version.json` tells a running Console which program to download when it updates.\n\n"
+              f"`genestack-console-appliance-{version}-amd64.qcow2.xz` is a virtual machine disk "
+              "with Console already installed. Decompress it and boot it.\n\n"
+              f"`genestack-console-appliance-{version}-amd64.iso` is a CD image. "
+              "Boot it, then type the name of the disk to install onto.\n\n"
               f"{notes}\n"
           )
           Path("dist").mkdir(exist_ok=True)
