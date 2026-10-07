@@ -66,6 +66,14 @@ run_priv podman build \
   -f "$stage/Containerfile" \
   "$stage"
 
+echo "==> installer image ${ISO_REF}"
+run_priv podman build \
+  --build-arg "BASE=${BASE}" \
+  --build-arg "APPLIANCE_REF=${REF}" \
+  -t "$ISO_REF" \
+  -f "$ROOT/images/bootc/iso/Containerfile" \
+  "$ROOT/images/bootc/iso"
+
 mkdir -p "$work/output"
 echo "==> qcow2"
 run_priv podman run \
@@ -98,14 +106,6 @@ mkdir -p "$OUT_DIR"
 echo "==> compress ${NAME}.xz"
 xz -T0 -6 -c "$disk" > "$OUT_DIR/${NAME}.xz"
 echo "OK: $OUT_DIR/${NAME}.xz"
-
-echo "==> installer image ${ISO_REF}"
-run_priv podman build \
-  --build-arg "BASE=${BASE}" \
-  --build-arg "APPLIANCE_REF=${REF}" \
-  -t "$ISO_REF" \
-  -f "$ROOT/images/bootc/iso/Containerfile" \
-  "$ROOT/images/bootc/iso"
 
 mkdir -p "$work/iso"
 echo "==> iso"

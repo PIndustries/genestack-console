@@ -2,8 +2,10 @@
 # not what gets installed. scripts/build-appliance.sh passes the appliance
 # image in as the payload, and this system runs bootc install to-disk.
 ARG BASE=docker.io/library/ubuntu:26.04
-FROM ${BASE}
 ARG APPLIANCE_REF=localhost/genestack-console-appliance:dev
+FROM ${APPLIANCE_REF} AS appliance
+FROM ${BASE}
+ARG APPLIANCE_REF
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN printf '%s\n' \
@@ -32,6 +34,8 @@ RUN printf '%s\n' \
         grub-efi-amd64 \
         grub-pc-bin \
         shim-signed \
+        ostree \
+        openssl \
         squashfs-tools \
         xorriso \
         isomd5sum \
@@ -46,6 +50,21 @@ RUN printf '%s\n' \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sfn /usr/bin/grub-mkimage /usr/bin/grub2-mkimage
+
+# Image Builder runs `bootc install print-configuration` in this image.
+# Ubuntu does not package bootc. The appliance image already built it.
+COPY --from=appliance /usr/bin/bootc /usr/bin/bootc
+COPY --from=appliance /usr/lib/bootc/install/00-genestack.toml /usr/lib/bootc/install/00-genestack.toml
+
+RUN set -eu; \
+    missing="$(ldd /usr/bin/bootc | grep 'not found' || true)"; \
+    if [ -n "$missing" ]; then \
+      printf '%s\n' "$missing" >&2; \
+      exit 1; \
+    fi; \
+    bootc install print-configuration > /tmp/bootc-install-config.json; \
+    grep -q ext4 /tmp/bootc-install-config.json; \
+    rm -f /tmp/bootc-install-config.json
 
 # dmsquash-live will not build without dmsetup. The overlay module
 # will not build without parted.
