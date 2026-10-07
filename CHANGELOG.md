@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.2
+
+The image cache keeps Genestack images and lets an operator add the rest.
+
+- Genestack images stay on the list and cannot be removed. Other images can be added, edited, and removed so an air-gapped environment can pull them.
+- Cache images and charts pulls that list and what the cluster is running.
+
 ## 2026.10.07.1
 
 The image cache uses this console's address, and a machine opens in a dialog.
