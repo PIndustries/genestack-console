@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.11
+
+The appliance image includes setfiles so Image Builder can label the disk.
+
+- The labeling step runs inside the Ubuntu image. That image did not contain the program.
+
 ## 2026.10.07.10
 
 The appliance image includes the SELinux file-context list Image Builder reads.
