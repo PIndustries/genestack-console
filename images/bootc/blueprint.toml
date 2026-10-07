@@ -1,0 +1,4 @@
+# Root filesystem floor for a new appliance disk. The qcow2 stays sparse.
+[[customizations.filesystem]]
+mountpoint = "/"
+minsize = "40 GiB"

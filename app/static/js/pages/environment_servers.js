@@ -6,7 +6,7 @@
 // Already have an OS only records Ubuntu that is already there.
 import { api, esc, skeletonHtml, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
-import { openShell } from "./environment_terminal.js?v=ls40";
+import { openShell } from "./environment_terminal.js?v=ls48";
 import { ROLES, ROLE_LABELS } from "../roles.js";
 import { clearOvhPoll } from "../ovh.js";
 import { fetchMetalPath, osNameHtml } from "../metal_path.js";

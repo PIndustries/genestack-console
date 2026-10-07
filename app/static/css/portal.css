@@ -1800,11 +1800,22 @@ body.gsc-term-fs-lock { overflow: hidden; }
   transition: height 0.16s ease-out;
   display: flex;
   flex-direction: column;
+  --gsc-quake-h: min(52vh, 28rem);
 }
-.gsc-quake.open { height: min(52vh, 28rem); }
+.gsc-quake.open { height: var(--gsc-quake-h); }
+.gsc-quake.gsc-quake-dragging { transition: none; }
 .gsc-quake.open.gsc-term-fullscreen,
 .gsc-quake.gsc-term-fullscreen {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
   height: 100vh;
+  height: 100dvh;
+  max-height: none;
+  border-bottom: 0;
+  transition: none;
 }
 .gsc-quake-bar {
   display: flex;
@@ -1813,6 +1824,7 @@ body.gsc-term-fs-lock { overflow: hidden; }
   padding: 0.35rem 0.75rem;
   border-bottom: 1px solid #1f1f1f;
   flex: 0 0 auto;
+  min-width: 0;
 }
 .gsc-quake-title {
   font-family: "SF Mono", "Cascadia Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -1822,8 +1834,19 @@ body.gsc-term-fs-lock { overflow: hidden; }
   letter-spacing: 0.04em;
 }
 .gsc-quake-hint { font-size: 0.72rem; margin-left: auto; color: #8a8a8a; }
+.gsc-quake-bar > .gsc-quake-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .gsc-quake-bar > .gsc-quake-hint { display: none; }
+}
 .gsc-quake .gsc-term-body,
 .gsc-quake-body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   height: auto;
@@ -1831,19 +1854,22 @@ body.gsc-term-fs-lock { overflow: hidden; }
   border: 0;
   border-radius: 0;
   background: #000;
+  overflow: hidden;
 }
 .gsc-quake-tabs {
   display: flex;
   gap: 0.3rem;
   overflow: auto;
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 5.5rem;
 }
 .gsc-quake-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  max-width: 16rem;
+  flex: 0 1 auto;
+  min-width: 1.8rem;
+  max-width: min(16rem, 100%);
   border: 1px solid #262626;
   background: #141414;
   color: #c8c8c8;
@@ -1853,15 +1879,34 @@ body.gsc-term-fs-lock { overflow: hidden; }
   white-space: nowrap;
 }
 .gsc-quake-tab.on { color: #4ade80; border-color: #14532d; }
-.gsc-quake-tab button {
+.gsc-quake-tab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gsc-quake-tab [data-quake-close] {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
   border: 0;
+  border-radius: 0.2rem;
   background: transparent;
   color: inherit;
-  padding: 0;
+  line-height: 1;
+  font-weight: 600;
   cursor: pointer;
 }
-.gsc-quake-pane { display: none; height: 100%; }
-.gsc-quake-pane.on { display: block; }
+.gsc-quake-tab [data-quake-close]:hover {
+  background: #3f1d1d;
+  color: #e06c75;
+}
+.gsc-quake-pane { display: none; }
+.gsc-quake-pane.on {
+  display: block;
+  position: absolute;
+  inset: 0;
+}
 .gsc-quake .btn-sm {
   font-family: "SF Mono", "Cascadia Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.72rem;
@@ -1872,8 +1917,9 @@ body.gsc-term-fs-lock { overflow: hidden; }
 .gsc-quake-menu {
   position: fixed;
   z-index: 1410;
-  min-width: 18rem;
-  max-width: 34rem;
+  box-sizing: border-box;
+  min-width: min(18rem, calc(100vw - 1rem));
+  max-width: min(34rem, calc(100vw - 1rem));
   max-height: min(70vh, 32rem);
   overflow: auto;
   background: #141414;
@@ -1906,6 +1952,7 @@ body.gsc-term-fs-lock { overflow: hidden; }
 .gsc-quake-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.35rem;
   padding: 0.12rem 0.2rem;
 }
@@ -1926,13 +1973,37 @@ body.gsc-term-fs-lock { overflow: hidden; }
 .gsc-quake-empty {
   padding: 0.8rem 1rem;
 }
-.gsc-quake-pane iframe {
+.gsc-quake-pane iframe,
+.gsc-quake-pane .gsc-term-fallback {
   width: 100%;
   height: 100%;
   border: 0;
   background: #000;
+  box-sizing: border-box;
 }
-.gsc-quake.open .gsc-quake-body .xterm { height: 100%; }
+.gsc-quake .xterm,
+.gsc-quake.gsc-term-fullscreen .xterm {
+  height: 100%;
+  width: 100%;
+  padding: 0;
+}
+.gsc-quake-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 10px;
+  cursor: ns-resize;
+  z-index: 5;
+  touch-action: none;
+  background: linear-gradient(to bottom, transparent 0 4px, #262626 4px 6px, transparent 6px);
+}
+.gsc-quake-resize:hover,
+.gsc-quake-resize:focus-visible {
+  background: linear-gradient(to bottom, transparent 0 3px, #14532d 3px 7px, transparent 7px);
+  outline: none;
+}
+.gsc-quake.gsc-term-fullscreen .gsc-quake-resize { display: none; }
 .gsc-quake #gsc-term-status.pill,
 .gsc-quake #gsc-term-status .pill {
   font-family: "SF Mono", "Cascadia Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;

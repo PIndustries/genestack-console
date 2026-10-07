@@ -1,0 +1,18 @@
+[Unit]
+Description=Genestack Console job worker
+After=network-online.target genestack-console.service genestack-console-prepare.service
+Requires=genestack-console-prepare.service
+
+[Service]
+Type=simple
+User=genestack
+Group=genestack
+Environment=GSC_PREFIX=/opt/genestack-console
+Environment=CONSOLE_CONFIG=/opt/genestack-console/config.yaml
+WorkingDirectory=/opt/genestack-console
+ExecStart=/opt/genestack-console/bin/genestack-console worker --daemon --interval 5
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

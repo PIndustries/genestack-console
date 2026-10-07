@@ -1,0 +1,155 @@
+# Bootc appliance. scripts/build-appliance.sh builds this from the
+# published Linux binary and turns it into a qcow2. The binary on the
+# data disk is what systemd runs, so the existing update check can
+# replace it. See docs/appliance.md.
+#
+# The operating system is Ubuntu 24.04 LTS. Ubuntu publishes container
+# images, and this file installs the kernel, OpenSSH, cloud-init, and
+# bootc on that image so image-builder can write the disk.
+ARG BASE=docker.io/library/ubuntu:24.04
+ARG BOOTC_VERSION=v1.16.14
+FROM ${BASE} AS builder
+ARG BOOTC_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CARGO_BUILD_JOBS=2
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl git make build-essential pkg-config \
+        libssl-dev libzstd-dev zlib1g-dev libostree-dev libsystemd-dev \
+        libselinux1-dev cmake \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain 1.85.0 \
+    && git clone --depth 1 --branch "${BOOTC_VERSION}" \
+        https://github.com/bootc-dev/bootc.git /src/bootc
+WORKDIR /src/bootc
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_FEATURES=install-to-disk
+RUN make install DESTDIR=/output prefix=/usr
+
+FROM ${BASE}
+ENV DEBIAN_FRONTEND=noninteractive
+COPY --from=builder /output/ /
+
+RUN printf '%s\n' \
+        'do_symlinks = yes' \
+        'do_bootloader = no' \
+        'do_initrd = no' \
+        'link_in_boot = yes' \
+        > /etc/kernel-img.conf \
+    && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
+    && chmod 0755 /usr/sbin/policy-rc.d \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        openssh-server \
+        qemu-guest-agent \
+        cloud-init \
+        sudo \
+        openssl \
+        btrfs-progs \
+        dosfstools \
+        e2fsprogs \
+        fdisk \
+        xfsprogs \
+        linux-image-generic-hwe-24.04 \
+        ostree \
+        zstd \
+        skopeo \
+        systemd \
+        systemd-boot \
+        systemd-boot-efi \
+        netplan.io \
+        bubblewrap \
+        kmod \
+    && apt-get install -y --no-install-recommends dracut \
+    && rm -f /usr/sbin/policy-rc.d \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eu; \
+    kver=""; \
+    for dir in /usr/lib/modules/*; do \
+      [ -d "$dir" ] || continue; \
+      ver=$(basename "$dir"); \
+      if [ -f "/boot/vmlinuz-$ver" ]; then \
+        cp -a "/boot/vmlinuz-$ver" "$dir/vmlinuz"; \
+        kver=$ver; \
+      fi; \
+    done; \
+    test -n "$kver"; \
+    mkdir -p /usr/lib/dracut/dracut.conf.d /etc/dracut.conf.d; \
+    printf '%s\n' \
+      'systemdsystemconfdir=/etc/systemd/system' \
+      'systemdsystemunitdir=/usr/lib/systemd/system' \
+      > /usr/lib/dracut/dracut.conf.d/30-genestack-bootc.conf; \
+    printf '%s\n' \
+      'reproducible=yes' \
+      'hostonly=no' \
+      'compress=zstd' \
+      'add_dracutmodules+=" bootc "' \
+      > /usr/lib/dracut/dracut.conf.d/30-genestack-initramfs.conf; \
+    dracut --force "/usr/lib/modules/$kver/initramfs.img" "$kver"
+
+RUN set -eu; \
+    systemctl enable ssh.service qemu-guest-agent.service \
+      systemd-networkd.service systemd-resolved.service \
+      cloud-init-local.service cloud-init.service \
+      cloud-config.service cloud-final.service; \
+    printf 'L! /etc/resolv.conf - - - - /run/systemd/resolve/stub-resolv.conf\n' \
+      > /usr/lib/tmpfiles.d/resolv-conf.conf; \
+    mkdir -p /etc/netplan; \
+    printf '%s\n' \
+      'network:' \
+      '  version: 2' \
+      '  ethernets:' \
+      '    all-en:' \
+      '      match:' \
+      '        name: "en*"' \
+      '      dhcp4: true' \
+      '    all-eth:' \
+      '      match:' \
+      '        name: "eth*"' \
+      '      dhcp4: true' \
+      > /etc/netplan/01-dhcp.yaml
+
+# /opt and /var become the bootc data layout. Console state is created
+# after this, on the data disk.
+RUN set -eu; \
+    rm -rf /boot /home /root /usr/local /srv /opt /mnt /var; \
+    mkdir -p /sysroot /boot /usr/lib/ostree /var; \
+    ln -sT sysroot/ostree /ostree; \
+    ln -sT var/roothome /root; \
+    ln -sT var/srv /srv; \
+    ln -sT var/opt /opt; \
+    ln -sT var/mnt /mnt; \
+    ln -sT var/home /home; \
+    ln -sT ../var/usrlocal /usr/local; \
+    printf '%s\n' \
+      'd /var/opt 0755 root root -' \
+      'd /var/home 0755 root root -' \
+      'd /var/srv 0755 root root -' \
+      'd /var/mnt 0755 root root -' \
+      'd /var/usrlocal 0755 root root -' \
+      'd /var/roothome 0700 root root -' \
+      'd /run/media 0755 root root -' \
+      > /usr/lib/tmpfiles.d/bootc-base-dirs.conf; \
+    mkdir -p /usr/lib/composefs; \
+    : > /usr/lib/composefs/setup-root-conf.toml; \
+    printf '%s\n' 'HOME=/var/home' >> /etc/default/useradd
+
+COPY genestack-console /usr/lib/genestack-console/genestack-console
+COPY prepare.sh /usr/lib/genestack-console/prepare.sh
+COPY genestack-console.service /usr/lib/systemd/system/genestack-console.service
+COPY genestack-console-worker.service /usr/lib/systemd/system/genestack-console-worker.service
+COPY genestack-console-prepare.service /usr/lib/systemd/system/genestack-console-prepare.service
+COPY 10-genestack-cloud.cfg /etc/cloud/cloud.cfg.d/10-genestack.cfg
+
+RUN chmod 0755 /usr/lib/genestack-console/genestack-console /usr/lib/genestack-console/prepare.sh \
+    && mkdir -p /var/opt /var/lib/genestack-console/bin /var/lib/genestack-console/data /var/lib/genestack /etc/genestack \
+    && ln -sfn /var/lib/genestack-console /opt/genestack-console \
+    && ln -sfn /var/lib/genestack /opt/genestack \
+    && systemctl enable genestack-console-prepare.service genestack-console.service genestack-console-worker.service
+
+LABEL containers.bootc=1
+RUN bootc container lint

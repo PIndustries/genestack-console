@@ -89,7 +89,7 @@ On `main`, Settings → Access has the cluster-already-running card. Adopt Kubes
 | `environment_observe.js` | Logs and metrics for this environment. |
 | `environment_components.js` | The OpenStack services the settings ask for, against what is installed. |
 | `environment_discovery.js` | Servers and management ports a scan found, before you accept them. |
-| `environment_terminal.js` | The shell drawer. Backtick or tilde opens a list of machines. Shell is SSH in xterm. Console is that machine's management port. Esc hides the drawer. |
+| `environment_terminal.js` | The shell drawer. Backtick or tilde opens a list of machines. Shell is SSH in xterm. The × on a shell tab closes that session. The machine list has Close for a shell that is already open. Drag the bottom edge to set the height. This browser remembers that height. Expand fills the screen and the shell grows with it. Console is that machine's management port. Esc hides the drawer. |
 | `environment_honeycomb.js` and `environment_space3d.js` | Two drawings of the same cloud. They read the snapshot. They do not change it. |
 | `hosts.js` | A host list used from the fleet. |
 | `tenant.js` | The tenant switcher in the top bar. |

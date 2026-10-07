@@ -172,6 +172,7 @@ The first rows are the rest of this chapter. Install, the one-machine lab, and h
 | The HTTP routes | [The HTTP API](http.md) |
 | The screens | [The web page](ui.md) |
 | Install on Linux, a Mac, or Windows | [Install](install.md) |
+| Boot the console as an appliance | [The appliance disk](appliance.md) |
 | A lab with one local virtual machine | [Install AIO](install-aio.md) |
 | The longer design notes | [Architecture](architecture.md) |
 | The account page and the Apple apps | [Connect a console to my.genestack.dev](hosted-mode.md) |

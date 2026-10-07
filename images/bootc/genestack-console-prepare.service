@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare Genestack Console state
+DefaultDependencies=no
+After=local-fs.target
+Before=genestack-console.service genestack-console-worker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/genestack-console/prepare.sh
+
+[Install]
+WantedBy=multi-user.target

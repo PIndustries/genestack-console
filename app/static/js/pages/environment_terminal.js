@@ -4,11 +4,16 @@
 // Esc or Hide closes the drawer. A backtick typed while the terminal has
 // focus goes to the shell. Sessions stay up when the environment page changes.
 // The server refuses any host that is not in that environment's inventory.
+// Drag the bottom edge to set the height. This browser remembers it.
+// Expand fills the screen, and the shell resizes with that screen.
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, store } from "../store.js";
 
 const VENDOR_BASE = "/static/vendor/xterm";
 const FS_CLASS = "gsc-term-fullscreen";
+const HEIGHT_KEY = "gsc.quake.height";
+const HEIGHT_MIN_VH = 12;
+const HEIGHT_MAX_VH = 96;
 
 const TERM_THEME = {
   background: "#0c0c0c",
@@ -90,6 +95,21 @@ function sessionKey(envId, machine) {
   return `${encodeURIComponent(envId)}|${encodeURIComponent(machine || "")}`;
 }
 
+let tabSerial = 0;
+
+function nextTabId() {
+  tabSerial += 1;
+  return String(tabSerial);
+}
+
+function sessionByTab(id) {
+  if (!id) return null;
+  for (const sess of sessions.values()) {
+    if (sess.tabId === id || sess.key === id) return sess;
+  }
+  return null;
+}
+
 function currentEnvId() {
   const match = /^#\/environment_detail\/([^?]+)/.exec(location.hash || "");
   if (!match) return "";
@@ -107,6 +127,73 @@ function envTitle(id) {
 
 function quakeEl() {
   return document.getElementById("gsc-quake");
+}
+
+function readHeightVh() {
+  try {
+    const raw = localStorage.getItem(HEIGHT_KEY);
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return Math.min(HEIGHT_MAX_VH, Math.max(HEIGHT_MIN_VH, n));
+  } catch {
+    return null;
+  }
+}
+
+function heightBounds() {
+  const view = window.innerHeight || 800;
+  const min = Math.min(192, Math.round(view * 0.3));
+  const max = Math.max(min, Math.round(view * (HEIGHT_MAX_VH / 100)));
+  return { view, min, max };
+}
+
+function applySavedHeight(el) {
+  if (!el) return;
+  const vh = readHeightVh();
+  if (vh == null) {
+    el.style.removeProperty("--gsc-quake-h");
+    return;
+  }
+  el.style.setProperty("--gsc-quake-h", `${vh}vh`);
+  const handle = document.getElementById("gsc-quake-resize");
+  if (handle) handle.setAttribute("aria-valuenow", String(vh));
+}
+
+function commitHeight(px) {
+  const { view, min, max } = heightBounds();
+  const clamped = Math.min(max, Math.max(min, px));
+  const vh = Math.round((clamped / view) * 1000) / 10;
+  const stored = Math.min(HEIGHT_MAX_VH, Math.max(HEIGHT_MIN_VH, vh));
+  try {
+    localStorage.setItem(HEIGHT_KEY, String(stored));
+  } catch {
+    /* private mode */
+  }
+  const el = quakeEl();
+  if (el) el.style.setProperty("--gsc-quake-h", `${stored}vh`);
+  const handle = document.getElementById("gsc-quake-resize");
+  if (handle) handle.setAttribute("aria-valuenow", String(stored));
+  return stored;
+}
+
+function refitActive() {
+  const sess = sessions.get(activeKey);
+  if (!isQuakeOpen() || !sess || !sess.fit || !sess.term) return;
+  try {
+    sess.fit.fit();
+  } catch {
+    return;
+  }
+  if (sess.sendResize) sess.sendResize();
+}
+
+function refitAfterLayout() {
+  refitActive();
+  window.requestAnimationFrame(() => {
+    refitActive();
+    window.requestAnimationFrame(refitActive);
+  });
 }
 
 function isQuakeOpen() {
@@ -140,12 +227,19 @@ function renderTabs() {
   bar.innerHTML = [...sessions.values()]
     .map((sess) => {
       const on = sess.key === activeKey ? " on" : "";
-      return `<div class="gsc-quake-tab${on}" role="tab" data-quake-tab="${esc(sess.key)}" aria-selected="${on ? "true" : "false"}">
+      return `<div class="gsc-quake-tab${on}" role="tab" data-quake-tab="${esc(sess.tabId || sess.key)}" aria-selected="${on ? "true" : "false"}">
         <span>${esc(sess.label || "shell")}</span>
-        <button type="button" data-quake-close="${esc(sess.key)}" aria-label="Close ${esc(sess.label || "shell")}">×</button>
+        <button type="button" data-quake-close="${esc(sess.tabId || sess.key)}" aria-label="Close ${esc(sess.label || "shell")}">×</button>
       </div>`;
     })
     .join("");
+  const current = bar.querySelector(".gsc-quake-tab.on");
+  if (current) {
+    const left = current.offsetLeft;
+    const right = left + current.offsetWidth;
+    if (left < bar.scrollLeft) bar.scrollLeft = left;
+    else if (right > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = right - bar.clientWidth;
+  }
   paintEmpty();
 }
 
@@ -168,6 +262,8 @@ function paintEmpty() {
 }
 
 function focusSession(key) {
+  const byTab = sessionByTab(key);
+  if (byTab && !sessions.has(key)) key = byTab.key;
   if (!sessions.has(key)) return;
   activeKey = key;
   sessions.forEach((sess) => {
@@ -197,6 +293,12 @@ function setQuakeOpen(on) {
   if (!on) {
     el.classList.remove(FS_CLASS);
     document.body.classList.remove("gsc-term-fs-lock");
+    const expand = document.getElementById("gsc-quake-expand");
+    if (expand) {
+      expand.textContent = "⤢";
+      expand.title = "Expand shell";
+      expand.setAttribute("aria-pressed", "false");
+    }
     const menu = document.getElementById("gsc-quake-menu");
     if (menu) menu.hidden = true;
     const focused = document.activeElement;
@@ -204,6 +306,59 @@ function setQuakeOpen(on) {
     return;
   }
   if (activeKey) focusSession(activeKey);
+  refitAfterLayout();
+}
+
+function onResizePointerDown(e) {
+  const el = quakeEl();
+  if (!el || el.classList.contains(FS_CLASS)) return;
+  if (e.button != null && e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const handle = e.currentTarget;
+  const startY = e.clientY;
+  const startH = el.getBoundingClientRect().height;
+  el.classList.add("gsc-quake-dragging");
+  let done = false;
+  const move = (ev) => {
+    const { min, max } = heightBounds();
+    const next = Math.min(max, Math.max(min, startH + (ev.clientY - startY)));
+    el.style.setProperty("--gsc-quake-h", `${Math.round(next)}px`);
+  };
+  const up = () => {
+    if (done) return;
+    done = true;
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", up);
+    handle.removeEventListener("pointercancel", up);
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    el.classList.remove("gsc-quake-dragging");
+    commitHeight(el.getBoundingClientRect().height);
+    refitAfterLayout();
+  };
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", up);
+  handle.addEventListener("pointercancel", up);
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  try {
+    handle.setPointerCapture(e.pointerId);
+  } catch {
+    /* the window listeners still track the drag */
+  }
+}
+
+function onResizeKey(e) {
+  const el = quakeEl();
+  if (!el || el.classList.contains(FS_CLASS)) return;
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "PageUp" && e.key !== "PageDown") return;
+  e.preventDefault();
+  const step = e.key === "PageUp" || e.key === "PageDown" ? 10 : 4;
+  const dir = e.key === "ArrowDown" || e.key === "PageDown" ? 1 : -1;
+  const current = (el.getBoundingClientRect().height / (window.innerHeight || 1)) * 100;
+  commitHeight(((current + dir * step) / 100) * (window.innerHeight || 1));
+  refitAfterLayout();
 }
 
 function setFullscreen(on) {
@@ -216,7 +371,9 @@ function setFullscreen(on) {
   if (btn) {
     btn.textContent = on ? "⤡" : "⤢";
     btn.title = on ? "Exit fullscreen" : "Expand shell";
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
+  refitAfterLayout();
   if (activeKey) focusSession(activeKey);
 }
 
@@ -383,6 +540,7 @@ async function connect(opts) {
   root.appendChild(pane);
   const sess = {
     key,
+    tabId: nextTabId(),
     envId,
     machine,
     label,
@@ -563,9 +721,7 @@ async function openMenu() {
   const gen = ++menuGen;
   menu.hidden = false;
   menu.innerHTML = `<div class="muted">Loading machines…</div>`;
-  const rect = btn.getBoundingClientRect();
-  menu.style.top = `${rect.bottom + 4}px`;
-  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 280))}px`;
+  placeMenu(menu, btn);
   const ids = menuEnvIds();
   const loaded = await Promise.all(
     ids.map(async (id) => ({ id, ...(await loadEnvTargets(id)) }))
@@ -582,10 +738,15 @@ async function openMenu() {
     const seen = new Set();
     const rows = [];
     if (deployHost) {
+      const hostSess = sessions.get(sessionKey(id, ""));
+      const hostClose = hostSess
+        ? `<button type="button" data-quake-close="${esc(hostSess.tabId)}">Close</button>`
+        : "";
       rows.push(
         `<div class="gsc-quake-row">
           <span class="gsc-quake-row-name">Deploy host <span class="muted">${esc(deployHost)}</span></span>
           <button type="button" data-quake-env="${esc(id)}" data-quake-machine=""${shellDis}>Shell</button>
+          ${hostClose}
         </div>`
       );
     }
@@ -598,10 +759,15 @@ async function openMenu() {
       const consoleBtn = node
         ? `<button type="button" data-quake-console="${esc(node.id)}" data-quake-env="${esc(id)}" data-quake-label="${esc(envTitle(id))} · ${esc(name)} · console"${consoleDis}>Console</button>`
         : "";
+      const shellSess = sessions.get(sessionKey(id, name));
+      const closeBtn = shellSess
+        ? `<button type="button" data-quake-close="${esc(shellSess.tabId)}">Close</button>`
+        : "";
       rows.push(
         `<div class="gsc-quake-row">
           <span class="gsc-quake-row-name">${esc(name)} <span class="muted">${esc(login + addr)}</span></span>
           <button type="button" data-quake-env="${esc(id)}" data-quake-machine="${esc(name)}"${shellDis}>Shell</button>
+          ${closeBtn}
           ${consoleBtn}
         </div>`
       );
@@ -625,6 +791,15 @@ async function openMenu() {
   }
   if (!admin) bits.push(`<div class="muted">An admin opens a shell.</div>`);
   menu.innerHTML = bits.join("");
+  placeMenu(menu, btn);
+}
+
+function placeMenu(menu, btn) {
+  const rect = btn.getBoundingClientRect();
+  const margin = 8;
+  const width = Math.min(menu.offsetWidth || 280, window.innerWidth - margin * 2);
+  menu.style.top = `${Math.max(margin, rect.bottom + 4)}px`;
+  menu.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`;
 }
 
 async function openConsole(opts) {
@@ -650,6 +825,7 @@ async function openConsole(opts) {
   root.appendChild(pane);
   const sess = {
     key,
+    tabId: nextTabId(),
     envId,
     machine: `console:${nodeId}`,
     label,
@@ -691,16 +867,22 @@ async function openConsole(opts) {
   }
 }
 
+function closeFromEvent(e) {
+  const close = e.target && e.target.closest && e.target.closest("[data-quake-close]");
+  if (!close) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  const id = close.getAttribute("data-quake-close") || "";
+  const sess = sessionByTab(id);
+  if (sess) disposeSession(sess.key);
+  return true;
+}
+
 function onQuakeClick(e) {
-  const close = e.target.closest("[data-quake-close]");
-  if (close) {
-    e.stopPropagation();
-    disposeSession(close.dataset.quakeClose || "");
-    return;
-  }
+  if (closeFromEvent(e)) return;
   const tab = e.target.closest("[data-quake-tab]");
   if (tab) {
-    focusSession(tab.dataset.quakeTab || "");
+    focusSession(tab.getAttribute("data-quake-tab") || "");
     return;
   }
   if (e.target.closest("#gsc-quake-hide")) {
@@ -792,10 +974,11 @@ export function mountQuake() {
         <button type="button" class="secondary btn-sm" id="gsc-quake-new">New</button>
         <span id="gsc-term-status"></span>
         <span class="gsc-quake-hint">\` lists machines · Esc hides</span>
-        <button type="button" class="secondary btn-sm" id="gsc-quake-expand" title="Expand shell">⤢</button>
+        <button type="button" class="secondary btn-sm" id="gsc-quake-expand" title="Expand shell" aria-pressed="false">⤢</button>
         <button type="button" class="secondary btn-sm" id="gsc-quake-hide">Hide</button>
       </div>
-      <div id="gsc-quake-panes" class="gsc-quake-body"></div>`;
+      <div id="gsc-quake-panes" class="gsc-quake-body"></div>
+      <div id="gsc-quake-resize" class="gsc-quake-resize" role="separator" aria-orientation="horizontal" aria-label="Shell height" aria-valuemin="12" aria-valuemax="96" title="Drag to set the height" tabindex="0"></div>`;
     document.body.appendChild(el);
     const menu = document.createElement("div");
     menu.id = "gsc-quake-menu";
@@ -806,12 +989,25 @@ export function mountQuake() {
   const el = quakeEl();
   if (el && !el.dataset.wired) {
     el.dataset.wired = "1";
+    el.addEventListener("pointerdown", closeFromEvent, true);
     el.addEventListener("click", onQuakeClick);
+    el.addEventListener("transitionend", (e) => {
+      if (e.propertyName === "height") refitActive();
+    });
     const menu = document.getElementById("gsc-quake-menu");
-    if (menu) menu.addEventListener("click", onQuakeClick);
+    if (menu) {
+      menu.addEventListener("pointerdown", closeFromEvent, true);
+      menu.addEventListener("click", onQuakeClick);
+    }
+    const handle = document.getElementById("gsc-quake-resize");
+    if (handle) {
+      handle.addEventListener("pointerdown", onResizePointerDown);
+      handle.addEventListener("keydown", onResizeKey);
+    }
     window.addEventListener("keydown", onQuakeKey, true);
     document.addEventListener("click", onDocClick);
   }
+  applySavedHeight(el);
   renderTabs();
 }
 
