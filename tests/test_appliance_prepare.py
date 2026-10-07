@@ -50,6 +50,9 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "bootupctl backend generate-update-metadata" in container
     assert "test ! -e /usr/sbin/grub2-install" in container
     assert "rm -f /usr/sbin/grub2-install" in container
+    assert "command -v grub-editenv" in container
+    assert 'ln -sfn "$editenv" /usr/bin/grub2-editenv' in container
+    assert "/usr/bin/grub2-editenv /tmp/genestack-grubenv create" in container
     assert 'add_dracutmodules+=" ostree bootc "' in container
     assert "btrfs-progs" not in container
     assert "xfsprogs" not in container

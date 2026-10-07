@@ -98,7 +98,9 @@ RUN printf '%s\n' \
 # lives in Ubuntu's blsuki module, so the EFI binary is built with
 # grub-mkimage instead of the signed image. A grub2-install symlink
 # would make metadata generation query rpm and fail. BIOS is left out.
-# Secure Boot is off for this unsigned GRUB.
+# Secure Boot is off for this unsigned GRUB. bootupd writes
+# /boot/grub2/grubenv by running /usr/bin/grub2-editenv. Ubuntu names
+# that program grub-editenv.
 RUN set -eu; \
     ver=$(dpkg-query -W -f '${Version}' grub-efi-amd64-bin | tr ':' '_'); \
     shimver=$(dpkg-query -W -f '${Version}' shim-signed | tr ':' '_'); \
@@ -124,6 +126,13 @@ RUN set -eu; \
     if [ -f /usr/lib/shim/BOOTX64.CSV ]; then \
       cp /usr/lib/shim/BOOTX64.CSV "$shimdir/ubuntu/BOOTX64.CSV"; \
     fi; \
+    editenv=$(command -v grub-editenv); \
+    test -n "$editenv"; \
+    ln -sfn "$editenv" /usr/bin/grub2-editenv; \
+    test -x /usr/bin/grub2-editenv; \
+    /usr/bin/grub2-editenv /tmp/genestack-grubenv create; \
+    test -s /tmp/genestack-grubenv; \
+    rm -f /tmp/genestack-grubenv; \
     rm -f /usr/sbin/grub2-install; \
     test ! -e /usr/sbin/grub2-install; \
     test -x /usr/bin/bootupctl; \
