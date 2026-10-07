@@ -114,6 +114,7 @@ let job = null;
 let recentJobs = [];
 let snap = null;
 let registryGen = 0;
+let registryConfigGen = 0;
 let cacheCardSig = "";
 let platform = null;
 let inventoryServers = [];
@@ -6447,6 +6448,39 @@ function configRowHtml(row, addr) {
   </tr>`;
 }
 
+function lockedImageRow(ref) {
+  return `<tr data-reg-image-locked="1">
+    <td><input type="text" value="${esc(ref)}" readonly spellcheck="false" aria-label="Genestack image" /></td>
+    <td class="muted">Genestack</td>
+    <td></td>
+  </tr>`;
+}
+
+function extraImageRow(ref) {
+  return `<tr>
+    <td><input type="text" data-reg-image value="${esc(ref || "")}" spellcheck="false" autocomplete="off" placeholder="registry/name:tag" aria-label="Image to cache" /></td>
+    <td class="muted">Added</td>
+    <td><button type="button" class="secondary btn-sm" data-reg-image-remove>Remove</button></td>
+  </tr>`;
+}
+
+function readExtraImages() {
+  const body = document.getElementById("reg-config-images");
+  if (!body) return [];
+  return [...body.querySelectorAll("[data-reg-image]")].map((el) => String(el.value || "").trim());
+}
+
+function paintImageList(extras) {
+  const body = document.getElementById("reg-config-images");
+  if (!body) return;
+  const reg = registryPayload();
+  const required = Array.isArray(reg.required_images) ? reg.required_images : [];
+  const added = extras == null ? (Array.isArray(reg.extra_images) ? reg.extra_images : []) : extras;
+  body.innerHTML = `${required.map((ref) => lockedImageRow(ref)).join("")}${added
+    .map((ref) => extraImageRow(ref))
+    .join("")}`;
+}
+
 function readConfigRows() {
   const body = document.getElementById("reg-config-rows");
   if (!body) return [];
@@ -6498,6 +6532,7 @@ function paintRegistryConfig(rows) {
     host.placeholder = reg.bind || "";
   }
   if (source) source.textContent = cacheSourceSentence(reg);
+  if (rows == null) paintImageList(null);
   const list =
     rows ||
     (Array.isArray(reg.upstreams) && reg.upstreams.length ? reg.upstreams : reg.defaults || []);
@@ -6541,6 +6576,19 @@ function ensureConfigModal() {
         <button type="button" class="secondary btn-sm" id="reg-config-add">Add a registry</button>
         <button type="button" class="secondary btn-sm" id="reg-config-reset">Standard registries</button>
       </div>
+      <h3 class="lc-title">Images</h3>
+      <p class="muted reg-config-note">Genestack images stay. Add, edit, or remove the others so this environment can pull them with no path to the internet. Cache images and charts copies this list.</p>
+      <div class="reg-config-scroll">
+        <table class="reg-config-table">
+          <thead>
+            <tr><th>Image</th><th></th><th></th></tr>
+          </thead>
+          <tbody id="reg-config-images"></tbody>
+        </table>
+      </div>
+      <div class="dm-insp-actions">
+        <button type="button" class="secondary btn-sm" id="reg-config-add-image">Add an image</button>
+      </div>
       <p id="reg-config-msg" class="muted"></p>
       <div class="dm-insp-actions">
         <button type="button" class="btn-sm" id="reg-config-save">Save</button>
@@ -6550,7 +6598,10 @@ function ensureConfigModal() {
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener("click", onConfigClick);
-  modal.addEventListener("input", () => paintConfigListens());
+  modal.addEventListener("input", () => {
+    registryConfigGen += 1;
+    paintConfigListens();
+  });
   return modal;
 }
 
@@ -6569,21 +6620,25 @@ async function openRegistryConfig() {
   modal.hidden = false;
   const msg = document.getElementById("reg-config-msg");
   if (msg) msg.textContent = "";
+  const gen = ++registryConfigGen;
+  paintRegistryConfig();
   if (envId) {
     try {
       const reg = await api(`/api/v1/environments/${encodeURIComponent(envId)}/registry`, {
         timeout: 20000,
       });
+      if (gen !== registryConfigGen) return;
       if (reg && typeof reg === "object") {
         snap = Object.assign({}, snap || {}, { registry: reg });
         cacheCardSig = "";
         renderCacheCard();
+        paintRegistryConfig();
       }
     } catch (err) {
+      if (gen !== registryConfigGen) return;
       if (msg) msg.textContent = (err && err.message) || "Registries unavailable.";
     }
   }
-  paintRegistryConfig();
   const host = document.getElementById("reg-config-host");
   if (host) host.focus();
 }
@@ -6606,18 +6661,21 @@ async function saveRegistryConfig() {
     port: Number(row.port),
     enabled: !!row.enabled,
   }));
+  const images = readExtraImages().filter(Boolean);
+  registryConfigGen += 1;
   if (msg) msg.textContent = "Saving…";
   try {
     const saved = await api(`/api/v1/environments/${encodeURIComponent(envId)}/registry`, {
       method: "PUT",
-      body: JSON.stringify({ host, upstreams }),
+      body: JSON.stringify({ host, upstreams, images }),
     });
     snap = Object.assign({}, snap || {}, { registry: saved });
     cacheCardSig = "";
     renderCacheCard();
+    paintImageList(Array.isArray(saved.extra_images) ? saved.extra_images : []);
     if (msg) {
       msg.textContent =
-        "Saved. Start caches brings the proxies up. Cache images and charts also pulls what this cluster is running.";
+        "Saved. Genestack images stay. Cache images and charts pulls this list and what the cluster is running.";
     }
     toast("Image cache saved", "ok");
     renderAll();
@@ -6679,6 +6737,23 @@ function onConfigClick(e) {
     paintRegistryConfig(rows);
     return;
   }
+  if (e.target.closest("#reg-config-add-image")) {
+    registryConfigGen += 1;
+    const extras = readExtraImages();
+    extras.push("");
+    paintImageList(extras);
+    const added = document.querySelectorAll("#reg-config-images [data-reg-image]");
+    const last = added[added.length - 1];
+    if (last) last.focus();
+    return;
+  }
+  const dropImage = e.target.closest("[data-reg-image-remove]");
+  if (dropImage) {
+    registryConfigGen += 1;
+    const tr = dropImage.closest("tr");
+    if (tr && !tr.hasAttribute("data-reg-image-locked")) tr.remove();
+    return;
+  }
   const remove = e.target.closest("[data-reg-config-remove]");
   if (remove) {
     const tr = remove.closest("tr");
@@ -6718,6 +6793,8 @@ function renderCacheCard() {
     r.bind,
     r.host_source,
     r.configured_host,
+    r.required_images,
+    r.extra_images,
     r.ready_count,
     r.cache_count,
     r.image_count,
@@ -6755,9 +6832,13 @@ function renderCacheCard() {
           : r.host_source === "console"
             ? "this console"
             : "address not set";
+    const reqN = Array.isArray(r.required_images) ? r.required_images.length : 0;
+    const extraN = Array.isArray(r.extra_images) ? r.extra_images.length : 0;
+    const imageLine =
+      reqN || extraN ? `${reqN} Genestack images, ${extraN} added. ` : "";
     setup.textContent = r.bind
-      ? `${r.bind} · ${where}. Configure sets the address and which registries are mirrored.`
-      : "Configure sets the address machines pull from, and which registries are mirrored.";
+      ? `${r.bind} · ${where}. ${imageLine}Configure sets the address, the registries, and the images to cache.`
+      : "Configure sets the address machines pull from, the registries, and the images to cache.";
   }
   if (!caches.length) {
     regs.innerHTML = r.error ? `<p class="muted">${esc(String(r.error))}</p>` : "";

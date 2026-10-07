@@ -13,7 +13,7 @@ import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard }
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap } from "./environment_deploy_map.js?v=ls43";
+import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap } from "./environment_deploy_map.js?v=ls45";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";

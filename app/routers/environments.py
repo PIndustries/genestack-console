@@ -309,6 +309,8 @@ def get_environment_registry(
             "configured_host": "",
             "upstreams": defaults,
             "defaults": defaults,
+            "required_images": image_registry.required_image_refs(),
+            "extra_images": [],
             "error": str(exc)[:240],
         }
 
@@ -323,6 +325,7 @@ class RegistryUpstreamIn(BaseModel):
 class RegistryConfigIn(BaseModel):
     host: str = ""
     upstreams: list[RegistryUpstreamIn] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
 
 
 @router.put("/{environment_id}/registry")
@@ -341,9 +344,10 @@ def put_environment_registry(
 
     host = body.host or ""
     upstreams = [row.model_dump() for row in body.upstreams]
+    images = list(body.images or [])
     try:
         image_registry.save_registry_config(
-            db, env, principal.username, host, upstreams
+            db, env, principal.username, host, upstreams, images
         )
     except envconfig_service.ConfigValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -359,7 +363,7 @@ def put_environment_registry(
         resource_type="environment",
         resource_id=env.id,
         environment_id=env.id,
-        details={"host": host.strip(), "registries": names},
+        details={"host": host.strip(), "registries": names, "images": images},
     )
     db.commit()
     return image_registry.for_environment(db, env, get_settings())

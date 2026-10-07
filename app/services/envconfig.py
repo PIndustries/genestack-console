@@ -35,11 +35,13 @@ Older server rows may still say ``source: maas``; they still load::
     pxe: {interface, range_start, range_end, # console-owned DHCP/PXE (services/pxe.py);
           netmask, gateway, dns,             # interface/range_start/range_end required
           next_server, http_port, image_url} # when the section is present
-    registry: {host, upstreams}            # image cache. host is the address
+    registry: {host, upstreams, images}   # image cache. host is the address
                                            # nodes pull from (empty follows pxe
                                            # next_server, then this console's
                                            # own address). upstreams is the
-                                           # pull-through list. Not rendered
+                                           # pull-through list. images are extra
+                                           # refs to warm. Genestack's own images
+                                           # are not stored here. Not rendered
                                            # into /etc/genestack.
     helm_overrides: {<service>: <inline yaml mapping>, global: {...}}
     kustomize_patches: {<service>: [<patch yaml docs>]}

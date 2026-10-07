@@ -226,6 +226,57 @@ def test_put_registry_saves_address_and_round_trips(client, operator_headers, vi
     assert again.json()["configured_host"] == "10.9.9.9"
 
 
+def test_extra_images_round_trip_and_genestack_images_stay(client, operator_headers):
+    name = f"env-imgs-{uuid.uuid4().hex[:10]}"
+    create = client.post("/api/v1/environments", headers=operator_headers, json={"name": name})
+    assert create.status_code in (200, 201), create.text
+    eid = create.json()["id"]
+    locked = image_registry.required_image_refs()
+    assert locked
+    assert all(ref == image_registry.canonical_image(ref) for ref in locked)
+    saved = client.put(
+        f"/api/v1/environments/{eid}/registry",
+        headers=operator_headers,
+        json={
+            "host": "",
+            "upstreams": [_one("docker.io", "https://registry-1.docker.io", 5001)],
+            "images": ["nginx:1.27", locked[0], "docker.io/library/busybox:1.36"],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["required_images"] == locked
+    assert body["extra_images"] == [
+        "docker.io/library/nginx:1.27",
+        "docker.io/library/busybox:1.36",
+    ]
+    assert locked[0] not in body["extra_images"]
+    again = client.get(f"/api/v1/environments/{eid}/registry", headers=operator_headers)
+    assert again.json()["extra_images"] == body["extra_images"]
+
+    bad = client.put(
+        f"/api/v1/environments/{eid}/registry",
+        headers=operator_headers,
+        json={
+            "upstreams": [_one("docker.io", "https://registry-1.docker.io", 5001)],
+            "images": ["quay.io/org/name:1"],
+        },
+    )
+    assert bad.status_code == 422
+    assert "quay.io" in bad.json()["detail"]
+
+
+def test_warm_includes_images_added_on_the_environment(monkeypatch):
+    monkeypatch.setattr(image_registry, "_warm_one", lambda *a, **k: (True, "cached"))
+    monkeypatch.setattr(image_registry, "_cluster_images", lambda kc: [])
+    doc = {
+        "pxe": {"next_server": "10.200.0.50"},
+        "registry": {"images": ["docker.io/library/busybox:1.36"]},
+    }
+    result = image_registry.warm_for_deploy(doc, None, None, lambda _m: None, dry_run=True)
+    assert result["cached"] == len(image_registry.required_image_refs()) + 1
+
+
 def test_put_registry_rejects_one_port_with_two_upstreams(client, admin_headers):
     name = f"env-cache-bad-{uuid.uuid4().hex[:10]}"
     create = client.post("/api/v1/environments", headers=admin_headers, json={"name": name})

@@ -53,6 +53,7 @@ UPSTREAMS: tuple[tuple[str, str, int], ...] = (
 _BIND_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
 _MAX_UPSTREAMS = 24
+_MAX_EXTRA_IMAGES = 200
 
 
 class RegistryError(RuntimeError):
@@ -172,7 +173,7 @@ def normalize_registry_section(section: dict[str, Any]) -> tuple[dict[str, Any],
     warnings = [
         f"registry: unknown key '{key}' (ignored)"
         for key in section
-        if key not in {"host", "upstreams"}
+        if key not in {"host", "upstreams", "images"}
     ]
     host = str(section.get("host") or "").strip()
     if host and not _BIND_RE.match(host):
@@ -230,6 +231,9 @@ def normalize_registry_section(section: dict[str, Any]) -> tuple[dict[str, Any],
             {"name": name, "remote": remote, "port": port, "enabled": enabled}
         )
     out["upstreams"] = cleaned
+    if "images" in section:
+        enabled_names = {row["name"] for row in cleaned if row["enabled"]}
+        out["images"] = _clean_extra_images(section.get("images"), enabled_names, warnings)
     return out, warnings
 
 
@@ -284,6 +288,114 @@ def _container_upstreams(doc: dict[str, Any] | None) -> list[tuple[str, str, int
             continue
         seen.add(port)
         out.append((name, remote, port))
+    return out
+
+
+def canonical_image(ref: str) -> str:
+    """``registry/repo:tag`` or ``registry/repo@sha256:…``. Raises ValueError."""
+    registry, repo, tag = split_image(ref)
+    if not _NAME_RE.match(registry) or not repo or "/" in str(tag):
+        raise ValueError("invalid image reference")
+    if str(tag).startswith("@"):
+        return f"{registry}/{repo}{tag}"
+    return f"{registry}/{repo}:{tag}"
+
+
+def required_image_refs() -> list[str]:
+    """Images Genestack always caches. These are not stored and cannot be removed."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for ref in BOOTSTRAP_WARM_IMAGES:
+        canon = canonical_image(ref)
+        if canon in seen:
+            continue
+        seen.add(canon)
+        out.append(canon)
+    return out
+
+
+def _clean_extra_images(
+    raw: Any,
+    enabled_names: set[str],
+    warnings: list[str],
+) -> list[str]:
+    """Operator image list. A Genestack image is dropped because it is already kept."""
+    from app.services.envconfig import ConfigValidationError
+
+    if not isinstance(raw, list):
+        raise ConfigValidationError("registry.images must be a list")
+    if len(raw) > _MAX_EXTRA_IMAGES:
+        raise ConfigValidationError(
+            f"registry.images accepts at most {_MAX_EXTRA_IMAGES} images"
+        )
+    locked = set(required_image_refs())
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        text = str(item or "").strip()
+        if not text:
+            continue
+        if len(text) > 300 or any(ch.isspace() for ch in text):
+            raise ConfigValidationError(
+                f"registry.images[{index}] must be an image such as quay.io/org/name:tag"
+            )
+        try:
+            canon = canonical_image(text)
+        except ValueError as exc:
+            raise ConfigValidationError(
+                f"registry.images[{index}] must be an image such as quay.io/org/name:tag"
+            ) from exc
+        if canon in locked:
+            warnings.append(f"registry image {canon} is a Genestack image and stays")
+            continue
+        if canon in seen:
+            raise ConfigValidationError(f"image {canon} is listed twice")
+        registry = canon.split("/", 1)[0]
+        if registry not in enabled_names:
+            raise ConfigValidationError(
+                f"image {canon} needs the {registry} mirror turned on"
+            )
+        seen.add(canon)
+        cleaned.append(canon)
+    return cleaned
+
+
+def extra_images(doc: dict[str, Any] | None) -> list[str]:
+    """Images this environment added. Genestack's own images are not in this list."""
+    raw = _registry_section(doc).get("images")
+    if not isinstance(raw, list):
+        return []
+    locked = set(required_image_refs())
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        try:
+            canon = canonical_image(str(item or ""))
+        except ValueError:
+            continue
+        if canon in locked or canon in seen:
+            continue
+        seen.add(canon)
+        out.append(canon)
+    return out
+
+
+def collect_warm_images(
+    doc: dict[str, Any] | None,
+    cluster: list[str] | None = None,
+) -> list[str]:
+    """Genestack images, then images added on this environment, then the live cluster."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for ref in [*required_image_refs(), *extra_images(doc), *(cluster or [])]:
+        try:
+            canon = canonical_image(ref)
+        except ValueError:
+            continue
+        if canon in seen:
+            continue
+        seen.add(canon)
+        out.append(canon)
     return out
 
 
@@ -541,6 +653,8 @@ def status(doc: dict[str, Any] | None = None, settings: Settings | None = None) 
         "configured_host": str(_registry_section(doc).get("host") or ""),
         "upstreams": editable_upstreams(doc),
         "defaults": default_upstream_rows(),
+        "required_images": required_image_refs(),
+        "extra_images": extra_images(doc),
     }
 
 
@@ -597,14 +711,17 @@ def save_registry_config(
     actor: str | None,
     host: str,
     upstreams: list[dict[str, Any]],
+    images: list[str] | None = None,
 ) -> tuple[Any, list[str]]:
-    """Store the pull address and registry list as a new config version.
+    """Store the pull address, registry list, and extra images.
 
     Does not commit. Does not start a container or pull an image.
+    Genestack's own images are not stored here. They are always warmed.
     """
-    section, warnings = normalize_registry_section(
-        {"host": host, "upstreams": upstreams}
-    )
+    payload: dict[str, Any] = {"host": host, "upstreams": upstreams}
+    if images is not None:
+        payload["images"] = images
+    section, warnings = normalize_registry_section(payload)
     current = envconfig_service.get_current(db, env)
     doc = dict(current[0]) if current else {}
     expected = current[1].version if current else None
@@ -862,10 +979,11 @@ def mirror_cluster(
             "returncode": 2,
         }
     bind = started.get("bind") or registry_host_from_doc(doc if isinstance(doc, dict) else None)
-    images = _cluster_images(kubeconfig) if kubeconfig else []
+    cluster = _cluster_images(kubeconfig) if kubeconfig else []
+    images = collect_warm_images(parsed, cluster)
     log_fn(
         f"[registry] warming {len(images)} unique image(s) through {bind} "
-        f"(manifests + layers, so the next greenfield does not hit the internet)"
+        "(Genestack images, images added here, and what this cluster is running)"
     )
     ok_n = 0
     fail_n = 0
@@ -940,13 +1058,8 @@ def warm_for_deploy(
     docker or the network and omits ``bind`` from the result.
     """
     del settings  # call-compatible with deploy/greenfield
-    images: list[str] = list(BOOTSTRAP_WARM_IMAGES)
-    seen = set(images)
-    if kubeconfig:
-        for img in _cluster_images(kubeconfig):
-            if img not in seen:
-                images.append(img)
-                seen.add(img)
+    cluster = _cluster_images(kubeconfig) if kubeconfig else []
+    images = collect_warm_images(doc if isinstance(doc, dict) else None, cluster)
     bind = registry_host_from_doc(doc)
     log_fn(
         f"[registry] warming {len(images)} unique image(s) through {bind} "
