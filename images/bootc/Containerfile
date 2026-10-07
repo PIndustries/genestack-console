@@ -3,10 +3,10 @@
 # data disk is what systemd runs, so the existing update check can
 # replace it. See docs/appliance.md.
 #
-# The operating system is Ubuntu 24.04 LTS. Ubuntu publishes container
-# images, and this file installs the kernel, OpenSSH, cloud-init, and
-# bootc on that image so image-builder can write the disk.
-ARG BASE=docker.io/library/ubuntu:24.04
+# The operating system is Ubuntu 26.04 LTS. That release has the ostree
+# bootc 1.16.14 links against. This file installs the kernel, OpenSSH,
+# cloud-init, and bootc on that image so image-builder can write the disk.
+ARG BASE=docker.io/library/ubuntu:26.04
 ARG BOOTC_VERSION=v1.16.14
 FROM ${BASE} AS builder
 ARG BOOTC_VERSION
@@ -52,7 +52,7 @@ RUN printf '%s\n' \
         e2fsprogs \
         fdisk \
         xfsprogs \
-        linux-image-generic-hwe-24.04 \
+        linux-image-generic \
         ostree \
         zstd \
         skopeo \

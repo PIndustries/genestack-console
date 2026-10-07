@@ -4,7 +4,7 @@ A release ships two ways to run Genestack Console.
 
 The install command puts the program on a Linux system you already have. Ubuntu is the usual system for that, including a machine you are using for development. That path is [Install the Genestack Console](install.md).
 
-The same release also ships a bootc disk. Boot that disk when you want the console and its operating system as one appliance. That operating system is Ubuntu 24.04 LTS. You boot the disk, and the first boot is the install.
+The same release also ships a bootc disk. Boot that disk when you want the console and its operating system as one appliance. That operating system is Ubuntu 26.04 LTS. You boot the disk, and the first boot is the install.
 
 The file on the release is:
 
@@ -21,7 +21,7 @@ The disk is a bootc image. bootc keeps the operating system as one image, with a
 | Genestack Console appliance               |
 |                                           |
 | image, replaced by bootc                  |
-|   Ubuntu 24.04 LTS                        |
+|   Ubuntu 26.04 LTS                        |
 |   sshd                                    |
 |   a copy of the console program           |
 |                                           |
@@ -51,7 +51,7 @@ virt-install \
   --vcpus 4 \
   --import \
   --disk genestack-console-appliance-<version>-amd64.qcow2 \
-  --os-variant ubuntu24.04 \
+  --os-variant ubuntu26.04 \
   --network network=default \
   --cloud-init ssh-key=$HOME/.ssh/id_ed25519.pub
 ```
@@ -98,6 +98,6 @@ On a Linux x86_64 machine with podman, from a checkout:
 
 The disk is `dist/genestack-console-appliance-<version>-amd64.qcow2.xz`.
 
-The operating system is Ubuntu 24.04 LTS. The build starts from `docker.io/library/ubuntu:24.04` and installs the kernel, OpenSSH, cloud-init, and bootc 1.16.14. The disk boots with systemd-boot. `GSC_BOOTC_BASE` selects the Ubuntu image. `GSC_BOOTC_VERSION` selects the bootc release. `GSC_IMAGE_BUILDER` selects the image-builder container. The default is `ghcr.io/osbuild/image-builder-cli:latest`.
+The operating system is Ubuntu 26.04 LTS. The build starts from `docker.io/library/ubuntu:26.04` and installs the kernel, OpenSSH, cloud-init, and bootc 1.16.14. Ubuntu 26.04 has the ostree release that bootc links against. The disk boots with systemd-boot. `GSC_BOOTC_BASE` selects the Ubuntu image. `GSC_BOOTC_VERSION` selects the bootc release. `GSC_IMAGE_BUILDER` selects the image-builder container. The default is `ghcr.io/osbuild/image-builder-cli:latest`.
 
 A tag on this repository runs that build after the Linux binary is published and attaches the compressed qcow2 to the same GitHub Release. The binary, `version.json`, `console.sh`, and `console.ps1` are published first. A failure in the disk build leaves that release in place.

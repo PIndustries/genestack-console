@@ -16,11 +16,11 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     container = (IMAGE / "Containerfile").read_text(encoding="utf-8")
     assert "cloud-init" in container
     assert "10-genestack-cloud.cfg" in container
-    assert "docker.io/library/ubuntu:24.04" in container
+    assert "docker.io/library/ubuntu:26.04" in container
     assert "apt-get" in container
     assert "v1.16.14" in container
     assert "default-toolchain stable" in container
-    assert "linux-image-generic-hwe-24.04" in container
+    assert "linux-image-generic" in container
     assert "setup-root-conf.toml" in container
     assert "prepare-root.conf" not in container
     assert "centos" not in container.lower()
@@ -32,11 +32,11 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "OpenStack" in cfg
     script = (ROOT / "scripts" / "build-appliance.sh").read_text(encoding="utf-8")
     assert "10-genestack-cloud.cfg" in script
-    assert "docker.io/library/ubuntu:24.04" in script
+    assert "docker.io/library/ubuntu:26.04" in script
     assert "centos" not in script.lower()
     docs = (ROOT / "docs" / "appliance.md").read_text(encoding="utf-8")
-    assert "Ubuntu 24.04" in docs
-    assert "ubuntu24.04" in docs
+    assert "Ubuntu 26.04" in docs
+    assert "ubuntu26.04" in docs
     assert "centos" not in docs.lower()
 
 
