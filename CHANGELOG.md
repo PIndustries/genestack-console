@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.3
+
+A release also ships an Ubuntu appliance disk, and the shell drawer keeps the height you set.
+
+- The same tag includes `genestack-console-appliance-<version>-amd64.qcow2.xz`. Boot that disk for an appliance. The install command stays for a machine you already have.
+- The disk is Ubuntu 24.04 LTS. Pass an SSH key when you create the virtual machine. cloud-init writes it for the user `console`.
+- Drag the bottom edge of the shell drawer to set the height. This browser remembers that height. Expand fills the screen. The × on a shell tab closes that session.
+
 ## 2026.10.07.2
 
 The image cache keeps Genestack images and lets an operator add the rest.
