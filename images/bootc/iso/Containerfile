@@ -87,4 +87,9 @@ RUN printf '%s\n' "$APPLIANCE_REF" > /usr/lib/genestack-console/appliance-ref \
     && chmod 0755 /usr/lib/genestack-console/iso-install.sh \
     && systemctl enable genestack-iso-install.service
 
+# Image Builder labels this live root the same way as the appliance disk.
+RUN mkdir -p /etc/selinux/targeted/contexts/files \
+    && printf '%s\n' 'SELINUX=disabled' 'SELINUXTYPE=targeted' > /etc/selinux/config \
+    && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts
+
 LABEL containers.bootc=1

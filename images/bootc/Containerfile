@@ -159,5 +159,11 @@ RUN chmod 0755 /usr/lib/genestack-console/genestack-console /usr/lib/genestack-c
     && ln -sfn /var/lib/genestack /opt/genestack \
     && systemctl enable genestack-console-prepare.service genestack-console.service genestack-console-worker.service
 
+# Image Builder labels the disk with setfiles and reads this path.
+# Ubuntu ships no targeted policy. The appliance does not enforce SELinux.
+RUN mkdir -p /etc/selinux/targeted/contexts/files \
+    && printf '%s\n' 'SELINUX=disabled' 'SELINUXTYPE=targeted' > /etc/selinux/config \
+    && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts
+
 LABEL containers.bootc=1
 RUN bootc container lint
