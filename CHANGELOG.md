@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.9
+
+The appliance disk build no longer passes a filesystem blueprint.
+
+- Image Builder rejects `customizations.filesystem` for a bootc qcow2. The published disk is 10 GiB, and the resize command in the appliance docs still grows it.
+
 ## 2026.10.07.8
 
 The appliance image enables the Ubuntu 26.04 resolver and cloud-init units.
