@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.21
+
+The installer CD image can format its EFI boot image.
+
+- The disk image built. The CD image stopped because Image Builder runs mkfs.fat to create the EFI boot image, and that program was not in the installer image. The image also links the CD builder name Image Builder runs.
+
 ## 2026.10.07.20
 
 The installer CD image includes skopeo.
