@@ -37,6 +37,7 @@ RUN printf '%s\n' \
         ostree \
         openssl \
         skopeo \
+        dosfstools \
         squashfs-tools \
         xorriso \
         isomd5sum \
@@ -66,7 +67,15 @@ RUN set -eu; \
     bootc install print-configuration > /tmp/bootc-install-config.json; \
     grep -q ext4 /tmp/bootc-install-config.json; \
     rm -f /tmp/bootc-install-config.json; \
-    command -v skopeo
+    command -v skopeo; \
+    command -v mksquashfs; \
+    command -v implantisomd5; \
+    test -x /usr/bin/xorriso; \
+    ln -sfn /usr/bin/xorriso /usr/bin/xorrisofs; \
+    test -x /usr/bin/xorrisofs; \
+    ln -sfn /usr/sbin/mkfs.fat /usr/bin/mkfs.fat; \
+    test -x /usr/bin/mkfs.fat; \
+    test -f /usr/lib/grub/i386-pc/boot_hybrid.img
 
 # dmsquash-live will not build without dmsetup. The overlay module
 # will not build without parted.
