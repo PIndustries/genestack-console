@@ -23,7 +23,7 @@ curl -fsSL https://get.genestack.dev/console.sh | bash
 The same redirect is on `genestack.dev`. A production deploy host runs that published binary. `--from-source` is for a checkout where you are changing the console and testing that change. A checkout can be what a deploy host runs. The install we support in production is the binary. The first login is a local password.
 To connect that console to the account portal at `https://my.genestack.dev`, see [hosted-mode.md](hosted-mode.md). The portal is the account and the Apple apps. It is not this program.
 
-The same release includes a bootc disk. Boot that disk when the console should arrive with its own operating system. The steps are in [The appliance disk](appliance.md). The install command on this page stays the way to put Console on Ubuntu, or on any other Linux system you already have.
+The same release includes a bootc appliance. Boot the qcow2 when you want a virtual disk, or boot the ISO when you want to install onto a machine. The steps are in [The appliance](appliance.md). The install command on this page stays the way to put Console on Ubuntu, or on any other Linux system you already have.
 
 ## Update an install
 
@@ -250,6 +250,6 @@ That command writes the ELF under `dist/`. A tag `v*` on this repository
 runs GitHub Actions and attaches `genestack-console-linux-amd64`,
 `version.json`, `console.sh`, and `console.ps1` to the GitHub Release.
 The same workflow then builds `genestack-console-appliance-<version>-amd64.qcow2.xz`
-and attaches that disk. The installer script downloads the binary asset.
+and `genestack-console-appliance-<version>-amd64.iso` and attaches them. The installer script downloads the binary asset.
 
 `--from-source` builds a container from a checkout while you are changing the console. The supported production install is the published binary.

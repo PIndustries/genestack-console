@@ -19,7 +19,7 @@ A maintainer reviews a pull request from someone else. After the tests pass, the
 
 ## What a release is
 
-A release is a git tag `v` plus `year.month.day.build` in `app/version.py`, for example `v2026.10.04.1`. Pushing that tag builds the binary and moves the install command. The same tag also builds the bootc appliance disk and attaches it to the release. The steps are in [docs/releasing.md](docs/releasing.md).
+A release is a git tag `v` plus `year.month.day.build` in `app/version.py`, for example `v2026.10.04.1`. Pushing that tag builds the binary and moves the install command. The same tag also builds the bootc appliance disk and the installer ISO and attaches them to the release. The steps are in [docs/releasing.md](docs/releasing.md).
 
 A tag with a hyphen, such as `v2026.10.04-rc.1`, is a prerelease. It does not become the latest release, so the install command stays where it is.
 

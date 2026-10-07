@@ -22,10 +22,17 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "default-toolchain stable" in container
     assert "libclang-dev" in container
     assert "linux-image-generic" in container
+    assert "go-md2man" in container
+    assert "00-genestack.toml" in container
+    assert 'type = "ext4"' in container
     assert "setup-root-conf.toml" in container
     assert "prepare-root.conf" not in container
+    assert "btrfs-progs" not in container
+    assert "xfsprogs" not in container
+    assert "linux-firmware" not in container
     assert "centos" not in container.lower()
     assert "dnf" not in container
+    assert "anaconda" not in container.lower()
     cfg = (IMAGE / "10-genestack-cloud.cfg").read_text(encoding="utf-8")
     assert "name: console" in cfg
     assert "groups: [sudo]" in cfg
@@ -34,10 +41,21 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     script = (ROOT / "scripts" / "build-appliance.sh").read_text(encoding="utf-8")
     assert "10-genestack-cloud.cfg" in script
     assert "docker.io/library/ubuntu:26.04" in script
+    assert "bootc-generic-iso" in script
     assert "centos" not in script.lower()
+    installer = (IMAGE / "iso" / "Containerfile").read_text(encoding="utf-8")
+    assert "dracut-live" in installer
+    assert "grub-efi" in installer
+    assert "anaconda" not in installer.lower()
+    iso_install = (IMAGE / "iso" / "iso-install.sh").read_text(encoding="utf-8")
+    assert "bootc install to-disk" in iso_install
+    assert "--wipe" in iso_install
+    assert "genestack.install" in iso_install
     docs = (ROOT / "docs" / "appliance.md").read_text(encoding="utf-8")
     assert "Ubuntu 26.04" in docs
     assert "ubuntu26.04" in docs
+    assert "genestack-console-appliance-<version>-amd64.iso" in docs
+    assert "not as small as Talos" in docs
     assert "centos" not in docs.lower()
 
 

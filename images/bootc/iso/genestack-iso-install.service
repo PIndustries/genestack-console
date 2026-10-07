@@ -1,0 +1,16 @@
+[Unit]
+Description=Install Genestack Console onto a local disk
+After=local-fs.target systemd-udevd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/genestack-console/iso-install.sh
+StandardInput=tty-force
+StandardOutput=journal+console
+StandardError=journal+console
+TTYPath=/dev/console
+TTYReset=yes
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+label: GENESTACK
+grub2:
+  default: "0"
+  timeout: "5"
+  entries:
+    - name: "Install Genestack Console"
+      linux: "/images/pxeboot/vmlinuz root=live:CDLABEL=GENESTACK rd.live.image rd.live.overlay.overlayfs=1 console=tty0 console=ttyS0,115200 genestack.install=ask"
+      initrd: "/images/pxeboot/initrd.img"

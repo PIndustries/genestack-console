@@ -1,16 +1,26 @@
-# The appliance disk
+# The appliance
 
-A release ships two ways to run Genestack Console.
+A release ships three ways to run Genestack Console.
 
 The install command puts the program on a Linux system you already have. Ubuntu is the usual system for that, including a machine you are using for development. That path is [Install the Genestack Console](install.md).
 
-The same release also ships a bootc disk. Boot that disk when you want the console and its operating system as one appliance. That operating system is Ubuntu 26.04 LTS. You boot the disk, and the first boot is the install.
+The same release also ships a bootc appliance. The operating system is a small Ubuntu 26.04 LTS boot image: the kernel, systemd, sshd, cloud-init, bootc, and the console program. It is a boot appliance. It is not Ubuntu Server, and it is not as small as Talos. Talos is one program and a kernel built for that program. This console program is a glibc binary, and bootc needs the ostree in Ubuntu 26.04, so the image stays on that base. Firmware packages are left out. A network card that needs them will not come up until those packages are added to the image.
 
-The file on the release is:
+Two files carry that appliance:
 
 `genestack-console-appliance-<version>-amd64.qcow2.xz`
 
-`version.json` on that release names it in the `appliance` field. The `binary` field is still the single Linux program. An install that already uses the program keeps updating that program.
+`genestack-console-appliance-<version>-amd64.iso`
+
+The qcow2 is an already-installed disk. Attach it to a virtual machine. The ISO is install media. Boot it from virtual media, a USB stick, or a DVD, and it writes the appliance onto a disk you name. `version.json` names the qcow2 in `appliance` and the ISO in `iso`. The `binary` field is still the single Linux program. An install that already uses the program keeps updating that program.
+
+## Install from the ISO
+
+Attach the ISO and boot it. The menu says `Install Genestack Console`. It lists the disks and waits. Type a disk name, for example `nvme0n1`. That disk is wiped. Then paste one SSH public key for the user `console`, or press enter to skip the key.
+
+Nothing is written until you name a disk. To wipe a known disk with no prompt, edit the kernel line and set `genestack.install=/dev/nvme0n1`. Remove the ISO when the installer says the machine is rebooting.
+
+The installed system is the same appliance as the qcow2. The first boot still grows into the disk and reads cloud-init. A key you pasted is written for `console`. A boot with no key and no cloud-init metadata has no SSH login. The page listens on `127.0.0.1:8080`.
 
 ## What is on the disk
 
@@ -96,8 +106,8 @@ On a Linux x86_64 machine with podman, from a checkout:
 ./scripts/build-appliance.sh
 ```
 
-The disk is `dist/genestack-console-appliance-<version>-amd64.qcow2.xz`.
+The disk is `dist/genestack-console-appliance-<version>-amd64.qcow2.xz`. The installer is `dist/genestack-console-appliance-<version>-amd64.iso`.
 
-The operating system is Ubuntu 26.04 LTS. The build starts from `docker.io/library/ubuntu:26.04` and installs the kernel, OpenSSH, cloud-init, and bootc 1.16.14. Ubuntu 26.04 has the ostree release that bootc links against. The disk boots with systemd-boot. `GSC_BOOTC_BASE` selects the Ubuntu image. `GSC_BOOTC_VERSION` selects the bootc release. `GSC_IMAGE_BUILDER` selects the image-builder container. The default is `ghcr.io/osbuild/image-builder-cli:latest`.
+The operating system is Ubuntu 26.04 LTS. The build starts from `docker.io/library/ubuntu:26.04` and installs the kernel, OpenSSH, cloud-init, and bootc 1.16.14. Ubuntu 26.04 has the ostree release that bootc links against. The disk boots with systemd-boot. The ISO is a second image that boots live and runs `bootc install to-disk` for the appliance image. `GSC_BOOTC_BASE` selects the Ubuntu image. `GSC_BOOTC_VERSION` selects the bootc release. `GSC_IMAGE_BUILDER` selects the image-builder container. The default is `ghcr.io/osbuild/image-builder-cli:latest`.
 
-A tag on this repository runs that build after the Linux binary is published and attaches the compressed qcow2 to the same GitHub Release. The binary, `version.json`, `console.sh`, and `console.ps1` are published first. A failure in the disk build leaves that release in place.
+A tag on this repository runs that build after the Linux binary is published and attaches the compressed qcow2 and the ISO to the same GitHub Release. The binary, `version.json`, `console.sh`, and `console.ps1` are published first. A failure in the disk build leaves that release in place. A disk that finished is attached even when the ISO step fails.

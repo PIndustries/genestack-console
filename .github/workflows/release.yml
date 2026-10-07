@@ -118,9 +118,14 @@ jobs:
               "https://github.com/PIndustries/genestack-console/releases/download/"
               f"{tag}/genestack-console-appliance-{version}-amd64.qcow2.xz"
           )
+          data["iso"] = (
+              "https://github.com/PIndustries/genestack-console/releases/download/"
+              f"{tag}/genestack-console-appliance-{version}-amd64.iso"
+          )
           path.write_text(json.dumps(data) + "\n")
           print(data["binary"])
           print(data["appliance"])
+          print(data["iso"])
           PY
 
       - name: Stage installer scripts
@@ -157,7 +162,9 @@ jobs:
               "`console.sh` and `console.ps1` are the installers. "
               "`get.genestack.dev` redirects to them.\n"
               f"The bootc disk is `genestack-console-appliance-{version}-amd64.qcow2.xz`. "
-              "Boot it for an appliance. The binary install stays.\n\n"
+              "Boot it for an appliance. The binary install stays.\n"
+              f"The installer ISO is `genestack-console-appliance-{version}-amd64.iso`. "
+              "Boot that when the machine has no disk image yet.\n\n"
               f"{notes}\n"
           )
           Path("dist").mkdir(exist_ok=True)
@@ -197,7 +204,7 @@ jobs:
       github.event.repository.fork == false &&
       (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -218,14 +225,27 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y podman xz-utils
 
-      - name: Build the appliance disk
+      - name: Build the appliance disk and installer
         run: |
           chmod 0755 dist/genestack-console-linux-amd64
           ./scripts/build-appliance.sh dist/genestack-console-linux-amd64
 
-      - name: Attach the disk to the release
+      - name: Attach the disk and installer to the release
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.binary.outputs.tag }}
         run: |
-          gh release upload "$TAG" dist/genestack-console-appliance-*.qcow2.xz --clobber
+          shopt -s nullglob
+          disks=(dist/genestack-console-appliance-*.qcow2.xz)
+          isos=(dist/genestack-console-appliance-*.iso)
+          if [ "${#disks[@]}" -eq 0 ]; then
+            echo "no appliance qcow2 was built" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" "${disks[@]}" --clobber
+          if [ "${#isos[@]}" -eq 0 ]; then
+            echo "no installer ISO was built" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" "${isos[@]}" --clobber

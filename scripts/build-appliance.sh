@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build the bootc appliance disk from a compiled console binary.
+# Build the bootc appliance from a compiled console binary.
 # Writes dist/genestack-console-appliance-<version>-amd64.qcow2.xz
+# and dist/genestack-console-appliance-<version>-amd64.iso
 #
 # Requires podman, so the image builder can see the local bootc image.
 #   ./scripts/build-appliance.sh
@@ -15,7 +16,9 @@ BASE="${GSC_BOOTC_BASE:-docker.io/library/ubuntu:26.04}"
 BOOTC_VERSION="${GSC_BOOTC_VERSION:-v1.16.14}"
 BUILDER="${GSC_IMAGE_BUILDER:-ghcr.io/osbuild/image-builder-cli:latest}"
 NAME="genestack-console-appliance-${VERSION}-amd64.qcow2"
+ISO_NAME="genestack-console-appliance-${VERSION}-amd64.iso"
 REF="localhost/genestack-console-appliance:${VERSION}"
+ISO_REF="localhost/genestack-console-installer:${VERSION}"
 
 if [ ! -f "$ELF" ]; then
   echo "missing console binary: $ELF" >&2
@@ -98,3 +101,41 @@ mkdir -p "$OUT_DIR"
 echo "==> compress ${NAME}.xz"
 xz -T0 -6 -c "$disk" > "$OUT_DIR/${NAME}.xz"
 echo "OK: $OUT_DIR/${NAME}.xz"
+
+echo "==> installer image ${ISO_REF}"
+run_priv podman build \
+  --build-arg "BASE=${BASE}" \
+  --build-arg "APPLIANCE_REF=${REF}" \
+  -t "$ISO_REF" \
+  -f "$ROOT/images/bootc/iso/Containerfile" \
+  "$ROOT/images/bootc/iso"
+
+mkdir -p "$work/iso"
+echo "==> iso"
+run_priv podman run \
+  --rm \
+  --privileged \
+  --pull=newer \
+  --security-opt label=disable \
+  -v "$work/iso:/output" \
+  -v /var/lib/containers/storage:/var/lib/containers/storage \
+  "$BUILDER" \
+  build \
+  --output-dir /output \
+  --bootc-ref "$ISO_REF" \
+  --bootc-installer-payload-ref "$REF" \
+  bootc-generic-iso
+
+run_priv chown -R "$(id -u):$(id -g)" "$work/iso"
+iso=""
+while IFS= read -r candidate; do
+  iso="$candidate"
+  break
+done < <(find "$work/iso" -type f -name '*.iso')
+if [ -z "$iso" ]; then
+  echo "image builder wrote no iso under $work/iso" >&2
+  find "$work/iso" -type f >&2 || true
+  exit 1
+fi
+cp "$iso" "$OUT_DIR/${ISO_NAME}"
+echo "OK: $OUT_DIR/${ISO_NAME}"

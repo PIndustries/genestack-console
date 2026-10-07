@@ -32,7 +32,7 @@ A cluster that is already running is not a list of machines. Settings, Access, A
 
 `get.genestack.dev/console.sh` redirects to the current GitHub Release asset. The script installs the Linux binary under `/opt/genestack-console` and binds the UI to `127.0.0.1:8080` on the deploy host. From your laptop, `ssh -L 8080:127.0.0.1:8080 <deploy-host>` and open the same URL. Install details are in [docs/install.md](docs/install.md). How a release is cut is in [docs/releasing.md](docs/releasing.md). What each build changed is in [CHANGELOG.md](CHANGELOG.md).
 
-The same release includes a bootc appliance disk, `genestack-console-appliance-<version>-amd64.qcow2.xz`. Boot that disk when the console should arrive with its own operating system. The install command above remains how you put Console on Ubuntu. See [docs/appliance.md](docs/appliance.md).
+The same release includes a bootc appliance disk, `genestack-console-appliance-<version>-amd64.qcow2.xz`, and an installer ISO, `genestack-console-appliance-<version>-amd64.iso`. Boot the disk for a virtual machine, or boot the ISO to install onto a machine. The install command above remains how you put Console on Ubuntu. See [docs/appliance.md](docs/appliance.md).
 
 Run the same command again to move an install to the latest release. `genestack-console update` does that replace without the rest of the install. Either one leaves `config.yaml`, the database, and `/opt/genestack` as they are. To install a published build by name: `curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.04.3`.
 
@@ -98,7 +98,7 @@ docker compose exec console python -m app.cli create-user --username admin --pas
 
 - [docs/first-cluster.md](docs/first-cluster.md) — the console is up. A Mac lab, one Ubuntu machine, one dedicated server, or three machines. Also a cluster you already have, Talos from an ISO, or Ubuntu that is already installed. A management port is optional.
 - [docs/install.md](docs/install.md) — the install on Linux, and the laptop lab on a Mac or Windows.
-- [docs/appliance.md](docs/appliance.md) — the bootc disk on the same release.
+- [docs/appliance.md](docs/appliance.md) — the bootc disk and installer ISO on the same release.
 - [docs/architecture.md](docs/architecture.md) — the processes on the deploy host, the boot sequence, and the job runner.
 - [docs/modules.md](docs/modules.md) — where each operation lives, and how to add a module of your own.
 - [docs/genestack-guide.md](docs/genestack-guide.md) — the same story, written as a chapter of the Genestack manual.

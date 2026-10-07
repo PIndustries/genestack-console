@@ -1,0 +1,85 @@
+# Installer ISO root. This image is the live system on the ISO. It is
+# not what gets installed. scripts/build-appliance.sh passes the appliance
+# image in as the payload, and this system runs bootc install to-disk.
+ARG BASE=docker.io/library/ubuntu:26.04
+FROM ${BASE}
+ARG APPLIANCE_REF=localhost/genestack-console-appliance:dev
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN printf '%s\n' \
+        'do_symlinks = yes' \
+        'do_bootloader = no' \
+        'do_initrd = no' \
+        'link_in_boot = yes' \
+        > /etc/kernel-img.conf \
+    && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
+    && chmod 0755 /usr/sbin/policy-rc.d \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        linux-image-generic \
+        systemd \
+        kmod \
+        zstd \
+        dracut \
+        dracut-live \
+        grub-efi \
+        grub-efi-amd64 \
+        grub-pc-bin \
+        shim-signed \
+        squashfs-tools \
+        xorriso \
+        isomd5sum \
+        python3 \
+        python-is-python3 \
+    && apt-get install -y podman \
+    && rm -f /usr/sbin/policy-rc.d \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sfn /usr/bin/grub-mkimage /usr/bin/grub2-mkimage
+
+RUN set -eu; \
+    kver=""; \
+    for dir in /usr/lib/modules/*; do \
+      [ -d "$dir" ] || continue; \
+      ver=$(basename "$dir"); \
+      if [ -f "/boot/vmlinuz-$ver" ]; then \
+        cp -a "/boot/vmlinuz-$ver" "$dir/vmlinuz"; \
+        kver=$ver; \
+      fi; \
+    done; \
+    test -n "$kver"; \
+    mkdir -p /usr/lib/dracut/dracut.conf.d; \
+    printf '%s\n' \
+      'reproducible=yes' \
+      'hostonly=no' \
+      'compress=zstd' \
+      'add_dracutmodules+=" dmsquash-live dmsquash-live-autooverlay "' \
+      > /usr/lib/dracut/dracut.conf.d/30-genestack-live.conf; \
+    dracut --force "/usr/lib/modules/$kver/initramfs.img" "$kver"
+
+# image-builder reads these paths when it writes the ISO.
+RUN set -eu; \
+    test -f /usr/lib/shim/shimx64.efi; \
+    test -f /usr/lib/shim/mmx64.efi; \
+    test -f /usr/lib/grub/x86_64-efi/monolithic/gcdx64.efi; \
+    test -d /usr/lib/grub/i386-pc; \
+    test -f /usr/share/grub/unicode.pf2; \
+    mkdir -p /usr/lib/efi/shim/version_placeholder/EFI/ubuntu \
+      /boot/efi/EFI/ubuntu /usr/share/grub2 \
+      /usr/lib/image-builder/bootc /usr/lib/bootc-image-builder; \
+    cp /usr/lib/shim/shimx64.efi /boot/efi/EFI/ubuntu/shimx64.efi; \
+    cp /usr/lib/shim/mmx64.efi /boot/efi/EFI/ubuntu/mmx64.efi; \
+    cp /usr/lib/grub/x86_64-efi/monolithic/gcdx64.efi /boot/efi/EFI/ubuntu/gcdx64.efi; \
+    ln -sfn /usr/share/grub/unicode.pf2 /usr/share/grub2/unicode.pf2
+
+COPY iso.yaml /usr/lib/image-builder/bootc/iso.yaml
+COPY iso.yaml /usr/lib/bootc-image-builder/iso.yaml
+COPY iso-install.sh /usr/lib/genestack-console/iso-install.sh
+COPY genestack-iso-install.service /usr/lib/systemd/system/genestack-iso-install.service
+
+RUN printf '%s\n' "$APPLIANCE_REF" > /usr/lib/genestack-console/appliance-ref \
+    && chmod 0755 /usr/lib/genestack-console/iso-install.sh \
+    && systemctl enable genestack-iso-install.service
+
+LABEL containers.bootc=1
