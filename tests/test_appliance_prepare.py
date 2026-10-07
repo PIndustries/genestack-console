@@ -35,7 +35,11 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "00-genestack.toml" in container
     assert 'type = "ext4"' in container
     assert "setup-root-conf.toml" in container
-    assert "prepare-root.conf" not in container
+    assert "/usr/lib/ostree/prepare-root.conf" in container
+    assert "[composefs]" in container
+    assert "enabled = true" in container
+    assert "ostree-boot" in container
+    assert 'add_dracutmodules+=" ostree bootc "' in container
     assert "btrfs-progs" not in container
     assert "xfsprogs" not in container
     _keeps_firmware_minimal(container)

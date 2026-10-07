@@ -54,6 +54,7 @@ RUN printf '%s\n' \
         fdisk \
         linux-image-generic \
         ostree \
+        ostree-boot \
         zstd \
         skopeo \
         systemd \
@@ -93,8 +94,11 @@ RUN set -eu; \
       'reproducible=yes' \
       'hostonly=no' \
       'compress=zstd' \
-      'add_dracutmodules+=" bootc "' \
+      'add_dracutmodules+=" ostree bootc "' \
       > /usr/lib/dracut/dracut.conf.d/30-genestack-initramfs.conf; \
+    mkdir -p /usr/lib/ostree; \
+    printf '%s\n' '[composefs]' 'enabled = true' \
+      > /usr/lib/ostree/prepare-root.conf; \
     dracut --force "/usr/lib/modules/$kver/initramfs.img" "$kver"
 
 RUN set -eu; \
@@ -143,6 +147,8 @@ RUN set -eu; \
       > /usr/lib/tmpfiles.d/bootc-base-dirs.conf; \
     mkdir -p /usr/lib/composefs /usr/lib/bootc/install; \
     : > /usr/lib/composefs/setup-root-conf.toml; \
+    printf '%s\n' '[composefs]' 'enabled = true' \
+      > /usr/lib/ostree/prepare-root.conf; \
     printf '%s\n' '[install.filesystem.root]' 'type = "ext4"' \
       > /usr/lib/bootc/install/00-genestack.toml; \
     printf '%s\n' 'HOME=/var/home' >> /etc/default/useradd
