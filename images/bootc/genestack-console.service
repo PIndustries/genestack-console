@@ -11,7 +11,7 @@ Group=genestack
 Environment=GSC_PREFIX=/opt/genestack-console
 Environment=CONSOLE_CONFIG=/opt/genestack-console/config.yaml
 WorkingDirectory=/opt/genestack-console
-ExecStart=/opt/genestack-console/bin/genestack-console serve --host 127.0.0.1 --port 8080
+ExecStart=/opt/genestack-console/bin/genestack-console serve --host 0.0.0.0 --port 8080
 Restart=on-failure
 RestartSec=5
 

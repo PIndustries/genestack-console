@@ -1,6 +1,6 @@
 #!/bin/bash
 # Seed the appliance data disk. A later boot leaves config.yaml and the
-# console binary alone, so `genestack-console update` can replace the binary.
+# console binary alone. The appliance moves versions with bootc.
 set -euo pipefail
 
 PREFIX="${GSC_APPLIANCE_PREFIX:-/var/lib/genestack-console}"
@@ -55,7 +55,7 @@ data_dir: ${PREFIX}/data
 update:
   url: https://github.com/PIndustries/genestack-console/releases/latest/download/version.json
   auto: false
-  watch: true
+  watch: false
 secret_key: ${secret}
 auth:
   api_keys:
@@ -68,7 +68,7 @@ auth:
 genestack:
   root: /opt/genestack
 server:
-  host: 127.0.0.1
+  host: 0.0.0.0
   port: 8080
 EOF
   chmod 600 "$PREFIX/config.yaml"
@@ -94,5 +94,18 @@ api_key: ${admin_key}
 EOF
     chmod 600 "$PREFIX/ADMIN_CREDENTIALS.txt"
     chown genestack:genestack "$PREFIX/ADMIN_CREDENTIALS.txt" || true
+    banner="Genestack Console
+Open http://<this-machine>:8080/ui
+username: admin
+password: ${password}
+SSH is off.
+"
+    printf '%s\n' "$banner" > "$PREFIX/CONSOLE.txt"
+    chmod 600 "$PREFIX/CONSOLE.txt"
+    chown genestack:genestack "$PREFIX/CONSOLE.txt" || true
+    if [ "$(id -u)" -eq 0 ]; then
+      mkdir -p /etc/issue.d
+      printf '%s\n' "$banner" > /etc/issue.d/genestack.issue
+    fi
   fi
 fi

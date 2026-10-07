@@ -54,6 +54,7 @@ if [ -z "$target" ]; then
 fi
 
 say "Genestack Console installer"
+say "The installed system does not start SSH. The page listens on port 8080."
 say "Disks:"
 lsblk -dno NAME,SIZE,MODEL,TRAN
 say ""

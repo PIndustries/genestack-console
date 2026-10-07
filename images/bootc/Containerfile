@@ -102,7 +102,8 @@ RUN set -eu; \
     dracut --force "/usr/lib/modules/$kver/initramfs.img" "$kver"
 
 RUN set -eu; \
-    systemctl enable ssh.service qemu-guest-agent.service \
+    systemctl disable ssh.service; \
+    systemctl enable qemu-guest-agent.service \
       systemd-networkd.service systemd-resolved.service \
       cloud-init-local.service cloud-init-main.service \
       cloud-init-network.service \
@@ -164,12 +165,16 @@ RUN chmod 0755 /usr/lib/genestack-console/genestack-console /usr/lib/genestack-c
     && mkdir -p /var/opt /var/lib/genestack-console/bin /var/lib/genestack-console/data /var/lib/genestack /etc/genestack \
     && ln -sfn /var/lib/genestack-console /opt/genestack-console \
     && ln -sfn /var/lib/genestack /opt/genestack \
-    && systemctl enable genestack-console-prepare.service genestack-console.service genestack-console-worker.service
+    && systemctl enable genestack-console-prepare.service genestack-console.service genestack-console-worker.service \
+    && printf '%s\n' 'genestack ALL=(root) NOPASSWD: /usr/bin/bootc' \
+      > /etc/sudoers.d/genestack-bootc \
+    && chmod 0440 /etc/sudoers.d/genestack-bootc
 
-# Image Builder labels the disk with setfiles and reads this path.
-# Ubuntu ships no targeted policy. The appliance does not enforce SELinux.
+# Image Builder labels the disk with setfiles and reads file_contexts.
+# bootc treats /etc/selinux/config as an enabled policy and then requires a
+# policy store. Ubuntu does not ship that store. The config file is removed.
 RUN mkdir -p /etc/selinux/targeted/contexts/files \
-    && printf '%s\n' 'SELINUX=disabled' 'SELINUXTYPE=targeted' > /etc/selinux/config \
+    && rm -f /etc/selinux/config \
     && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts \
     && test -x /usr/sbin/setfiles \
     && ln -sfn /usr/sbin/setfiles /usr/bin/setfiles

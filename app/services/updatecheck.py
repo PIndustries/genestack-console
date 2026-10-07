@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -39,6 +40,7 @@ _GH = {
     "X-GitHub-Api-Version": "2022-11-28",
 }
 
+_VERSION = re.compile(r"^\d{4}\.\d{2}\.\d{2}(?:\.\d+)?$")
 _cache_lock = threading.Lock()
 _apply_lock = threading.Lock()
 _channel_cache: dict[str, Any] = {"at": 0.0, "url": "", "data": None, "ok": False}
@@ -141,7 +143,27 @@ def status(settings: Settings) -> dict[str, Any]:
     }
 
 
+def release_binary_url(version: str) -> str | None:
+    """The Linux program for one published release. Other strings are refused."""
+    text = str(version or "").strip()
+    if not _VERSION.fullmatch(text):
+        return None
+    return (
+        "https://github.com/PIndustries/genestack-console/releases/download/"
+        f"v{text}/genestack-console-linux-amd64"
+    )
+
+
 def apply_binary(settings: Settings) -> dict[str, Any]:
+    return _apply_locked(settings, None)
+
+
+def apply_version(settings: Settings, version: str) -> dict[str, Any]:
+    """Install one published program file, including an older one."""
+    return _apply_locked(settings, version)
+
+
+def _apply_locked(settings: Settings, version: str | None) -> dict[str, Any]:
     if not _apply_lock.acquire(blocking=False):
         info = status(settings)
         return {
@@ -151,23 +173,37 @@ def apply_binary(settings: Settings) -> dict[str, Any]:
             "message": "an update is already running",
         }
     try:
-        return _apply_binary_locked(settings)
+        return _apply_binary_locked(settings, version)
     finally:
         _apply_lock.release()
 
 
-def _apply_binary_locked(settings: Settings) -> dict[str, Any]:
+def _apply_binary_locked(settings: Settings, version: str | None = None) -> dict[str, Any]:
     info = status(settings)
-    if not info.get("update_available"):
-        return {**info, "ok": True, "applied": False, "message": "already current"}
-    url = info.get("binary")
-    if not url:
-        return {
-            **info,
-            "ok": False,
-            "applied": False,
-            "message": "channel has no binary URL",
-        }
+    chosen = str(version or "").strip()
+    if chosen:
+        url = release_binary_url(chosen)
+        if not url:
+            return {
+                **info,
+                "ok": False,
+                "applied": False,
+                "message": "that version is not a release number",
+            }
+        if chosen == __version__:
+            return {**info, "ok": True, "applied": False, "message": "already current"}
+        info = {**info, "latest": chosen, "binary": url}
+    else:
+        if not info.get("update_available"):
+            return {**info, "ok": True, "applied": False, "message": "already current"}
+        url = info.get("binary")
+        if not url:
+            return {
+                **info,
+                "ok": False,
+                "applied": False,
+                "message": "channel has no binary URL",
+            }
     prefix = host_prefix()
     dest = prefix / "bin" / "genestack-console"
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -338,6 +374,10 @@ def watch_once(
     current = info if info is not None else status(settings)
     if not bool(getattr(settings, "update_watch", True)):
         return {**current, "applied": False, "skipped": "watch off"}
+    from app.services.bootc import installed as bootc_installed
+
+    if bootc_installed():
+        return {**current, "applied": False, "skipped": "bootc"}
     if not current.get("update_available"):
         return {**current, "applied": False, "skipped": "current"}
     here = can_apply_here() if installed is None else bool(installed)
