@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.16
+
+The appliance image includes the GRUB tool bootupd uses to write the boot environment.
+
+- bootc install stopped because bootupd looks for grub2-editenv. Ubuntu names that program grub-editenv. The image links the name bootupd expects.
+
 ## 2026.10.07.15
 
 The appliance image includes bootupd so bootc can install the disk.
