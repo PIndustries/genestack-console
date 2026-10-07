@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.5
+
+The appliance disk is Ubuntu 26.04 LTS.
+
+- Ubuntu 26.04 has the ostree release bootc 1.16.14 links against. The file is `genestack-console-appliance-<version>-amd64.qcow2.xz`.
+
 ## 2026.10.07.4
 
 The Ubuntu appliance disk is attached to this release.
