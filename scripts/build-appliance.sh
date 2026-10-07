@@ -51,7 +51,6 @@ trap 'rm -rf "$stage" "$work"' EXIT
 
 cp "$ROOT/images/bootc/Containerfile" "$stage/Containerfile"
 cp "$ROOT/images/bootc/prepare.sh" "$stage/prepare.sh"
-cp "$ROOT/images/bootc/blueprint.toml" "$stage/blueprint.toml"
 cp "$ROOT/images/bootc/genestack-console.service" "$stage/genestack-console.service"
 cp "$ROOT/images/bootc/genestack-console-worker.service" "$stage/genestack-console-worker.service"
 cp "$ROOT/images/bootc/genestack-console-prepare.service" "$stage/genestack-console-prepare.service"
@@ -74,12 +73,10 @@ run_priv podman run \
   --privileged \
   --pull=newer \
   --security-opt label=disable \
-  -v "$stage/blueprint.toml:/blueprint.toml:ro" \
   -v "$work/output:/output" \
   -v /var/lib/containers/storage:/var/lib/containers/storage \
   "$BUILDER" \
   build \
-  --blueprint /blueprint.toml \
   --output-dir /output \
   --bootc-ref "$REF" \
   --bootc-default-fs ext4 \

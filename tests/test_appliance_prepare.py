@@ -55,6 +55,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "10-genestack-cloud.cfg" in script
     assert "docker.io/library/ubuntu:26.04" in script
     assert "bootc-generic-iso" in script
+    assert "blueprint" not in script
     assert "centos" not in script.lower()
     installer = (IMAGE / "iso" / "Containerfile").read_text(encoding="utf-8")
     assert "dracut-live" in installer

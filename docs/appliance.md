@@ -50,7 +50,7 @@ The first boot writes `config.yaml`, creates the `admin` user, and stores the pa
 
 ## Boot it
 
-Decompress the disk and give it room for the Genestack checkout and the image cache. The disk has sshd and cloud-init. It has no password login. Pass your SSH key when you create the virtual machine. cloud-init writes that key for the user `console` on first boot. The same first boot grows the root filesystem to the size of the virtual disk.
+The qcow2 is a 10 GiB disk. Decompress it and give it room for the Genestack checkout and the image cache. The disk has sshd and cloud-init. It has no password login. Pass your SSH key when you create the virtual machine. cloud-init writes that key for the user `console` on first boot. The same first boot grows the root filesystem to the size of the virtual disk.
 
 ```bash
 xz -d genestack-console-appliance-<version>-amd64.qcow2.xz
