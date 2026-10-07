@@ -15,6 +15,7 @@ RUN printf '%s\n' \
     && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
     && chmod 0755 /usr/sbin/policy-rc.d \
     && apt-get update \
+    && apt-get install -y --no-install-recommends linux-firmware-minimal \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         linux-image-generic \
@@ -32,6 +33,10 @@ RUN printf '%s\n' \
         isomd5sum \
         python3 \
         python-is-python3 \
+    && if dpkg-query -W -f '${db:Status-Status}' linux-firmware 2>/dev/null | grep -qx installed; then \
+         echo 'the full linux-firmware metapackage was installed' >&2; \
+         exit 1; \
+       fi \
     && apt-get install -y podman \
     && rm -f /usr/sbin/policy-rc.d \
     && apt-get clean \

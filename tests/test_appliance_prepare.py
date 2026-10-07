@@ -12,6 +12,15 @@ PREPARE = ROOT / "images" / "bootc" / "prepare.sh"
 IMAGE = ROOT / "images" / "bootc"
 
 
+def _keeps_firmware_minimal(text: str) -> None:
+    assert "linux-firmware-minimal" in text
+    requested = [
+        line.strip().rstrip("\\").strip()
+        for line in text.splitlines()
+    ]
+    assert "linux-firmware" not in requested
+
+
 def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     container = (IMAGE / "Containerfile").read_text(encoding="utf-8")
     assert "cloud-init" in container
@@ -29,7 +38,11 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "prepare-root.conf" not in container
     assert "btrfs-progs" not in container
     assert "xfsprogs" not in container
-    assert "linux-firmware" not in container
+    _keeps_firmware_minimal(container)
+    assert "systemd-resolved" in container
+    assert "cloud-init-main.service" in container
+    assert "cloud-init-network.service" in container
+    assert "cloud-init.service" not in container
     assert "centos" not in container.lower()
     assert "dnf" not in container
     assert "anaconda" not in container.lower()
@@ -47,6 +60,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "dracut-live" in installer
     assert "grub-efi" in installer
     assert "anaconda" not in installer.lower()
+    _keeps_firmware_minimal(installer)
     iso_install = (IMAGE / "iso" / "iso-install.sh").read_text(encoding="utf-8")
     assert "bootc install to-disk" in iso_install
     assert "--wipe" in iso_install

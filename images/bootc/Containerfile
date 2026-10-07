@@ -41,6 +41,7 @@ RUN printf '%s\n' \
     && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
     && chmod 0755 /usr/sbin/policy-rc.d \
     && apt-get update \
+    && apt-get install -y --no-install-recommends linux-firmware-minimal \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         openssh-server \
@@ -56,12 +57,17 @@ RUN printf '%s\n' \
         zstd \
         skopeo \
         systemd \
+        systemd-resolved \
         systemd-boot \
         systemd-boot-efi \
         netplan.io \
         bubblewrap \
         kmod \
     && apt-get install -y --no-install-recommends dracut \
+    && if dpkg-query -W -f '${db:Status-Status}' linux-firmware 2>/dev/null | grep -qx installed; then \
+         echo 'the full linux-firmware metapackage was installed' >&2; \
+         exit 1; \
+       fi \
     && rm -f /usr/sbin/policy-rc.d \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -93,7 +99,8 @@ RUN set -eu; \
 RUN set -eu; \
     systemctl enable ssh.service qemu-guest-agent.service \
       systemd-networkd.service systemd-resolved.service \
-      cloud-init-local.service cloud-init.service \
+      cloud-init-local.service cloud-init-main.service \
+      cloud-init-network.service \
       cloud-config.service cloud-final.service; \
     printf 'L! /etc/resolv.conf - - - - /run/systemd/resolve/stub-resolv.conf\n' \
       > /usr/lib/tmpfiles.d/resolv-conf.conf; \

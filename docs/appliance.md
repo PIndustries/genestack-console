@@ -4,7 +4,7 @@ A release ships three ways to run Genestack Console.
 
 The install command puts the program on a Linux system you already have. Ubuntu is the usual system for that, including a machine you are using for development. That path is [Install the Genestack Console](install.md).
 
-The same release also ships a bootc appliance. The operating system is a small Ubuntu 26.04 LTS boot image: the kernel, systemd, sshd, cloud-init, bootc, and the console program. It is a boot appliance. It is not Ubuntu Server, and it is not as small as Talos. Talos is one program and a kernel built for that program. This console program is a glibc binary, and bootc needs the ostree in Ubuntu 26.04, so the image stays on that base. Firmware packages are left out. A network card that needs them will not come up until those packages are added to the image.
+The same release also ships a bootc appliance. The operating system is a small Ubuntu 26.04 LTS boot image: the kernel, systemd, sshd, cloud-init, bootc, and the console program. It is a boot appliance. It is not Ubuntu Server, and it is not as small as Talos. Talos is one program and a kernel built for that program. This console program is a glibc binary, and bootc needs the ostree in Ubuntu 26.04, so the image stays on that base. The full firmware set is left out. CPU microcode stays, because the kernel package requires it. A network card that needs a firmware file will not come up until that package is added to the image.
 
 Two files carry that appliance:
 
