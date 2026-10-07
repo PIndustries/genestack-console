@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.13
+
+The appliance disk build no longer tells bootc that SELinux is on. Settings can upgrade or roll back this console.
+
+- bootc install stopped because the image had an SELinux config and no policy. The file-context list Image Builder needs stays. The config file does not.
+- On the appliance, SSH does not start. The page listens on port 8080. Settings lists this boot and the previous image. Upgrade and Rollback reboot into the one you pick.
+
 ## 2026.10.07.12
 
 The appliance image includes the ostree prepare-root config bootc install reads.
