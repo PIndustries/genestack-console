@@ -39,6 +39,7 @@ EVENTS_TIMEOUT = 15
 APPLY_MODES = frozenset({"auto", "staged", "no-reboot", "reboot"})
 SERVICE_ACTIONS = frozenset({"start", "stop", "restart"})
 _SERVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,80}$")
 _SINCE_RE = re.compile(r"^(?:\d+[smhd]|\d{4}-\d{2}-\d{2}T[\d:.]+Z?)$")
 APPLY_YAML_MAX = 512_000
 
@@ -848,6 +849,10 @@ def _proc_text(value: Any) -> str:
     return str(value)
 
 
+def _valid_node_name(value: str) -> bool:
+    return bool(_NAME_RE.fullmatch(str(value or "").strip()))
+
+
 def _prepare_talos(
     env: Environment,
     name: str,
@@ -855,6 +860,8 @@ def _prepare_talos(
     db: Session | None,
 ) -> dict[str, Any]:
     """Resolve talosctl + node endpoint. Never raises."""
+    if not _valid_node_name(name):
+        return {"ok": False, "error": "invalid node name", "node": name, "ip": None}
     try:
         settings = settings or get_settings()
         talosconfig, node_ip = _node_public_ip(env, settings, db, name)
@@ -945,6 +952,7 @@ def _setup_error(result: dict[str, Any]) -> bool:
         "talosctl not found",
         "talosconfig or node IP missing",
         "invalid node address",
+        "invalid node name",
     }
 
 
