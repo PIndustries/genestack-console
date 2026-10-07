@@ -92,6 +92,8 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "parted" in installer
     assert "e2fsprogs" in installer
     assert "ostree" in installer
+    assert "skopeo" in installer
+    assert "command -v skopeo" in installer
     assert "COPY --from=appliance /usr/bin/bootc /usr/bin/bootc" in installer
     assert "bootc install print-configuration" in installer
     assert script.index("==> installer image") < script.index("==> qcow2")
