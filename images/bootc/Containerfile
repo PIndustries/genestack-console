@@ -19,7 +19,7 @@ RUN apt-get update \
         libselinux1-dev cmake \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
-        | sh -s -- -y --profile minimal --default-toolchain 1.85.0 \
+        | sh -s -- -y --profile minimal --default-toolchain stable \
     && git clone --depth 1 --branch "${BOOTC_VERSION}" \
         https://github.com/bootc-dev/bootc.git /src/bootc
 WORKDIR /src/bootc

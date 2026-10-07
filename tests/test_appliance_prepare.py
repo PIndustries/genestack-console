@@ -19,6 +19,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "docker.io/library/ubuntu:24.04" in container
     assert "apt-get" in container
     assert "v1.16.14" in container
+    assert "default-toolchain stable" in container
     assert "linux-image-generic-hwe-24.04" in container
     assert "setup-root-conf.toml" in container
     assert "prepare-root.conf" not in container
