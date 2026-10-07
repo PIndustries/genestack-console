@@ -16,7 +16,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl git make build-essential pkg-config \
         libssl-dev libzstd-dev zlib1g-dev libostree-dev libsystemd-dev \
-        libselinux1-dev cmake \
+        libselinux1-dev libclang-dev clang cmake \
     && rm -rf /var/lib/apt/lists/* \
     && curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
         | sh -s -- -y --profile minimal --default-toolchain stable \

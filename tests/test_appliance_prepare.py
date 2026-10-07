@@ -20,6 +20,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "apt-get" in container
     assert "v1.16.14" in container
     assert "default-toolchain stable" in container
+    assert "libclang-dev" in container
     assert "linux-image-generic" in container
     assert "setup-root-conf.toml" in container
     assert "prepare-root.conf" not in container
