@@ -83,6 +83,9 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "bootc-generic-iso" in script
     assert "blueprint" not in script
     assert "centos" not in script.lower()
+    iso_menu = (IMAGE / "iso" / "iso.yaml").read_text(encoding="utf-8")
+    assert "default: 0\n" in iso_menu
+    assert "timeout: 5\n" in iso_menu
     installer = (IMAGE / "iso" / "Containerfile").read_text(encoding="utf-8")
     assert "dracut-live" in installer
     assert "dmsetup" in installer
