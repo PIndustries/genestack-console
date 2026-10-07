@@ -19,6 +19,7 @@ RUN printf '%s\n' \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         linux-image-generic \
+        policycoreutils \
         systemd \
         kmod \
         zstd \
@@ -90,6 +91,8 @@ RUN printf '%s\n' "$APPLIANCE_REF" > /usr/lib/genestack-console/appliance-ref \
 # Image Builder labels this live root the same way as the appliance disk.
 RUN mkdir -p /etc/selinux/targeted/contexts/files \
     && printf '%s\n' 'SELINUX=disabled' 'SELINUXTYPE=targeted' > /etc/selinux/config \
-    && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts
+    && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts \
+    && test -x /usr/sbin/setfiles \
+    && ln -sfn /usr/sbin/setfiles /usr/bin/setfiles
 
 LABEL containers.bootc=1

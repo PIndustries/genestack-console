@@ -44,6 +44,8 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "cloud-init-network.service" in container
     assert "cloud-init.service" not in container
     assert "/etc/selinux/targeted/contexts/files/file_contexts" in container
+    assert "policycoreutils" in container
+    assert "/usr/sbin/setfiles" in container
     assert "centos" not in container.lower()
     assert "dnf" not in container
     assert "anaconda" not in container.lower()
@@ -64,6 +66,8 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "anaconda" not in installer.lower()
     _keeps_firmware_minimal(installer)
     assert "/etc/selinux/targeted/contexts/files/file_contexts" in installer
+    assert "policycoreutils" in installer
+    assert "/usr/sbin/setfiles" in installer
     iso_install = (IMAGE / "iso" / "iso-install.sh").read_text(encoding="utf-8")
     assert "bootc install to-disk" in iso_install
     assert "--wipe" in iso_install

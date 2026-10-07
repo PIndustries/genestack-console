@@ -58,6 +58,7 @@ RUN printf '%s\n' \
         skopeo \
         systemd \
         systemd-resolved \
+        policycoreutils \
         systemd-boot \
         systemd-boot-efi \
         netplan.io \
@@ -163,7 +164,9 @@ RUN chmod 0755 /usr/lib/genestack-console/genestack-console /usr/lib/genestack-c
 # Ubuntu ships no targeted policy. The appliance does not enforce SELinux.
 RUN mkdir -p /etc/selinux/targeted/contexts/files \
     && printf '%s\n' 'SELINUX=disabled' 'SELINUXTYPE=targeted' > /etc/selinux/config \
-    && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts
+    && printf '/.*\tsystem_u:object_r:usr_t:s0\n' > /etc/selinux/targeted/contexts/files/file_contexts \
+    && test -x /usr/sbin/setfiles \
+    && ln -sfn /usr/sbin/setfiles /usr/bin/setfiles
 
 LABEL containers.bootc=1
 RUN bootc container lint
