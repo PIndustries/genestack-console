@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.14
+
+The appliance image includes podman so bootc can open its container store.
+
+- bootc install stopped because podman was not on PATH. Install and upgrade both use it to create the container store.
+
 ## 2026.10.07.13
 
 The appliance disk build no longer tells bootc that SELinux is on. Settings can upgrade or roll back this console.
