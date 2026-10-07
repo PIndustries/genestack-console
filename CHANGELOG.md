@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.7
+
+The release includes an installer ISO, and the appliance build can finish.
+
+- The ISO is `genestack-console-appliance-<version>-amd64.iso`. Boot it, name a disk, and it installs the appliance. The qcow2 is still the already-installed disk.
+- The appliance is a small Ubuntu 26.04 boot image. The bootc build installs go-md2man, and the image declares ext4 as its root filesystem.
+
 ## 2026.10.07.6
 
 The appliance build includes the clang library bootc needs.
