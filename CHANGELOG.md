@@ -4,6 +4,17 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.07.1
+
+The image cache uses this console's address, and a machine opens in a dialog.
+
+- Configure sets the address machines pull from and which registries are mirrored. An empty address follows the PXE next-server, then this console's own address. Start caches brings the proxies up. Cache images and charts also pulls what the cluster is running.
+- Overview counts the machines, how many are Ready, and how many have a role and are not joined. A metal-rebuild line shows only while that job is queued or running.
+- Machines opens on All. The host name opens that machine. OS is Talos or Ubuntu. Cluster is In cluster, Not joined, or No role.
+- Look around means jobs only write a log. Apply means jobs change the machines.
+- Backtick lists the machines. Shell is SSH. Console is the management port. An Ubuntu machine installed from here accepts the ubuntu login.
+- Kubernetes groups workloads by namespace. Logs and Describe open in front of the page.
+
 ## 2026.10.06.5
 
 The sign-in page has a moving field.
