@@ -99,7 +99,7 @@ The server is the one cloud machine. Install Ubuntu on it. Install the console o
 
 ## Three machines in one environment
 
-Use this when you want a control plane and two workers. The three machines can be physical servers or virtual machines. The console is one more computer. It is not one of the three.
+Use this when you want control, compute, and storage on separate machines. The three machines can be physical servers or virtual machines. The console is one more computer. It is not one of the three. A worker is an extra machine for Kubernetes workloads such as monitoring and gateways.
 
 A starting lab is 4 vCPU, 16 GiB of memory, and an 80 GB disk on each of the three. Talos can boot on less. Deploy is where a small machine runs out of room. The console does not refuse a small machine.
 
@@ -109,9 +109,9 @@ Talos is the operating system this console prefers. Boot the three machines from
 https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64.iso
 ```
 
-A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc and does not power the machine. Then follow Talos is already installed, below. Add each host and set its roles. Three machines with one control plane and two workers is an example on that step. Add or remove hosts for the machines you have. After the environment exists, Machines, the same roles are the preset **Control Plane** on one machine and **Worker (compute + storage)** on the other two.
+A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc and does not power the machine. Then follow Talos is already installed, below. Add each host and set its roles. Tick every function a machine should have. Compute, network, storage, and worker are separate roles. A worker runs Kubernetes workloads such as monitoring and gateways, and it does not run compute or storage. A small cloud can tick more than one role on the same machine. Three machines with control, compute, and storage on separate machines is an example. After the environment exists, Machines has a preset for each of those roles.
 
-Ubuntu that is already installed follows Ubuntu is already installed, below. Add each host and set its roles. Three machines with one control plane and two workers is an example. After the environment exists, Machines, the same roles are the preset **Control Plane** on one machine and **Worker (compute + storage)** on the other two.
+Ubuntu that is already installed follows Ubuntu is already installed, below. Add each host and set its roles. Compute, network, storage, and worker are separate roles, and one machine can tick more than one. Three machines with control, compute, and storage on separate machines is an example. After the environment exists, Machines has a preset for each of those roles.
 
 The console computer is Ubuntu and the plain install command:
 
@@ -143,7 +143,7 @@ The Genestack checkout at `/opt/genestack` is what the install scripts run from.
 Use this when Talos is already running and waiting for a config. A Talos ISO does that. A virtual machine, or any machine with no management port, starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
 
 1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
-2. Servers: add each host by hostname and IP, and set its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples. Add the hosts you have. Import or discover writes this same list.
+2. Servers: add each host by hostname and IP, and set its roles. One machine that runs every role, and three machines with control, compute, and storage on separate machines, are examples. A worker is its own role. Add the hosts you have. Import or discover writes this same list.
 3. On the environment, open Machines and stay on Talos. The tab does not install an operating system.
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
 5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.

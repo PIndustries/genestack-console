@@ -7,7 +7,7 @@
 import { api, esc, skeletonHtml, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { openShell } from "./environment_terminal.js?v=ls48";
-import { ROLES, ROLE_LABELS } from "../roles.js";
+import { ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
 import { clearOvhPoll } from "../ovh.js";
 import { fetchMetalPath, osNameHtml } from "../metal_path.js";
 
@@ -24,15 +24,25 @@ const TOPOLOGY_PRESETS = {
     desc: "K8s control + etcd + OpenStack control",
     roles: ["k8s_control_plane", "etcd", "control"],
   },
-  worker: {
-    label: "Worker (compute + storage)",
-    desc: "Runs workloads and persistent storage",
-    roles: ["compute", "storage"],
+  compute: {
+    label: "Compute",
+    desc: "Nova compute. No storage volumes on this machine.",
+    roles: ["compute"],
+  },
+  network: {
+    label: "Network",
+    desc: "OVN network node.",
+    roles: ["network"],
   },
   storage: {
-    label: "Storage only",
+    label: "Storage",
     desc: "Dedicated storage node (longhorn)",
     roles: ["storage"],
+  },
+  worker: {
+    label: "Worker",
+    desc: "Kubernetes workloads such as monitoring and gateways. No compute and no storage.",
+    roles: ["worker"],
   },
   custom: {
     label: "Custom",
@@ -46,7 +56,7 @@ const REQUIRED_ROLE_SETS = [
   { label: "K8s control plane", role: "k8s_control_plane", min: 1 },
   { label: "etcd", role: "etcd", min: 1 },
   { label: "OpenStack control", role: "control", min: 1 },
-  { label: "Worker (compute)", role: "compute", min: 1 },
+  { label: "Compute", role: "compute", min: 1 },
   { label: "Storage", role: "storage", min: 1 },
 ];
 
@@ -2320,7 +2330,7 @@ function renderClusterStatus(statuses) {
     "K8s control plane": "Control plane",
     etcd: "etcd",
     "OpenStack control": "OpenStack control",
-    "Worker (compute)": "Compute",
+    Compute: "Compute",
     Storage: "Storage",
   };
   bar.innerHTML = statuses

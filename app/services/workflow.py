@@ -41,6 +41,7 @@ TRACKED_ROLES = (
     "compute",
     "network",
     "storage",
+    "worker",
 )
 
 # Operations that count as "pushing config to the deploy host"

@@ -8,6 +8,7 @@ Doc server roles map onto the group layout the parent genestack repo consumes
     control           -> openstack_control_plane + kube_node
     compute           -> openstack_compute_nodes + kube_node
     network           -> ovn_network_nodes + kube_node
+    worker            -> kube_node
     storage           -> storage_nodes.children.longhorn_storage_nodes + kube_node
     storage-ceph      -> storage_nodes.children.ceph_storage_nodes + kube_node
     storage-cinder    -> storage_nodes.children.cinder_storage_nodes + kube_node
@@ -36,6 +37,7 @@ SERVER_ROLE_GROUPS: dict[str, tuple[str, ...]] = {
     "control": ("openstack_control_plane", "kube_node"),
     "compute": ("openstack_compute_nodes", "kube_node"),
     "network": ("ovn_network_nodes", "kube_node"),
+    "worker": ("kube_node",),
     "storage": ("longhorn_storage_nodes", "kube_node"),
     "storage-ceph": ("ceph_storage_nodes", "kube_node"),
     "storage-cinder": ("cinder_storage_nodes", "kube_node"),

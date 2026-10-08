@@ -207,6 +207,24 @@ class TestRoleGrouping:
         assert "etcd01" in k8s["etcd"]["hosts"]
         assert "etcd01" not in k8s.get("kube_node", {}).get("hosts", {})
 
+    def test_worker_is_a_kube_node_only(self):
+        env = _make_env()
+        servers = {
+            "work01": {
+                "ip": "10.0.0.1",
+                "roles": ["worker"],
+                "source": "static",
+            },
+        }
+        inv = build_inventory_from_environment(
+            env, servers=servers, include_deployer=False
+        )
+        children = inv["all"]["children"]
+        k8s = children["k8s_cluster"]["children"]
+        assert "work01" in k8s["kube_node"]["hosts"]
+        assert "openstack_compute_nodes" not in k8s
+        assert "storage_nodes" not in k8s
+
     def test_compute_grouping(self):
         env = _make_env()
         servers = {

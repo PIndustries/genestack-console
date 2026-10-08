@@ -16,7 +16,7 @@
 //   Step 4 — Summary. Open Machines. A running cluster is Adopt on Settings.
 import { api, esc, toast } from "../api.js";
 import { loadEnvs, canRun, gate, store } from "../store.js";
-import { ROLES, REQUIRED_ROLES, ROLE_LABELS } from "../roles.js";
+import { ROLES, REQUIRED_ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
 import { currentTenantId } from "./tenant.js";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
 import { ovhAccountPicker, ovhServerTable, ovhEnvStatus, clearOvhPoll } from "../ovh.js";
@@ -36,18 +36,21 @@ const ROLE_PLAIN = {
   k8s_control_plane: "control plane",
   etcd: "etcd",
   control: "control",
-  compute: "worker",
+  compute: "compute",
   network: "network",
   storage: "storage",
+  worker: "worker",
 };
 
 function rolePlain(r) {
   return ROLE_PLAIN[r] || ROLE_LABELS[r] || r;
 }
 
-// Hosts presets: All-in-One, and Worker (compute + storage). Control Plane is REQUIRED_ROLES.
+// One machine can tick several roles. The named sets stay single-purpose.
 const AIO_ROLES = ["k8s_control_plane", "etcd", "control", "compute", "network", "storage"];
-const WORKER_ROLES = ["compute", "storage"];
+const COMPUTE_ROLES = ["compute"];
+const STORAGE_ROLES = ["storage"];
+const WORKER_ROLES = ["worker"];
 
 // agent.install requires the admin role server-side (catalog). Agent and
 // deploy-host SSH stay behind Advanced; the community default is this console
@@ -460,7 +463,7 @@ function oneMachineServers(prev) {
 
 function threeMachineServers(prev) {
   const rows = Array.isArray(prev) ? prev : [];
-  const roleSets = [REQUIRED_ROLES, WORKER_ROLES, WORKER_ROLES];
+  const roleSets = [REQUIRED_ROLES, COMPUTE_ROLES, STORAGE_ROLES];
   return roleSets.map((roles, i) => {
     const row = rows[i];
     const hostname = typedStaticField(row, "hostname");
@@ -481,7 +484,7 @@ function staticPanelHtml() {
   const atCap = servers.length >= MAX_SERVER_ROWS;
   const canRemove = servers.length > 1;
   return `
-  <p class="hint muted" style="margin:.2rem 0 .6rem">Each row is one machine. Set its roles. One machine that runs every role, and three machines with one control plane and two workers, are examples.</p>
+  <p class="hint muted" style="margin:.2rem 0 .6rem">Each row is one machine. Tick every role it should have. A small cloud can put compute and storage on the same machine. The three-machine example keeps control, compute, and storage on separate machines.</p>
   <div style="display:flex;gap:.4rem;margin:0 0 .6rem;flex-wrap:wrap;align-items:center">
     ${showAddBtn ? `<button class="btn-sm" id="wz-srv-add" type="button">Add server</button>` : ""}
     ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">Remove last</button>` : ""}
@@ -515,7 +518,7 @@ function serverRowHtml(srv, idx) {
       </label>
     </div>
     <div class="wz-srv-roles">
-      <span style="font-size:.75rem;color:var(--muted)">Roles (control plane / worker):</span>
+      <span style="font-size:.75rem;color:var(--muted)">Roles. Tick every function this machine has:</span>
       ${roleChecks}
     </div>
   </div>`;

@@ -12,7 +12,7 @@ import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
 import * as environmentDetail from "./pages/environment_detail.js?v=ls48";
 import { mountQuake, destroyAllSessions } from "./pages/environment_terminal.js?v=ls48";
-import * as envWizard from "./pages/env_wizard.js?v=ls27";
+import * as envWizard from "./pages/env_wizard.js?v=ls55";
 import * as admin from "./pages/admin.js";
 import * as settings from "./pages/settings.js?v=ls49";
 

@@ -10,6 +10,7 @@ export const ROLES = [
   "storage",
   "storage-ceph",
   "storage-cinder",
+  "worker",
 ];
 
 // Checkbox labels for roles whose inventory target benefits from a hint.
@@ -17,6 +18,7 @@ export const ROLE_LABELS = {
   storage: "storage (longhorn)",
   "storage-ceph": "storage-ceph (rook)",
   "storage-cinder": "storage-cinder (netapp)",
+  worker: "worker",
 };
 
 export const REQUIRED_ROLES = ["k8s_control_plane", "etcd", "control"];
