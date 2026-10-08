@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.08.1
+
+A machine's roles are separate functions.
+
+- A worker is a Kubernetes node for workloads such as monitoring and gateways. Compute, network, and storage are their own roles. One machine can still have more than one role.
+
 ## 2026.10.07.21
 
 The installer CD image can format its EFI boot image.
