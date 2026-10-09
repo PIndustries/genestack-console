@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.09.2
+
+An admin can view, edit, and delete a record in an environment's vault.
+
+- Open a record to see its value. Close clears that value from the page. The list still shows names only.
+- Edit replaces ssh, a machine's management password, kubeconfig, talosconfig, or a note. A new note can be added.
+- Delete removes that record. Deleting ssh clears the key pair. The SSH Keys card can generate a new one. Deleting a management password leaves the machine. Deleting kubeconfig or talosconfig leaves the file on this console, and the next download can file it again.
+
 ## 2026.10.09.1
 
 Each environment has a vault for its client certificates, and a drifted Talos machine can be returned to the installer.
