@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.09.1
+
+Each environment has a vault for its client certificates, and a drifted Talos machine can be returned to the installer.
+
+- Open an environment and choose Vault. The list is the names stored for that environment. Values stay in the console.
+- Kubeconfig and Talosconfig download the copy in that vault. The first download saves the copy this console already has. Regenerate asks the cluster for a new client certificate, valid for one year, and replaces the vault copy.
+- A Talos machine whose certificate does not match the saved config is rebooted into the installer when this console has its management port. Otherwise the job names the one step left and waits for you to confirm that step.
+- SSH user, password, and key are shown only for Ubuntu. Worker and network stay checkboxes on Custom.
+- The disk image is attached to the release as soon as it is built. The CD image follows.
+
 ## 2026.10.08.1
 
 A machine's roles are separate functions.
