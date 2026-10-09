@@ -37,6 +37,7 @@ _JOB_COLUMN_MIGRATIONS = {
     "dry_run": "BOOLEAN",
     "secret_params": "JSON",
     "cancel_requested": "BOOLEAN DEFAULT 0 NOT NULL",
+    "user_step": "JSON",
 }
 
 _OVH_ACCOUNT_COLUMN_MIGRATIONS = {

@@ -4,7 +4,7 @@
 // and audit all render a "f-env" select) — so only one is mounted at a time:
 // switching tabs destroys the current module, clears the pane, and renders the
 // next. Mounting is therefore also lazy (first open wires and loads the tab).
-import * as jobs from "./jobs.js";
+import * as jobs from "./jobs.js?v=ls57";
 import * as alerts from "./alerts.js";
 import * as auditPage from "./audit.js";
 

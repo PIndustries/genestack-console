@@ -13,10 +13,12 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -271,6 +273,11 @@ class Job(Base):
         DateTime(timezone=True), nullable=True
     )
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # One manual step the job is waiting on. The Activity page asks the user
+    # to confirm it, then the next run checks and continues on its own.
+    user_step: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, default=None
+    )
     # True when the job only rehearsed (dry-run); None = not dry-run-relevant
     dry_run: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     # Best-effort cancellation: set via the cancel API for a running job; the
@@ -989,4 +996,49 @@ class ReachLink(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+
+class VaultItem(Base):
+    """A secret stored for one tenant or one environment. The value is encrypted."""
+
+    __tablename__ = "vault_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "environment_id",
+            "name",
+            name="uq_vault_items_env_name",
+        ),
+        Index(
+            "uq_vault_items_tenant_name",
+            "tenant_id",
+            "name",
+            unique=True,
+            sqlite_where=text("environment_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    environment_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        ForeignKey("environments.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="note")
+    value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    remote_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )

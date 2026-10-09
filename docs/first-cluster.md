@@ -109,9 +109,9 @@ Talos is the operating system this console prefers. Boot the three machines from
 https://factory.talos.dev/image/613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245/v1.13.9/metal-amd64.iso
 ```
 
-A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc and does not power the machine. Then follow Talos is already installed, below. Add each host and set its roles. Tick every function a machine should have. Compute, network, storage, and worker are separate roles. A worker runs Kubernetes workloads such as monitoring and gateways, and it does not run compute or storage. A small cloud can tick more than one role on the same machine. Three machines with control, compute, and storage on separate machines is an example. After the environment exists, Machines has a preset for each of those roles.
+A SCSI disk is often `/dev/sda`. Confirm the name on the machine. The one step outside the console is booting that ISO yourself. The console does not insert a disc. Boot it yourself when this console has no management port. Then follow Talos is already installed, below. Add each host and set its roles. Tick every function a machine should have. Compute, network, storage, and worker are separate roles. A worker runs Kubernetes workloads such as monitoring and gateways, and it does not run compute or storage. A small cloud can tick more than one role on the same machine. Three machines with control, compute, and storage on separate machines is an example. After the environment exists, Compute and Storage are presets, and worker is chosen on Custom.
 
-Ubuntu that is already installed follows Ubuntu is already installed, below. Add each host and set its roles. Compute, network, storage, and worker are separate roles, and one machine can tick more than one. Three machines with control, compute, and storage on separate machines is an example. After the environment exists, Machines has a preset for each of those roles.
+Ubuntu that is already installed follows Ubuntu is already installed, below. Add each host and set its roles. Compute, network, storage, and worker are separate roles, and one machine can tick more than one. Three machines with control, compute, and storage on separate machines is an example. After the environment exists, Compute and Storage are presets, and worker is chosen on Custom.
 
 The console computer is Ubuntu and the plain install command:
 
@@ -128,7 +128,7 @@ Do not reinstall it. Do not run a wipe, and do not run Deploy, until you mean to
 1. On the deploy host, use the Genestack checkout and the `/etc/genestack` inventory that this cluster was built from. Guided setup asks for those two paths. If the checkout is not on this machine yet, clone it to `/opt/genestack`. Do not run `bootstrap.sh` over an inventory you already use.
 2. The console has to reach the Kubernetes API of that cluster. A kubeconfig is the file `kubectl` uses. Copy it to the deploy host. Do not paste it into a chat or a ticket.
 3. Open the environment, then Settings, then Access. Paste the kubeconfig and choose Adopt Kubespray. That records the cluster. It does not clone Kubespray, it does not run Ansible, and it does not reinstall Kubernetes. Dry run must be off or the job will not store the file. Add servers on Machines when you mean to change the machines.
-4. Kubernetes lists the nodes once the console can reach the API. If the nodes are Talos, Machines, then Talos, is where you manage them. Talosconfig is the file for Talos. Download it from Machines after the console has it.
+4. Kubernetes lists the nodes once the console can reach the API. If the nodes are Talos, Machines is where you manage them. Talosconfig is the file for Talos, and kubeconfig is the file for Kubernetes. Both are saved in that environment's vault. On the Machines toolbar, Kubeconfig and Talosconfig download the vault copy. Regenerate asks the cluster for a new client certificate, valid for one year, and replaces the vault copy. Open Vault on that environment to see the names stored for it. Download is next to kubeconfig and talosconfig.
 
 Day to day you stay on this environment. Settings, then Config, is the settings document. Save stores a new version in the console. The menu next to the version opens an older one, read-only. Push writes the current version onto the deploy host. Deploy writes it and then runs the Genestack scripts. Saving by itself does not change the live cloud.
 
@@ -140,7 +140,7 @@ The Genestack checkout at `/opt/genestack` is what the install scripts run from.
 
 ### Talos is already installed
 
-Use this when Talos is already running and waiting for a config. A Talos ISO does that. A virtual machine, or any machine with no management port, starts here. You boot the ISO yourself. The console does not insert the ISO and does not power the machine.
+Use this when Talos is already running and waiting for a config. A Talos ISO does that. A virtual machine, or any machine with no management port, starts here. You boot the ISO yourself. The console does not insert the ISO. When the machine's certificate does not match the saved config and this console has its management port, the job reboots it into the installer. If it cannot reboot the machine, the job names the one step left and waits for you to confirm that step. A lab machine with no management port is that case.
 
 1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
 2. Servers: add each host by hostname and IP, and set its roles. One machine that runs every role, and three machines with control, compute, and storage on separate machines, are examples. A worker is its own role. Add the hosts you have. Import or discover writes this same list.
@@ -148,7 +148,7 @@ Use this when Talos is already running and waiting for a config. A Talos ISO doe
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
 5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.
 
-Kubernetes is up after that job succeeds. On Machines, Talos, the diagram marks infrastructure, and the button is Deploy from infrastructure. That Deploy starts there, so it does not run the Talos bootstrap a second time. A second bootstrap stops when the talos directory under the inventory path, usually `/etc/genestack/talos`, already holds `secrets.yaml` or `talosconfig`. Remove those files only when you mean to create a new cluster identity.
+Kubernetes is up after that job succeeds. On Machines, Talos, the diagram marks infrastructure, and the button is Deploy from infrastructure. That Deploy starts there, so it does not run the Talos bootstrap a second time. Running the bootstrap job again reuses `secrets.yaml` and `talosconfig` when they are already under the inventory path, usually `/etc/genestack/talos`. It does not create a second cluster identity. A node that already accepts that identity is left installed. A node that wants a client certificate and does not match is rebooted into the installer when this console can do that.
 
 ### Ubuntu is already installed
 
@@ -157,7 +157,7 @@ Use this for a group of servers that already have Ubuntu, including guests you i
 1. Guided setup. Open Advanced and choose Kubespray. On Servers, add each host by hostname and IP, and set its roles. The deploy host has to reach those machines over SSH.
 2. Open Machines and choose Ubuntu. The tab does not reboot anything.
 3. Select the rows. Already have an OS. That records them. The row shows Kubespray recorded. It does not reboot them, install anything, or start a playbook. Clear that record removes the mark. Roles stay.
-4. Across the group you still want a Kubernetes control plane, etcd, OpenStack control, a worker, and storage. After the environment exists, the Machines presets are those same roles.
+4. Across the group you still want a Kubernetes control plane, etcd, OpenStack control, a worker, and storage. After the environment exists, Compute and Storage are presets, and worker is chosen on Custom.
 5. Apply on this environment when you want Deploy to run. Deploy uses SSH. It does not network-boot those machines. While the environment only logs, Deploy records the work and does not change the guests.
 
 A machine may stay a plain Ubuntu server. Install Ubuntu on a Machines row is a different action. It puts Ubuntu on that one machine and waits until it answers. It does not install Kubernetes or OpenStack. A host that already answers stays on disk. A host that does not answer is network-booted, and that boot uses a management port when the machine has one.

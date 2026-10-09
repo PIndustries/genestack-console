@@ -92,7 +92,7 @@ const STEPS = [
     howto: [
       "Start with Verify (quick, then standard).",
       "Then open Machines, Kubernetes, and OpenStack.",
-      "Download kubeconfig and talosconfig from Machines. Do not use Lens.",
+      "Download kubeconfig and talosconfig from Machines. They are saved in the environment vault. Regenerate replaces that copy with a new client certificate, valid for one year. Do not use Lens.",
     ],
     info:
       "Day 2: cluster reachability, helm releases, pod health, and drift. Verify still " +
@@ -101,7 +101,7 @@ const STEPS = [
       "screens. Horizon remains at " +
       "horizon.<gateway_domain> as a fallback. From a VPN, point that hostname " +
       "at the hub address the installer printed. " +
-      "kubeconfig and talosconfig download from Machines; do not use Lens.",
+      "kubeconfig and talosconfig are saved in the environment vault and download from Machines. Regenerate replaces that copy with a new client certificate, valid for one year. Do not use Lens.",
   },
 ];
 

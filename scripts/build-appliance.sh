@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # Build the bootc appliance from a compiled console binary.
-# Writes dist/genestack-console-appliance-<version>-amd64.qcow2.xz
-# and dist/genestack-console-appliance-<version>-amd64.iso
-#
-# Requires podman, so the image builder can see the local bootc image.
+# The part is disk, iso, or all (default all). Pass it as the second
+# argument, or set GSC_APPLIANCE_PART.
+#   all: installer image, then qcow2.xz, then the ISO
+#   disk: bootc image, installer image, then qcow2.xz, no ISO
+#   iso: bootc image, installer image, and the ISO, no qcow2 pass
 #   ./scripts/build-appliance.sh
 #   ./scripts/build-appliance.sh dist/genestack-console-linux-amd64
+#   ./scripts/build-appliance.sh dist/genestack-console-linux-amd64 disk
+#
+# Requires podman, so the image builder can see the local bootc image.
+# all builds the installer image before the qcow2. A missing tool fails
+# in that image build, before the long disk pass.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ELF="${1:-$ROOT/dist/genestack-console-linux-amd64}"
+PART="${2:-${GSC_APPLIANCE_PART:-all}}"
 VERSION="$(cd "$ROOT" && python3 -c 'from app.version import VERSION; print(VERSION)')"
 OUT_DIR="${GSC_DIST:-$ROOT/dist}"
 BASE="${GSC_BOOTC_BASE:-docker.io/library/ubuntu:26.04}"
@@ -20,19 +27,27 @@ ISO_NAME="genestack-console-appliance-${VERSION}-amd64.iso"
 REF="localhost/genestack-console-appliance:${VERSION}"
 ISO_REF="localhost/genestack-console-installer:${VERSION}"
 
+case "$PART" in
+  disk|iso|all) ;;
+  *)
+    echo "part must be disk, iso, or all (got: ${PART})" >&2
+    exit 1
+    ;;
+esac
+
 if [ ! -f "$ELF" ]; then
   echo "missing console binary: $ELF" >&2
   echo "run ./scripts/compile-console.sh on Linux x86_64 first" >&2
   exit 1
 fi
 if ! command -v podman >/dev/null 2>&1; then
-  echo "podman is required to build the appliance disk" >&2
+  echo "podman is required to build the appliance" >&2
   exit 1
 fi
 case "$(uname -m)" in
   x86_64|amd64) ;;
   *)
-    echo "the appliance disk is built on x86_64 (this machine is $(uname -m))" >&2
+    echo "the appliance is built on x86_64 (this machine is $(uname -m))" >&2
     exit 1
     ;;
 esac
@@ -66,6 +81,8 @@ run_priv podman build \
   -f "$stage/Containerfile" \
   "$stage"
 
+# Every part builds this before the qcow2. A missing installer tool fails here,
+# before the long disk pass. The ISO part builds it again from the local cache.
 echo "==> installer image ${ISO_REF}"
 run_priv podman build \
   --build-arg "BASE=${BASE}" \
@@ -74,65 +91,71 @@ run_priv podman build \
   -f "$ROOT/images/bootc/iso/Containerfile" \
   "$ROOT/images/bootc/iso"
 
-mkdir -p "$work/output"
-echo "==> qcow2"
-run_priv podman run \
-  --rm \
-  --privileged \
-  --pull=newer \
-  --security-opt label=disable \
-  -v "$work/output:/output" \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  "$BUILDER" \
-  build \
-  --output-dir /output \
-  --bootc-ref "$REF" \
-  --bootc-default-fs ext4 \
-  qcow2
+# Not for iso. all still runs this after the installer image.
+if [ "$PART" != "iso" ]; then
+  mkdir -p "$work/output"
+  echo "==> qcow2"
+  run_priv podman run \
+    --rm \
+    --privileged \
+    --pull=newer \
+    --security-opt label=disable \
+    -v "$work/output:/output" \
+    -v /var/lib/containers/storage:/var/lib/containers/storage \
+    "$BUILDER" \
+    build \
+    --output-dir /output \
+    --bootc-ref "$REF" \
+    --bootc-default-fs ext4 \
+    qcow2
 
-run_priv chown -R "$(id -u):$(id -g)" "$work/output"
-disk=""
-while IFS= read -r candidate; do
-  disk="$candidate"
-  break
-done < <(find "$work/output" -type f -name '*.qcow2')
-if [ -z "$disk" ]; then
-  echo "image builder wrote no qcow2 under $work/output" >&2
-  find "$work/output" -type f >&2 || true
-  exit 1
+  run_priv chown -R "$(id -u):$(id -g)" "$work/output"
+  disk=""
+  while IFS= read -r candidate; do
+    disk="$candidate"
+    break
+  done < <(find "$work/output" -type f -name '*.qcow2')
+  if [ -z "$disk" ]; then
+    echo "image builder wrote no qcow2 under $work/output" >&2
+    find "$work/output" -type f >&2 || true
+    exit 1
+  fi
+
+  mkdir -p "$OUT_DIR"
+  echo "==> compress ${NAME}.xz"
+  xz -T0 -6 -c "$disk" > "$OUT_DIR/${NAME}.xz"
+  echo "OK: $OUT_DIR/${NAME}.xz"
 fi
 
-mkdir -p "$OUT_DIR"
-echo "==> compress ${NAME}.xz"
-xz -T0 -6 -c "$disk" > "$OUT_DIR/${NAME}.xz"
-echo "OK: $OUT_DIR/${NAME}.xz"
+# Not for disk. The ISO copies bootc out of the appliance image.
+if [ "$PART" != "disk" ]; then
+  mkdir -p "$work/iso" "$OUT_DIR"
+  echo "==> iso"
+  run_priv podman run \
+    --rm \
+    --privileged \
+    --pull=newer \
+    --security-opt label=disable \
+    -v "$work/iso:/output" \
+    -v /var/lib/containers/storage:/var/lib/containers/storage \
+    "$BUILDER" \
+    build \
+    --output-dir /output \
+    --bootc-ref "$ISO_REF" \
+    --bootc-installer-payload-ref "$REF" \
+    bootc-generic-iso
 
-mkdir -p "$work/iso"
-echo "==> iso"
-run_priv podman run \
-  --rm \
-  --privileged \
-  --pull=newer \
-  --security-opt label=disable \
-  -v "$work/iso:/output" \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  "$BUILDER" \
-  build \
-  --output-dir /output \
-  --bootc-ref "$ISO_REF" \
-  --bootc-installer-payload-ref "$REF" \
-  bootc-generic-iso
-
-run_priv chown -R "$(id -u):$(id -g)" "$work/iso"
-iso=""
-while IFS= read -r candidate; do
-  iso="$candidate"
-  break
-done < <(find "$work/iso" -type f -name '*.iso')
-if [ -z "$iso" ]; then
-  echo "image builder wrote no iso under $work/iso" >&2
-  find "$work/iso" -type f >&2 || true
-  exit 1
+  run_priv chown -R "$(id -u):$(id -g)" "$work/iso"
+  iso=""
+  while IFS= read -r candidate; do
+    iso="$candidate"
+    break
+  done < <(find "$work/iso" -type f -name '*.iso')
+  if [ -z "$iso" ]; then
+    echo "image builder wrote no iso under $work/iso" >&2
+    find "$work/iso" -type f >&2 || true
+    exit 1
+  fi
+  cp "$iso" "$OUT_DIR/${ISO_NAME}"
+  echo "OK: $OUT_DIR/${ISO_NAME}"
 fi
-cp "$iso" "$OUT_DIR/${ISO_NAME}"
-echo "OK: $OUT_DIR/${ISO_NAME}"

@@ -3,13 +3,13 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls55";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls60";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
-import { destroyWorkflowCard } from "./environment_workflow.js?v=ls27";
-import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=ls39";
-import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls39";
+import { destroyWorkflowCard } from "./environment_workflow.js?v=ls61";
+import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=ls60";
+import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls60";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
@@ -21,6 +21,7 @@ import { reachCardHtml, wireReachCard, loadReachCard, destroyReachCard } from ".
 import { hostsCardHtml, wireHostsCard, loadHostsCard, destroyHostsCard } from "./environment_hosts.js";
 import { appsCardHtml, wireAppsCard, loadAppsCard, destroyAppsCard } from "./environment_apps.js?v=slot2";
 import { observeCardHtml, wireObserveCard, loadObserveCard, destroyObserveCard } from "./environment_observe.js";
+import { envVaultCardHtml, wireEnvVault, loadEnvVault, destroyEnvVault } from "./environment_vault.js?v=ls62";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
 
 export const title = "Environment Detail";
@@ -357,6 +358,7 @@ const TAB_LOADERS = {
   workflow: [loadDeployMap, loadProgressCard],
   cache: [loadImageCache],
   observe: [loadObserveCard],
+  vault: [loadEnvVault],
   settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
   inventory: [loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
   config: [loadConfigCard],
@@ -375,6 +377,7 @@ function loadTab(tabName) {
     workflow: "Loading overview…",
     cache: "Loading image cache…",
     observe: "Loading observe…",
+    vault: "Loading vault…",
     settings: "Loading settings…",
   };
   showPanelLoading(panel, labels[tabName] || "Loading…");
@@ -462,6 +465,7 @@ export async function render(root, { param, query } = {}) {
       <button class="tab" data-tab="platform" data-ptab="kubernetes">Kubernetes</button>
       <button class="tab" data-tab="platform" data-ptab="openstack">OpenStack</button>
       <button class="tab" data-tab="observe">Observe</button>
+      <button class="tab" data-tab="vault">Vault</button>
       <button class="tab" data-tab="settings">Settings</button>
       <div class="tab-spacer"></div>
       <select id="desc-env" data-gsc-env-select data-gsc-env-none="Environment">${envOptionsHtml(envId, { includeNone: true, noneLabel: "Environment" })}</select>
@@ -531,6 +535,12 @@ export async function render(root, { param, query } = {}) {
     <div class="tab-panel" data-panel="observe" id="panel-observe">
       <div class="env-grid full">
         ${observeCardHtml()}
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="vault" id="panel-vault">
+      <div class="env-grid full">
+        ${envVaultCardHtml()}
       </div>
     </div>
 
@@ -686,6 +696,7 @@ export async function render(root, { param, query } = {}) {
   wireSshKeysCard(() => envId);
   wireAppsCard(() => envId);
   wireObserveCard(() => envId, { onGoto: (ptab) => switchTab("platform", ptab) });
+  wireEnvVault(() => envId);
   wireOverlayEditor();
 
   syncDemoBanner();
@@ -731,6 +742,7 @@ export function destroy() {
   destroyCloudCard();
   destroyAppsCard();
   destroyObserveCard();
+  destroyEnvVault();
   closeOverlay();
   tabLoads.clear();
 }

@@ -7,12 +7,12 @@ import * as fleet from "./pages/fleet.js?v=ls39";
 import * as hosts from "./pages/hosts.js";
 import * as environments from "./pages/environments.js?v=ls30";
 import * as hardware from "./pages/hardware.js";
-import * as activity from "./pages/activity.js";
+import * as activity from "./pages/activity.js?v=ls57";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls48";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls62";
 import { mountQuake, destroyAllSessions } from "./pages/environment_terminal.js?v=ls48";
-import * as envWizard from "./pages/env_wizard.js?v=ls55";
+import * as envWizard from "./pages/env_wizard.js?v=ls56";
 import * as admin from "./pages/admin.js";
 import * as settings from "./pages/settings.js?v=ls49";
 

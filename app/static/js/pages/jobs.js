@@ -241,10 +241,11 @@ async function showJob(id, { silent = false } = {}) {
       <div><div class="k">Started</div>${esc(fmtTime(job.started_at)) || "—"}</div>
       <div><div class="k">Finished</div>${esc(fmtTime(job.finished_at)) || "—"}</div>
     </div>
-    ${job.error ? `<div class="error">${esc(job.error)}${job.dry_run === true ? " (rehearsal — nothing was executed)" : ""}</div>` : ""}
+    ${userStepHtml(job)}
+    ${job.user_step && job.status === "failed" ? "" : (job.error ? `<div class="error">${esc(job.error)}${job.dry_run === true ? " (rehearsal — nothing was executed)" : ""}</div>` : "")}
     ${!job.error && job.dry_run === true ? `<div class="dryrun-note">Rehearsal — nothing was executed.</div>` : ""}
     <div class="row" style="margin-bottom:.75rem">
-      <button class="secondary btn-sm" id="btn-job-retry" type="button" ${gate(canRun(), "operator")}>Retry</button>
+      ${job.user_step && job.status === "failed" ? "" : `<button class="secondary btn-sm" id="btn-job-retry" type="button" ${gate(canRun(), "operator")}>Retry</button>`}
       ${resumeBtnHtml(job)}
       ${ACTIVE.has(job.status) ? `<button class="danger btn-sm" id="btn-job-cancel" type="button" ${gate(canRun(), "operator")}>Cancel</button>` : ""}
       <span id="job-retry-msg" class="muted"></span>
@@ -259,7 +260,10 @@ async function showJob(id, { silent = false } = {}) {
   if (!silent) resetLiveLog("job-log");
   bindLiveLog(document.getElementById("job-log"), document.getElementById("btn-log-latest"));
 
-  document.getElementById("btn-job-retry").addEventListener("click", () => retryJob(job));
+  const retryBtn = document.getElementById("btn-job-retry");
+  if (retryBtn) retryBtn.addEventListener("click", () => retryJob(job));
+  const confirmBtn = document.getElementById("btn-job-confirm");
+  if (confirmBtn) confirmBtn.addEventListener("click", () => retryJob(job));
   const resumeBtn = document.getElementById("btn-job-resume");
   if (resumeBtn) {
     const stage = failedDeployStage(job);
@@ -273,6 +277,22 @@ async function showJob(id, { silent = false } = {}) {
 
 // "Resume from failed stage" — only offered on failed genestack.deploy jobs.
 // genestack.deploy requires the admin role server-side, so gate at admin.
+function userStepHtml(job) {
+  const step = job && job.user_step;
+  if (!step || job.status !== "failed") return "";
+  const title = step.title || "This job is waiting on you";
+  const confirm = step.confirm || "I did this — continue";
+  return `<div class="card" id="job-user-step" style="margin-top:.75rem">
+    <h2>${esc(title)}</h2>
+    ${step.detail ? `<p>${esc(step.detail)}</p>` : ""}
+    ${step.action ? `<p><strong>Next:</strong> ${esc(step.action)}</p>` : ""}
+    <div class="row">
+      <button class="btn-sm" id="btn-job-confirm" type="button" ${gate(canRun(), "operator")}>${esc(confirm)}</button>
+      <span id="job-confirm-msg" class="muted"></span>
+    </div>
+  </div>`;
+}
+
 function resumeBtnHtml(job) {
   if (job.operation !== "genestack.deploy" || job.status !== "failed") return "";
   return `<button class="secondary btn-sm" id="btn-job-resume" type="button" ${gate(canAdmin(), "admin")}>Resume from failed stage</button>`;
@@ -324,18 +344,24 @@ async function cancelJob(job) {
 }
 
 async function retryJob(job) {
-  const msg = document.getElementById("job-retry-msg");
-  msg.textContent = "Retrying…";
+  const msg = document.getElementById("job-confirm-msg") || document.getElementById("job-retry-msg");
+  if (msg) msg.textContent = "Checking again…";
   try {
     const newJob = await api(`/api/v1/jobs/${encodeURIComponent(job.id)}/retry`, {
       method: "POST",
       body: JSON.stringify({ run_sync: false }),
     });
-    toast(`Retry created job ${String(newJob.id).slice(0, 8)}…`, "ok");
+    const continuing = Boolean(job.user_step);
+    toast(
+      continuing
+        ? `Continuing as job ${String(newJob.id).slice(0, 8)}…`
+        : `Retry created job ${String(newJob.id).slice(0, 8)}…`,
+      "ok"
+    );
     await loadJobs();
     showJob(newJob.id);
   } catch (e) {
-    msg.textContent = e.message;
+    if (msg) msg.textContent = e.message;
     if (e.status === 403) toast("Insufficient role: operator required", "bad");
   }
 }

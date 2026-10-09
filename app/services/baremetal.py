@@ -299,12 +299,14 @@ def pxe_boot(
 
 
 def talos_api_ready(ip: str, log: LogFn | None = None) -> bool:
-    """Probe the talos maintenance API at ``https://<ip>:50000`` (insecure).
+    """Probe ``https://<ip>:50000`` for a completed TLS handshake.
 
-    Ready means the talos API server is accepting TLS connections. A gRPC
-    endpoint does not speak HTTP/1.1, so any transport success that ends in a
-    protocol-level error still counts as ready; only connect-level failures
-    (nothing listening / unreachable) count as not ready.
+    Ready here means something is listening. A gRPC endpoint does not speak
+    HTTP/1.1, so any transport success that ends in a protocol-level error
+    still counts as ready; only connect-level failures (nothing listening /
+    unreachable) count as not ready. A configured Talos node and a maintenance
+    node both complete this handshake. :func:`talos_insecure_maintenance` is
+    what tells them apart.
     """
     try:
         with httpx.Client(verify=False, timeout=TALOS_PROBE_TIMEOUT) as client:
@@ -315,6 +317,18 @@ def talos_api_ready(ip: str, log: LogFn | None = None) -> bool:
     except httpx.HTTPError:
         # TCP + TLS established; the gRPC API just doesn't speak HTTP/1.1
         return True
+
+
+def talos_insecure_maintenance(ip: str, log: LogFn | None = None) -> bool:
+    """True when the node accepts talosctl with no client certificate.
+
+    ``talos_api_ready`` stays the TLS check so a node that is already
+    installed still looks up for paths that only ask whether port 50000 is
+    open. Fresh maintenance is this check.
+    """
+    from app.services.talos import insecure_maintenance
+
+    return insecure_maintenance(ip, log=log)
 
 
 def k8s_ready_for_ip(ip: str, kubeconfig: str | None) -> bool | None:
@@ -441,6 +455,7 @@ def set_next_boot(
     dry_run: bool,
     log: LogFn,
     settings: Settings | None = None,
+    replace_installed: bool = False,
 ) -> dict[str, Any]:
     """Choose the next image for one MAC. ``boot_now`` power-cycles into it."""
     choice = str(target or "").strip().lower()
@@ -472,7 +487,7 @@ def set_next_boot(
         return begin_commission(
             db, env, node, log=log, settings=settings, boot_now=boot_now
         )
-    if choice == "talos" and node.wiped_at is None:
+    if choice == "talos" and node.wiped_at is None and not replace_installed:
         return {
             "ok": False,
             "error": (
@@ -482,6 +497,11 @@ def set_next_boot(
             "node_id": node.id,
             "returncode": 2,
         }
+    if choice == "talos" and replace_installed and node.wiped_at is None:
+        log(
+            f"[baremetal] {node.name} does not match the saved Talos config. "
+            "Replacing the installed system."
+        )
     node.next_boot = choice
     if choice == "talos":
         node.boot_stage = "talos"
@@ -917,6 +937,23 @@ def provision(
                 fresh = True
                 matched_ip = ip
                 break
+            if probe == "installed":
+                from app.services.talos import installed_talos_guidance
+
+                guide = installed_talos_guidance(node.name, ip)
+                message = str(guide["error"])
+                log(f"[baremetal] {message}")
+                node.state = "failed"
+                node.boot_stage = "failed"
+                db.add(node)
+                db.flush()
+                return {
+                    "ok": False,
+                    "error": message,
+                    "user_step": guide["user_step"],
+                    "node_id": node.id,
+                    "returncode": 2,
+                }
             if probe == "old-os":
                 log(
                     f"[baremetal] {node.name} at {ip} is still the old OS "
@@ -1136,7 +1173,7 @@ def host_boot_state(
     """
     api_up = talos_api_ready(ip)
     k8s_status = k8s_ready_for_ip(ip, kubeconfig) if api_up else None
-    return classify_boot(
+    state = classify_boot(
         api_up,
         k8s_status,
         wiped_at=wiped_at,
@@ -1145,6 +1182,12 @@ def host_boot_state(
         was_ready=bool(was_ready and ip in was_ready),
         saw_down=saw_down,
     )
+    if state in ("maintenance", "fresh-maintenance") and not talos_insecure_maintenance(ip):
+        # TLS came up and the node wants a client certificate. That is an
+        # installed Talos, not a maintenance boot waiting for a config.
+        # A node that is already Kubernetes Ready stays "old-os".
+        return "installed"
+    return state
 
 
 def boot_for_talos(

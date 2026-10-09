@@ -629,29 +629,40 @@ def run_deploy(
                 failed_phase = talos_result.get("failed_phase")
                 rc = talos_result.get("returncode")
                 failed_at = f"hosts/talos-{failed_phase}"
-                log(f"[deploy] FAILED at {failed_at} rc={rc} — stopping pipeline")
+                plain = str(talos_result.get("error") or "").strip()
+                if failed_phase == "reach" and plain:
+                    log(f"[deploy] FAILED at {failed_at} — {plain}")
+                else:
+                    log(f"[deploy] FAILED at {failed_at} rc={rc} — stopping pipeline")
                 deploy_timing.log_timing(
                     log,
                     stage="hosts",
                     item="talos",
                     seconds=deploy_timing.elapsed(stage_t0),
                 )
-                return finish(
-                    {
-                        "ok": False,
-                        "error": (
+                reach = failed_phase == "reach" and plain
+                payload: dict[str, Any] = {
+                    "ok": False,
+                    "error": (
+                        f"deploy failed at stage 'hosts' (talos): {plain}"
+                        if reach
+                        else (
                             f"deploy failed at stage 'hosts' "
                             f"talos phase '{failed_phase}' (rc={rc})"
-                        ),
-                        "returncode": rc,
-                        "stages_completed": stages_completed,
-                        "stages_total": stages_total,
-                        "failed_at": failed_at,
-                        "dry_run": dry_run,
-                        "version": version,
-                        "from_stage": from_stage,
-                    }
-                )
+                        )
+                    ),
+                    "returncode": rc,
+                    "stages_completed": stages_completed,
+                    "stages_total": stages_total,
+                    "failed_at": failed_at,
+                    "dry_run": dry_run,
+                    "version": version,
+                    "from_stage": from_stage,
+                }
+                step = talos_result.get("user_step")
+                if reach and isinstance(step, dict):
+                    payload["user_step"] = step
+                return finish(payload)
             hosts_s = round(deploy_timing.elapsed(stage_t0), 1)
             deploy_timing.log_timing(log, stage="hosts", item="talos", seconds=hosts_s)
             deploy_timing.log_timing(log, stage="hosts", seconds=hosts_s)

@@ -50,7 +50,6 @@ function rolePlain(r) {
 const AIO_ROLES = ["k8s_control_plane", "etcd", "control", "compute", "network", "storage"];
 const COMPUTE_ROLES = ["compute"];
 const STORAGE_ROLES = ["storage"];
-const WORKER_ROLES = ["worker"];
 
 // agent.install requires the admin role server-side (catalog). Agent and
 // deploy-host SSH stay behind Advanced; the community default is this console
@@ -484,7 +483,7 @@ function staticPanelHtml() {
   const atCap = servers.length >= MAX_SERVER_ROWS;
   const canRemove = servers.length > 1;
   return `
-  <p class="hint muted" style="margin:.2rem 0 .6rem">Each row is one machine. Tick every role it should have. A small cloud can put compute and storage on the same machine. The three-machine example keeps control, compute, and storage on separate machines.</p>
+  <p class="hint muted" style="margin:.2rem 0 .6rem">Each row is one machine. Tick every role it should have. A small cloud ticks more than one role on one machine, and worker is one of those checkboxes. The three-machine example keeps control, compute, and storage on separate machines.</p>
   <div style="display:flex;gap:.4rem;margin:0 0 .6rem;flex-wrap:wrap;align-items:center">
     ${showAddBtn ? `<button class="btn-sm" id="wz-srv-add" type="button">Add server</button>` : ""}
     ${canRemove ? `<button class="secondary btn-sm" id="wz-srv-remove" type="button">Remove last</button>` : ""}
@@ -1001,7 +1000,7 @@ function wireStaticRows() {
       if (!Array.isArray(state.servers)) state.servers = [];
       if (state.servers.length >= MAX_SERVER_ROWS) return;
       const roles = collectServerRoles(state.servers).k8s_control_plane
-        ? [...WORKER_ROLES]
+        ? [...COMPUTE_ROLES]
         : [...REQUIRED_ROLES];
       state.servers.push({ hostname: `node${state.servers.length + 1}`, ip: "", roles });
       paintStaticServers(state.servers);

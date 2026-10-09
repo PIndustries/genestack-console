@@ -230,13 +230,20 @@ function overviewHtml(data) {
         <div class="om-kicker">Talos</div>
         <h2 class="om-title">${esc(title)}</h2>
         <div class="muted om-sub">Versions, Ready, logs, and upgrades for these machines.</div>
-      </div>
-      <div class="om-overview-actions">
-        <button type="button" class="secondary btn-sm" data-pf-dl="kubeconfig">Kubeconfig</button>
-        <button type="button" class="secondary btn-sm" data-pf-dl="talosconfig">Talosconfig</button>
         ${
           run
-            ? `<button type="button" class="secondary btn-sm" data-pf-upgrade-all ${gate(canRun(), "operator")}>Upgrade Talos</button>`
+            ? `<div class="muted om-sub">Kubeconfig and Talosconfig are saved in this environment's vault. Download grabs that copy. Regenerate replaces it with a new client certificate, valid for one year.</div>`
+            : ""
+        }
+      </div>
+      <div class="om-overview-actions">
+        ${
+          run
+            ? `<button type="button" class="secondary btn-sm" data-pf-dl="kubeconfig" title="Download the copy in this environment's vault">Kubeconfig</button>
+        <button type="button" class="secondary btn-sm" data-pf-dl="talosconfig" title="Download the copy in this environment's vault">Talosconfig</button>
+        <button type="button" class="secondary btn-sm" data-pf-renew="kubeconfig" title="Replace the vault copy with a new client certificate">Regenerate kubeconfig</button>
+        <button type="button" class="secondary btn-sm" data-pf-renew="talosconfig" title="Replace the vault copy with a new client certificate">Regenerate talosconfig</button>
+        <button type="button" class="secondary btn-sm" data-pf-upgrade-all ${gate(canRun(), "operator")}>Upgrade Talos</button>`
             : ""
         }
       </div>
@@ -704,12 +711,31 @@ async function copyText(text) {
   toast("Copy failed — select the value", "bad");
 }
 
-async function downloadConfig(kind) {
+function noteCredentialDownload(source) {
+  if (source === "issued") {
+    toast("Regenerated. The new client certificate is in the vault and is valid for one year.", "ok", { timeout: 7000 });
+    return;
+  }
+  if (source === "filed") {
+    toast("Saved in this environment's vault.", "ok", { timeout: 7000 });
+    return;
+  }
+  if (source === "vault") {
+    toast("Downloaded from this environment's vault.", "ok", { timeout: 5000 });
+  }
+}
+
+async function downloadConfig(kind, renew) {
   const envId = (envIdGetter && envIdGetter()) || activeEnvId;
   if (!envId) return;
   const filename = kind === "talosconfig" ? "talosconfig" : `${envName(envId) || "cluster"}-kubeconfig`;
   try {
-    await downloadAuth(`/api/v1/environments/${encodeURIComponent(envId)}/access/${kind}`, filename);
+    const source = await downloadAuth(
+      `/api/v1/environments/${encodeURIComponent(envId)}/access/${kind}`,
+      filename,
+      renew ? { method: "POST" } : undefined
+    );
+    noteCredentialDownload(source);
   } catch (e) {
     toast(`Download failed: ${e && e.message ? e.message : "unavailable"}`, "error");
   }
@@ -874,9 +900,14 @@ async function onClick(e) {
     copyText(copyBtn.dataset.copy || "");
     return;
   }
+  const renewBtn = e.target.closest("[data-pf-renew]");
+  if (renewBtn) {
+    downloadConfig(renewBtn.dataset.pfRenew, true);
+    return;
+  }
   const dl = e.target.closest("[data-pf-dl]");
   if (dl) {
-    downloadConfig(dl.dataset.pfDl);
+    downloadConfig(dl.dataset.pfDl, false);
     return;
   }
   const upAll = e.target.closest("[data-pf-upgrade-all]");
@@ -1143,6 +1174,8 @@ export async function loadPlatformCard(envId, { silent = false } = {}) {
     }
     if (msg) msg.textContent = "";
     body.classList.remove("muted");
+    const overview = document.getElementById("pf-overview");
+    if (overview && !overview.innerHTML) overview.innerHTML = overviewHtml({ nodes: [] });
     body.innerHTML =
       e && e.status === 404
         ? `<div class="muted">Machines join API not deployed yet.</div>`

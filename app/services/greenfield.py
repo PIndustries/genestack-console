@@ -381,6 +381,22 @@ def run_greenfield(
                         wiped_at=getattr(node, "wiped_at", None),
                         talos_served_at=getattr(node, "talos_served_at", None),
                     )
+                    if state == "installed":
+                        from app.services.talos import installed_talos_guidance
+
+                        guide = installed_talos_guidance(hostname, probe_ip)
+                        msg = str(guide["error"])
+                        log(f"[greenfield] {msg}")
+                        return _stamp(
+                            {
+                                "ok": False,
+                                "error": msg,
+                                "user_step": guide["user_step"],
+                                "returncode": 2,
+                                "dry_run": False,
+                                "failed_at": "greenfield/maintenance",
+                            }
+                        )
                     if state == "down":
                         saw_down[hostname] = True
                     stage = getattr(node, "boot_stage", "") if node is not None else ""

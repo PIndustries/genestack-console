@@ -17,6 +17,17 @@ servers whose roles contain ``k8s_control_plane``; every other server is a
 worker for talos purposes. Bootstrap and endpoints target the first
 control-plane node (docs/k8s-talos.md: bootstrap runs ONCE on a single cp).
 
+Before any of that runs for real, each node is checked with
+``talosctl version``. Maintenance mode accepts ``--insecure``. A node that
+already has a config answers ``tls: certificate required``. Applying a config
+is what leaves maintenance mode. When the saved client certificate still
+matches, the installed machine config stays in place and bootstrap continues.
+When it does not match and the console has a management port, the console
+reboots that machine into the Talos installer and applies the saved config.
+That is the reconcile: desired config versus the live certificate, with no
+confirm step. A machine with no management port is the one case the job
+cannot move, so it names that step and waits.
+
 Two doc notes are surfaced in the op logs, never enforced:
   - pin kube-ovn to v1.14.10 in helm-chart-versions.yaml for talos
   - nodes boot a Talos Image Factory image carrying the siderolabs/iscsi-tools
@@ -31,6 +42,7 @@ import os
 import re
 import shlex
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -101,6 +113,48 @@ FIREWALL_FILENAME = "firewall.yaml"
 # PKI-bearing artifacts written by `talosctl gen config`. Presence of either
 # means the workdir already holds live cluster identity — never --force gen.
 TALOS_PKI_MARKER_FILES = ("secrets.yaml", "talosconfig")
+# Short check before gen config. A configured apid refuses --insecure at once.
+TALOS_PROBE_TIMEOUT = 20
+# A configured node that is not this environment's identity. The Resources
+# page shows the second form: the saved talosconfig CA did not sign the
+# certificate the machine presented.
+_DRIFT_MARKERS = (
+    "certificate required",
+    "unknown authority",
+    "certificate signed by",
+)
+_ALREADY_BOOTSTRAPPED = (
+    "already bootstrapped",
+    "already been bootstrapped",
+    "etcd data directory is not empty",
+    "etcd is already",
+)
+_DOWN_MARKERS = (
+    "connection refused",
+    "no route to host",
+    "i/o timeout",
+    "context deadline exceeded",
+    "deadline exceeded",
+    "timed out",
+    "timeout",
+    "unreachable",
+    "no such host",
+    "network is unreachable",
+)
+# Dropped when every node already accepts this environment's talosconfig.
+# Re-applying machine config reboots a healthy node.
+_APPLY_PREP_PHASES = frozenset(
+    {
+        "write-network-patch",
+        "write-etcd-patch",
+        "gen-config",
+        "write-firewall",
+        "apply-firewall",
+        "write-node-net",
+        "apply-controlplane",
+        "apply-worker",
+    }
+)
 # Dual-NIC: kube-apiserver (6443) and the Talos API (50000) may stay reachable
 # on the public NIC *from listed management CIDRs only* — never 0.0.0.0/0.
 DEFAULT_PUBLIC_MANAGEMENT_PORTS = (6443, 50000)
@@ -553,6 +607,8 @@ def build_talos_plan(
     doc: dict[str, Any],
     env: Environment,
     settings: Any = None,  # noqa: ARG001 — signature reserved (see render_to_files)
+    *,
+    allow_existing_pki: bool = False,
 ) -> dict[str, Any]:
     """Compute the talos bootstrap plan from the env config document.
 
@@ -568,6 +624,10 @@ def build_talos_plan(
     workdir already holds Talos PKI markers (``secrets.yaml`` /
     ``talosconfig``) — hosts stage must not ``gen config --force`` over live
     cluster identity.
+
+    ``allow_existing_pki`` is the live resume path. It still never passes
+    ``--force``. Machine config is regenerated with ``--with-secrets`` only
+    when ``secrets.yaml`` is present and ``controlplane.yaml`` is missing.
     """
     talos_cfg = doc.get("talos") if isinstance(doc, dict) else None
     if talos_cfg is None:
@@ -629,7 +689,7 @@ def build_talos_plan(
     # Never `talosctl gen config --force` over an existing cluster.
     # Hosts stage re-entry must not mint new secrets/talosconfig and wipe live PKI.
     existing_pki = talos_pki_markers(workdir)
-    if existing_pki:
+    if existing_pki and not allow_existing_pki:
         markers = ", ".join(existing_pki)
         raise ConfigValidationError(
             "talos workdir already looks bootstrapped "
@@ -688,8 +748,8 @@ def build_talos_plan(
                 f"@{ETCD_PATCH_FILENAME}",
                 "--with-docs=false",
                 "--with-examples=false",
-                # Never --force. Greenfield workdirs have no files to
-                # overwrite; bootstrapped workdirs hard-fail above.
+                # Never --force. A resume keeps this identity and may add
+                # --with-secrets below when machine config is missing.
             ],
         },
         {
@@ -801,6 +861,20 @@ def build_talos_plan(
         }
     )
 
+    if existing_pki and allow_existing_pki:
+        missing_machine = not (workdir / "controlplane.yaml").is_file()
+        if "secrets.yaml" in existing_pki and missing_machine:
+            for command in commands:
+                if command["phase"] == "gen-config":
+                    command["argv"] = [
+                        *command["argv"],
+                        "--with-secrets",
+                        "secrets.yaml",
+                    ]
+                    break
+        else:
+            commands = [c for c in commands if c["phase"] != "gen-config"]
+
     return {
         "cluster_name": cluster_name,
         "install_disk": install_disk,
@@ -884,6 +958,39 @@ def _executor_read_text(
         return ""
 
 
+def _vault_client_files(
+    plan: dict[str, Any],
+    env: Environment,
+    db: Any | None,
+    *,
+    ssh_target: str | None,
+    agent_env_id: str | None,
+) -> None:
+    """File the kubeconfig and talosconfig into this environment's vault.
+
+    The text is not logged. A missing file is skipped. These copies stay in
+    the console vault.
+    """
+    if db is None:
+        return
+    from app.services.clientconfig import remember_client_config
+
+    kube_text = _executor_read_text(
+        plan["kubeconfig"],
+        ssh_target=ssh_target,
+        agent_env_id=agent_env_id,
+    )
+    if kube_text.strip():
+        remember_client_config(db, env, "kubeconfig", kube_text)
+    talos_text = _executor_read_text(
+        plan["workdir"] / "talosconfig",
+        ssh_target=ssh_target,
+        agent_env_id=agent_env_id,
+    )
+    if talos_text.strip():
+        remember_client_config(db, env, "talosconfig", talos_text)
+
+
 def _retain_created_kubeconfig(
     plan: dict[str, Any],
     env: Environment,
@@ -924,6 +1031,465 @@ def _retain_created_kubeconfig(
     )
 
 
+def _joined_output(result: dict[str, Any]) -> str:
+    return f"{result.get('stdout') or ''}\n{result.get('stderr') or ''}"
+
+
+def _short_detail(result: dict[str, Any]) -> str:
+    text = " ".join(_joined_output(result).split())
+    if text:
+        return text[:180]
+    rc = result.get("returncode")
+    if rc in (0, None):
+        return ""
+    return f"rc={rc}"
+
+
+def _classify_probe(result: dict[str, Any]) -> str:
+    """maintenance, cert-required, down, missing-client, or unknown."""
+    if result.get("returncode") in (0, None):
+        return "maintenance"
+    text = _joined_output(result).lower()
+    if any(marker in text for marker in _DRIFT_MARKERS):
+        return "cert-required"
+    rc = result.get("returncode")
+    if rc == 127:
+        return "missing-client"
+    if rc == 124 or any(marker in text for marker in _DOWN_MARKERS):
+        return "down"
+    return "unknown"
+
+
+def _run_talosctl(
+    argv: list[str],
+    *,
+    cwd: Path | None,
+    timeout: int,
+    ssh_target: str | None,
+    remote_env: dict[str, str] | None,
+    agent_env_id: str | None,
+    extra_env: dict[str, str] | None,
+    log: LogFn | None,
+) -> dict[str, Any]:
+    return bridge.run_command(
+        argv,
+        cwd=cwd,
+        timeout=timeout,
+        dry_run=False,
+        extra_env=extra_env,
+        ssh_target=ssh_target,
+        remote_env=remote_env,
+        agent_env_id=agent_env_id,
+        log=log,
+    )
+
+
+def _probe_insecure(
+    ctl: str,
+    ip: str,
+    **kwargs: Any,
+) -> tuple[str, dict[str, Any]]:
+    result = _run_talosctl(
+        [ctl, "version", "--nodes", ip, "--insecure"],
+        **kwargs,
+    )
+    return _classify_probe(result), result
+
+
+def _probe_with_talosconfig(
+    ctl: str,
+    ip: str,
+    **kwargs: Any,
+) -> tuple[str, dict[str, Any]]:
+    result = _run_talosctl(
+        [ctl, "version", "--nodes", ip, "--talosconfig=./talosconfig"],
+        **kwargs,
+    )
+    if result.get("returncode") in (0, None):
+        return "configured", result
+    return "nomatch", result
+
+
+def insecure_maintenance(ip: str, log: LogFn | None = None) -> bool:
+    """True when ``talosctl version --insecure`` succeeds against ``ip``.
+
+    A finished TLS handshake is not enough. A node that already has a config
+    completes TLS and then asks for a client certificate.
+    """
+    host = str(ip or "").strip()
+    if not valid_node_endpoint(host):
+        return False
+    state, _result = _probe_insecure(
+        talosctl_command(),
+        host,
+        cwd=None,
+        timeout=TALOS_PROBE_TIMEOUT,
+        ssh_target=None,
+        remote_env=None,
+        agent_env_id=None,
+        extra_env=None,
+        log=log,
+    )
+    return state == "maintenance"
+
+
+def _bootstrap_already_done(result: dict[str, Any]) -> bool:
+    text = _joined_output(result).lower()
+    return any(phrase in text for phrase in _ALREADY_BOOTSTRAPPED)
+
+
+def _baremetal_for_host(db: Any, env: Environment, hostname: str) -> Any:
+    if db is None or not hostname:
+        return None
+    from sqlalchemy import select
+
+    from app.models import BaremetalNode
+
+    return db.scalar(
+        select(BaremetalNode).where(
+            BaremetalNode.environment_id == env.id,
+            BaremetalNode.name == hostname,
+        )
+    )
+
+
+def _guide(
+    *,
+    kind: str,
+    hostname: str,
+    ip: str,
+    title: str,
+    detail: str,
+    action: str,
+    confirm: str,
+    error: str,
+) -> dict[str, Any]:
+    """One manual step. The job waits until the user confirms it is done."""
+    return {
+        "ok": False,
+        "error": error,
+        "user_step": {
+            "kind": kind,
+            "hostname": hostname,
+            "address": ip,
+            "title": title,
+            "detail": detail,
+            "action": action,
+            "confirm": confirm,
+        },
+    }
+
+
+def _talos_said(detail: str) -> str:
+    text = str(detail or "").strip()
+    return f" Talos said: {text}." if text else ""
+
+
+def _boot_installer_guide(
+    hostname: str,
+    ip: str,
+    *,
+    why: str,
+    detail: str = "",
+) -> dict[str, Any]:
+    said = _talos_said(detail)
+    return _guide(
+        kind="boot-installer",
+        hostname=hostname,
+        ip=ip,
+        title=f"Boot the Talos installer on {hostname}",
+        detail=(
+            f"{hostname} at {ip} is already running Talos. {why} "
+            "Booting the installer replaces the install that is running."
+            f"{said}"
+        ),
+        action=(
+            f"Boot {hostname} from the Talos installer. "
+            "Wait until Talos is in maintenance mode."
+        ),
+        confirm="The installer is up — continue",
+        error=(
+            f"{hostname} at {ip} is not in Talos maintenance mode. "
+            "Talos is already installed and wants a client certificate. "
+            f"{why} Boot the Talos installer on {hostname}. That replaces "
+            "the install that is running. Confirm on this job when "
+            f"maintenance mode is up.{said}"
+        ),
+    )
+
+
+def installed_talos_guidance(hostname: str, ip: str) -> dict[str, Any]:
+    """Step shown when a path will not reboot an already-installed node."""
+    return _boot_installer_guide(
+        hostname,
+        ip,
+        why=(
+            "This console will not reboot it from this step. "
+            "A machine with no management port is the same case as a lab."
+        ),
+    )
+
+
+def installed_talos_message(hostname: str, ip: str) -> str:
+    """Job text when a node is installed and this path will not reboot it."""
+    return str(installed_talos_guidance(hostname, ip)["error"])
+
+
+def _power_on_guide(hostname: str, ip: str, *, detail: str = "") -> dict[str, Any]:
+    said = _talos_said(detail)
+    return _guide(
+        kind="power-on",
+        hostname=hostname,
+        ip=ip,
+        title=f"Turn on {hostname}",
+        detail=(
+            f"{hostname} at {ip} is not answering on the Talos API (port 50000). "
+            f"This console did not write a new cluster identity.{said}"
+        ),
+        action=f"Power on {hostname} so the Talos API on port 50000 answers.",
+        confirm="It is on — continue",
+        error=(
+            f"{hostname} at {ip} is not answering on the Talos API (port 50000). "
+            "This console did not write a new cluster identity. "
+            f"Turn {hostname} on so port 50000 answers, then confirm on this "
+            f"job.{said}"
+        ),
+    )
+
+
+def _reach_guide(hostname: str, ip: str, state: str, detail: str) -> dict[str, Any]:
+    said = _talos_said(detail)
+    if state == "missing-client":
+        return {
+            "ok": False,
+            "error": (
+                f"This console could not run talosctl to check {hostname} at {ip}. "
+                "The Talos client is not installed on the deploy host, so this job "
+                f"stopped before writing a cluster identity.{said}"
+            ),
+        }
+    if state == "down":
+        return _power_on_guide(hostname, ip, detail=detail)
+    return _boot_installer_guide(
+        hostname,
+        ip,
+        why="This console could not tell whether Talos is in maintenance mode.",
+        detail=detail,
+    )
+
+
+def _reboot_into_maintenance(
+    db: Any,
+    env: Environment,
+    hostname: str,
+    ip: str,
+    log: LogFn,
+    *,
+    ctl: str,
+    probe_kwargs: dict[str, Any],
+    detail: str,
+) -> dict[str, Any]:
+    """Power the node into the Talos installer when this console can."""
+    node = _baremetal_for_host(db, env, hostname)
+    if node is None or not str(getattr(node, "bmc_host", "") or "").strip():
+        return _boot_installer_guide(
+            hostname,
+            ip,
+            why=(
+                "This console has no management port for it, so it cannot "
+                "reboot the machine."
+            ),
+            detail=detail,
+        )
+    log(
+        f"[talos] {hostname} at {ip} is not in maintenance mode. "
+        "The certificate on the machine does not match this environment's "
+        "config. This console is rebooting it into the Talos installer. "
+        "That replaces the Talos install that is running."
+    )
+    from app.services import baremetal as baremetal_service
+
+    booted = baremetal_service.set_next_boot(
+        db,
+        env,
+        node,
+        "talos",
+        boot_now=True,
+        dry_run=False,
+        log=log,
+        replace_installed=True,
+    )
+    if not booted.get("ok"):
+        why = str(booted.get("error") or "the management port did not accept the reboot")
+        return _boot_installer_guide(
+            hostname,
+            ip,
+            why=(
+                "This console tried to reboot it from the management port "
+                f"and could not. {why}"
+            ),
+            detail=detail,
+        )
+    log(f"[talos] waiting for {hostname} at {ip} to enter maintenance mode")
+    deadline = time.monotonic() + baremetal_service.DEFAULT_PROVISION_TIMEOUT
+    poll = baremetal_service.DEFAULT_POLL_INTERVAL
+    quiet = dict(probe_kwargs)
+    quiet["log"] = None
+    attempt = 0
+    while True:
+        attempt += 1
+        state, _result = _probe_insecure(ctl, ip, **quiet)
+        if state == "maintenance":
+            log(
+                f"[talos] {hostname} at {ip} is back in maintenance mode. "
+                "Applying this environment's config."
+            )
+            return {"ok": True}
+        if time.monotonic() >= deadline:
+            break
+        if attempt % 12 == 0:
+            log(f"[talos] {hostname} at {ip} is still not in maintenance mode")
+        time.sleep(poll)
+    return _boot_installer_guide(
+        hostname,
+        ip,
+        why=(
+            "This console rebooted it into the Talos installer and it did "
+            "not come back in maintenance mode."
+        ),
+        detail=detail,
+    )
+
+
+def _commands_for_modes(
+    commands: list[dict[str, Any]],
+    nodes: list[dict[str, str]],
+    modes: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Drop apply steps for nodes that already have this environment's config."""
+    if not any(mode == "configured" for mode in modes.values()):
+        return commands
+    configured = {
+        node["hostname"] for node in nodes if modes.get(node["hostname"]) == "configured"
+    }
+    all_configured = configured == {node["hostname"] for node in nodes}
+    by_ip = {node["apply_ip"] or node["ip"]: node["hostname"] for node in nodes}
+    kept: list[dict[str, Any]] = []
+    for command in commands:
+        phase = command["phase"]
+        argv = [str(part) for part in command["argv"]]
+        if all_configured and phase in _APPLY_PREP_PHASES:
+            continue
+        if phase in ("apply-controlplane", "apply-worker"):
+            host = ""
+            if "--nodes" in argv:
+                idx = argv.index("--nodes")
+                if idx + 1 < len(argv):
+                    host = by_ip.get(argv[idx + 1], "")
+            if host in configured:
+                continue
+        if phase == "write-node-net":
+            blob = " ".join(argv)
+            if any(f"node-{host}.yaml" in blob for host in configured):
+                continue
+        kept.append(command)
+    return kept
+
+
+def _prepare_live_nodes(
+    plan: dict[str, Any],
+    env: Environment,
+    log: LogFn,
+    *,
+    db: Any,
+    ssh_target: str | None,
+    remote_env: dict[str, str] | None,
+    agent_env_id: str | None,
+    extra_env: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Probe each node before gen config. Never mint an identity we cannot apply."""
+    nodes = list(plan["control_planes"]) + list(plan["workers"])
+    ctl = talosctl_command()
+    probe_kwargs = {
+        "cwd": plan["workdir"],
+        "timeout": TALOS_PROBE_TIMEOUT,
+        "ssh_target": ssh_target,
+        "remote_env": remote_env,
+        "agent_env_id": agent_env_id,
+        "extra_env": extra_env,
+        "log": log,
+    }
+    modes: dict[str, str] = {}
+    blocked: list[str] = []
+    for node in nodes:
+        hostname = node["hostname"]
+        ip = node["apply_ip"] or node["ip"]
+        log(
+            f"[talos] {hostname} at {ip}: checking whether Talos is waiting "
+            "for a config"
+        )
+        state, result = _probe_insecure(ctl, ip, **probe_kwargs)
+        detail = _short_detail(result)
+        if state == "maintenance":
+            log(
+                f"[talos] {hostname} at {ip} is in maintenance mode. "
+                "It will take a config without a client certificate."
+            )
+            modes[hostname] = "maintenance"
+            continue
+        if state == "cert-required":
+            _auth_state, _auth = _probe_with_talosconfig(ctl, ip, **probe_kwargs)
+            if _auth_state == "configured":
+                log(
+                    f"[talos] {hostname} at {ip} already has this environment's "
+                    "Talos config. The installed machine config stays in place."
+                )
+                modes[hostname] = "configured"
+                continue
+            log(
+                f"[talos] {hostname} at {ip} already has Talos installed and "
+                "wants a client certificate. The config in this environment "
+                "does not match. Applying a config is what leaves maintenance mode."
+            )
+            recovered = _reboot_into_maintenance(
+                db,
+                env,
+                hostname,
+                ip,
+                log,
+                ctl=ctl,
+                probe_kwargs=probe_kwargs,
+                detail=detail,
+            )
+            if recovered.get("ok"):
+                modes[hostname] = "maintenance"
+                continue
+            blocked.append(recovered)
+            continue
+        blocked.append(_reach_guide(hostname, ip, state, detail))
+    if blocked:
+        errors = [str(item.get("error") or "") for item in blocked]
+        step = next(
+            (item.get("user_step") for item in blocked if item.get("user_step")),
+            None,
+        )
+        out: dict[str, Any] = {
+            "ok": False,
+            "error": " ".join(part for part in errors if part),
+        }
+        if step:
+            out["user_step"] = step
+        return out
+    commands = _commands_for_modes(plan["commands"], nodes, modes)
+    kept = [node["hostname"] for node in nodes if modes.get(node["hostname"]) == "configured"]
+    if kept:
+        log(
+            "[talos] leaving the installed machine config in place on "
+            + ", ".join(kept)
+        )
+    return {"ok": True, "commands": commands}
+
+
 def log_talos_notes(log: LogFn | None) -> None:
     """Surface the docs/k8s-talos.md caveats (advisory, never enforced)."""
     if log is None:
@@ -958,7 +1524,11 @@ def run_talos_bootstrap(
     and executes nothing. Raises :class:`ConfigValidationError` when the plan
     cannot be built (caller maps that to a returncode=2 result).
     """
-    plan = build_talos_plan(doc, env)
+    allow_existing = False
+    if not dry_run and env.genestack_config_dir:
+        existing_dir = Path(env.genestack_config_dir).expanduser() / "talos"
+        allow_existing = bool(talos_pki_markers(existing_dir))
+    plan = build_talos_plan(doc, env, allow_existing_pki=allow_existing)
     cp_count = len(plan["control_planes"])
     worker_count = len(plan["workers"])
     log(
@@ -1001,6 +1571,8 @@ def run_talos_bootstrap(
             "exposed to the internet"
         )
     log_talos_notes(log)
+    if allow_existing:
+        log("[talos] using the Talos identity already saved for this environment")
 
     if not dry_run:
         plan["workdir"].mkdir(parents=True, exist_ok=True)
@@ -1028,7 +1600,39 @@ def run_talos_bootstrap(
     total = len(plan["commands"])
     failed: dict[str, Any] | None = None
     try:
-        for command in plan["commands"]:
+        commands = plan["commands"]
+        if not dry_run:
+            prepared = _prepare_live_nodes(
+                plan,
+                env,
+                log,
+                db=db,
+                ssh_target=ssh_target,
+                remote_env=remote_env,
+                agent_env_id=agent_env_id,
+                extra_env=extra_env,
+            )
+            if not prepared.get("ok"):
+                message = str(
+                    prepared.get("error") or "Talos is not in maintenance mode"
+                )
+                log(f"[talos] {message}")
+                failed = {
+                    **base,
+                    "ok": False,
+                    "error": message,
+                    "returncode": 2,
+                    "failed_phase": "reach",
+                    "phases_completed": 0,
+                    "phases_total": total,
+                }
+                if prepared.get("user_step"):
+                    failed["user_step"] = prepared["user_step"]
+                commands = []
+            else:
+                commands = prepared["commands"]
+                total = len(commands)
+        for command in commands:
             result = bridge.run_command(
                 [str(a) for a in command["argv"]],
                 cwd=plan["workdir"],
@@ -1041,6 +1645,18 @@ def run_talos_bootstrap(
                 log=log,
             )
             rc = result.get("returncode")
+            if (
+                command["phase"] == "bootstrap"
+                and rc not in (0, None)
+                and not result.get("dry_run")
+                and _bootstrap_already_done(result)
+            ):
+                log(
+                    "[talos] etcd is already bootstrapped on this cluster. "
+                    "Continuing to the kubeconfig."
+                )
+                phases_completed += 1
+                continue
             if rc not in (0, None) and not result.get("dry_run"):
                 phase = command["phase"]
                 log(f"[talos] FAILED at phase '{phase}' rc={rc} — stopping")
@@ -1069,6 +1685,14 @@ def run_talos_bootstrap(
                         "(console is not on the private fabric)"
                     )
     finally:
+        if not dry_run:
+            _vault_client_files(
+                plan,
+                env,
+                db,
+                ssh_target=ssh_target,
+                agent_env_id=agent_env_id,
+            )
         if not dry_run and not kube_existed:
             _retain_created_kubeconfig(
                 plan,

@@ -1617,10 +1617,14 @@ function healthStripHtml(data, envId) {
   const access = hasKey(data, "access") ? data.access : null;
   const actions = [];
   if (showDownload(envId, "kubeconfig", access)) {
-    actions.push('<button type="button" class="secondary btn-sm" data-dl-kubeconfig>Kubeconfig</button>');
+    actions.push(
+      '<button type="button" class="secondary btn-sm" data-dl-kubeconfig title="Download the copy in this environment\'s vault">Kubeconfig</button>'
+    );
   }
   if (showDownload(envId, "talosconfig", access)) {
-    actions.push('<button type="button" class="secondary btn-sm" data-dl-talosconfig>Talosconfig</button>');
+    actions.push(
+      '<button type="button" class="secondary btn-sm" data-dl-talosconfig title="Download the copy in this environment\'s vault">Talosconfig</button>'
+    );
   }
   if (access && access.horizon) {
     actions.push(
@@ -1701,13 +1705,28 @@ function fetchCluster(envId) {
   return inflight;
 }
 
+function noteCredentialDownload(source) {
+  if (source === "issued") {
+    toast("Regenerated. The new client certificate is in the vault and is valid for one year.", "ok", { timeout: 7000 });
+    return;
+  }
+  if (source === "filed") {
+    toast("Saved in this environment's vault.", "ok", { timeout: 7000 });
+    return;
+  }
+  if (source === "vault") {
+    toast("Downloaded from this environment's vault.", "ok", { timeout: 5000 });
+  }
+}
+
 async function downloadConfig(kind) {
   const envId = (envIdGetter && envIdGetter()) || activeEnvId;
   if (!envId) return;
   const filename = kind === "talosconfig" ? "talosconfig" : "kubeconfig";
   const path = `/api/v1/environments/${encodeURIComponent(envId)}/access/${kind}`;
   try {
-    await downloadAuth(path, filename);
+    const source = await downloadAuth(path, filename);
+    noteCredentialDownload(source);
   } catch (e) {
     if (e && e.status === 404) {
       downloadMissing.add(`${envId}:${kind}`);

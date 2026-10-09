@@ -105,6 +105,30 @@ class JobDeadlineExceededError(RuntimeError):
 
 CANCELLED_ERROR = "cancelled by operator"
 
+_USER_STEP_KEYS = (
+    "kind",
+    "hostname",
+    "address",
+    "title",
+    "detail",
+    "action",
+    "confirm",
+)
+
+
+def _public_user_step(raw: Any) -> dict[str, str] | None:
+    """Keep the one manual step the Activity page can ask the user to confirm."""
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind") or "").strip()
+    confirm = str(raw.get("confirm") or "").strip()
+    if not kind or not confirm:
+        return None
+    step = {key: str(raw.get(key) or "").strip()[:500] for key in _USER_STEP_KEYS}
+    step["kind"] = kind[:64]
+    step["confirm"] = confirm[:160]
+    return step
+
 
 def effective_timeout_seconds(op: OperationSpec | None, settings: Settings) -> int:
     """The op's timeout (clamped to the hard ceiling), else the global default."""
@@ -600,6 +624,10 @@ class JobRunner:
             if isinstance(result, dict) and "dry_run" in result:
                 job.dry_run = bool(result["dry_run"])
             ok = bool(result.get("ok", True)) if isinstance(result, dict) else True
+            if isinstance(result, dict):
+                job.user_step = (
+                    None if ok else _public_user_step(result.get("user_step"))
+                )
             if isinstance(result, dict) and result.get("error") and not ok:
                 raise RuntimeError(result["error"])
 

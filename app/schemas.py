@@ -357,6 +357,7 @@ class JobRead(BaseModel):
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     error: Optional[str] = None
+    user_step: Optional[dict[str, Any]] = None
     dry_run: Optional[bool] = None
     cancel_requested: bool = False
     created_at: datetime

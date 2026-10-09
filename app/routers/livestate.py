@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.deps import get_db, get_env_scoped
 from app.models import Environment
 from app.services import livestate
+from app.services.clientconfig import grab_client_config, renew_client_config
 from app.services.demo import (
     canned_cluster_logs,
     canned_cluster_overview,
@@ -28,15 +29,28 @@ router = APIRouter(prefix="/api/v1", tags=["livestate"])
 
 
 def _config_download(
-    path: Path | None, filename: str, cleanup: Callable[[], None]
+    path: Path | None,
+    filename: str,
+    cleanup: Callable[[], None],
+    source: str | None = None,
 ) -> FileResponse:
     if path is None or not path.is_file():
         cleanup()
-        raise HTTPException(status_code=404, detail=f"{filename} not found")
+        detail = f"{filename} not found"
+        if source == "stored":
+            detail = (
+                f"The cluster did not issue a {filename}, and this console "
+                "has no saved copy."
+            )
+        raise HTTPException(status_code=404, detail=detail)
+    headers = {"Cache-Control": "no-store"}
+    if source:
+        headers["X-Genestack-Credential"] = source
     return FileResponse(
         path,
         filename=filename,
         media_type="application/yaml",
+        headers=headers,
         background=BackgroundTask(cleanup),
     )
 
@@ -130,25 +144,69 @@ def get_environment_cluster_logs(
         ctx.cleanup()
 
 
+def _send_client_config(
+    env: Environment, kind: str, db: Session, *, renew: bool
+) -> FileResponse:
+    """Send the vault copy, or replace it when ``renew`` is set.
+
+    Download grabs the copy in this environment's vault. The first grab files
+    the on-disk copy into the vault. Regenerate asks the cluster for a new
+    client certificate, valid for one year, and replaces the vault copy.
+    """
+    ctx = build_context(env, get_settings())
+    if renew:
+        path, source, cleanup_issued = renew_client_config(ctx, env, db, kind)
+        if path is None:
+            cleanup_issued()
+            ctx.cleanup()
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The cluster did not issue a new certificate. "
+                    "The copy in the vault is unchanged."
+                ),
+            )
+    else:
+        path, source, cleanup_issued = grab_client_config(ctx, env, db, kind)
+
+    def cleanup() -> None:
+        cleanup_issued()
+        ctx.cleanup()
+
+    return _config_download(path, kind, cleanup, source)
+
+
 @router.get("/environments/{environment_id}/access/kubeconfig")
 def get_environment_kubeconfig(
     env: Environment = Depends(get_env_scoped("operator")),
+    db: Session = Depends(get_db),
 ) -> FileResponse:
-    """Download this environment's kubeconfig. 404 if the file is missing."""
-    ctx = build_context(env, get_settings())
-    path = Path(ctx.kubeconfig) if ctx.kubeconfig else None
-    return _config_download(path, "kubeconfig", ctx.cleanup)
+    """Download the kubeconfig saved in this environment's vault."""
+    return _send_client_config(env, "kubeconfig", db, renew=False)
+
+
+@router.post("/environments/{environment_id}/access/kubeconfig")
+def renew_environment_kubeconfig(
+    env: Environment = Depends(get_env_scoped("operator")),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Regenerate the kubeconfig and replace the vault copy."""
+    return _send_client_config(env, "kubeconfig", db, renew=True)
 
 
 @router.get("/environments/{environment_id}/access/talosconfig")
 def get_environment_talosconfig(
     env: Environment = Depends(get_env_scoped("operator")),
+    db: Session = Depends(get_db),
 ) -> FileResponse:
-    """Download this environment's talosconfig. 404 if the file is missing."""
-    ctx = build_context(env, get_settings())
-    path = (
-        (ctx.config_dir / "talos" / "talosconfig")
-        if ctx.config_dir is not None
-        else None
-    )
-    return _config_download(path, "talosconfig", ctx.cleanup)
+    """Download the talosconfig saved in this environment's vault."""
+    return _send_client_config(env, "talosconfig", db, renew=False)
+
+
+@router.post("/environments/{environment_id}/access/talosconfig")
+def renew_environment_talosconfig(
+    env: Environment = Depends(get_env_scoped("operator")),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Regenerate the talosconfig and replace the vault copy."""
+    return _send_client_config(env, "talosconfig", db, renew=True)

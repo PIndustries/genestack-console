@@ -194,6 +194,39 @@ def test_gen_config_refuses_both_pki_markers(tmp_path):
         build_talos_plan(_doc(DOC_TALOS), _env(tmp_path))
 
 
+def test_resume_skips_gen_and_never_passes_force(tmp_path):
+    """A saved identity is reused. gen config --force is still refused."""
+    env = _env(tmp_path)
+    workdir = tmp_path / "etc-genestack" / "talos"
+    workdir.mkdir(parents=True)
+    (workdir / "secrets.yaml").write_text("cluster:\n  id: fake\n", encoding="utf-8")
+    (workdir / "talosconfig").write_text("context: fake\n", encoding="utf-8")
+    (workdir / "controlplane.yaml").write_text("version: v1alpha1\n", encoding="utf-8")
+    plan = build_talos_plan(_doc(DOC_TALOS), env, allow_existing_pki=True)
+    assert not any(command["phase"] == "gen-config" for command in plan["commands"])
+    apply = next(
+        command["argv"]
+        for command in plan["commands"]
+        if command["phase"] == "apply-controlplane"
+    )
+    assert "--insecure" in apply
+    assert "--force" not in apply
+
+
+def test_resume_regenerates_machine_yaml_with_existing_secrets(tmp_path):
+    env = _env(tmp_path)
+    workdir = tmp_path / "etc-genestack" / "talos"
+    workdir.mkdir(parents=True)
+    (workdir / "secrets.yaml").write_text("cluster:\n  id: fake\n", encoding="utf-8")
+    (workdir / "talosconfig").write_text("context: fake\n", encoding="utf-8")
+    plan = build_talos_plan(_doc(DOC_TALOS), env, allow_existing_pki=True)
+    gen = next(
+        command["argv"] for command in plan["commands"] if command["phase"] == "gen-config"
+    )
+    assert "--force" not in gen
+    assert gen[gen.index("--with-secrets") + 1] == "secrets.yaml"
+
+
 def test_controlplane_yaml_alone_not_pki_marker(tmp_path):
     """Machine config without secrets/talosconfig is not treated as bootstrapped.
 
@@ -786,3 +819,355 @@ def test_talos_bootstrap_operator_forbidden(
 
     resp = _talos_job(client, operator_headers, env["id"])
     assert resp.status_code == 403
+
+
+DOC_ONE_CP = """\
+provider: talos
+servers:
+  cp1:
+    ip: 10.0.0.11
+    roles: [k8s_control_plane]
+"""
+
+
+def _probe_reply(argv, *, insecure_state, auth_ok, rebooted=None):
+    """Fake talosctl version. None means this argv is not a probe."""
+    if len(argv) < 2 or argv[1] != "version":
+        return None
+    if "--insecure" in argv:
+        if rebooted is not None and rebooted.get("ok"):
+            return {
+                "returncode": 0,
+                "stdout": "Talos\n",
+                "stderr": "",
+                "dry_run": False,
+            }
+        if insecure_state == "maintenance":
+            return {"returncode": 0, "stdout": "Talos\n", "stderr": "", "dry_run": False}
+        if insecure_state == "down":
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "connection refused\n",
+                "dry_run": False,
+            }
+        if insecure_state == "unknown-authority":
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": (
+                    "rpc error: code = Unavailable desc = connection error: "
+                    "desc = transport: authentication handshake failed: tls: "
+                    "failed to verify certificate: x509: certificate signed by "
+                    "unknown authority\n"
+                ),
+                "dry_run": False,
+            }
+        return {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": (
+                "rpc error: code = Unavailable desc = "
+                "error reading server preface: remote error: tls: certificate required\n"
+            ),
+            "dry_run": False,
+        }
+    if any(str(part).startswith("--talosconfig") for part in argv):
+        if auth_ok:
+            return {"returncode": 0, "stdout": "Talos\n", "stderr": "", "dry_run": False}
+        return {
+            "returncode": 1,
+            "stdout": "",
+            "stderr": (
+                "tls: failed to verify certificate: x509: certificate signed by "
+                "unknown authority\n"
+            ),
+            "dry_run": False,
+        }
+    return None
+
+
+def _install_probe(monkeypatch, *, insecure_state, auth_ok, rebooted=None, bootstrap_done=False):
+    captured: list[list[str]] = []
+
+    def fake_run_command(cmd, **kwargs):
+        argv = [str(part) for part in cmd]
+        captured.append(argv)
+        probed = _probe_reply(
+            argv,
+            insecure_state=insecure_state,
+            auth_ok=auth_ok,
+            rebooted=rebooted,
+        )
+        if probed is not None:
+            return probed
+        if bootstrap_done and len(argv) > 1 and argv[1] == "bootstrap":
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "cluster is already bootstrapped\n",
+                "dry_run": False,
+            }
+        if len(argv) > 1 and argv[1] == "kubeconfig":
+            Path(argv[2]).parent.mkdir(parents=True, exist_ok=True)
+            Path(argv[2]).write_text("talos-kubeconfig\n", encoding="utf-8")
+        return {"returncode": 0, "stdout": "", "stderr": "", "dry_run": False}
+
+    monkeypatch.setattr(bridge, "run_command", fake_run_command)
+    return captured
+
+
+def _save_identity(config_dir: Path) -> None:
+    workdir = config_dir / "talos"
+    workdir.mkdir(parents=True)
+    (workdir / "secrets.yaml").write_text("cluster:\n  id: fake\n", encoding="utf-8")
+    (workdir / "talosconfig").write_text("context: fake\n", encoding="utf-8")
+    (workdir / "controlplane.yaml").write_text("version: v1alpha1\n", encoding="utf-8")
+
+
+def test_talos_bootstrap_retries_saved_identity_in_maintenance(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """A failed run's secrets must not make the next click stop before apply."""
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    _save_identity(config_dir)
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    captured = _install_probe(monkeypatch, insecure_state="maintenance", auth_ok=False)
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "success", job["error"]
+    assert not any(argv[1:3] == ["gen", "config"] for argv in captured)
+    assert any(
+        "apply-config" in argv and "--insecure" in argv and "controlplane.yaml" in argv
+        for argv in captured
+    )
+    assert "already looks bootstrapped" not in (job.get("error") or "")
+
+
+def test_talos_bootstrap_matching_client_leaves_the_node_installed(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    _save_identity(config_dir)
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    captured = _install_probe(
+        monkeypatch, insecure_state="cert", auth_ok=True, bootstrap_done=True
+    )
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "success", job["error"]
+    assert not any("apply-config" in argv for argv in captured)
+    assert any(argv[1] == "kubeconfig" for argv in captured if len(argv) > 1)
+    log_text = _job_log(client, admin_headers, job["id"])
+    assert "stays in place" in log_text
+    assert "already bootstrapped" in log_text
+
+
+def test_talos_bootstrap_certificate_required_names_the_machine(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """No management port: stop before a new identity, and say why."""
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    captured = _install_probe(monkeypatch, insecure_state="cert", auth_ok=False)
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "failed"
+    error = job["error"]
+    assert "cp1" in error
+    assert "10.0.0.11" in error
+    assert "not in Talos maintenance mode" in error
+    assert "no management port" in error
+    assert "certificate required" in error
+    assert "confirm on this job" in error.lower()
+    assert "already looks bootstrapped" not in error
+    step = job["user_step"]
+    assert step["kind"] == "boot-installer"
+    assert step["hostname"] == "cp1"
+    assert step["address"] == "10.0.0.11"
+    assert step["confirm"] == "The installer is up — continue"
+    assert "replaces the install" in step["detail"]
+    assert "Remove those files" not in error
+    assert "rc=1" not in error
+    assert not any(argv[1:3] == ["gen", "config"] for argv in captured)
+    assert not (config_dir / "talos" / "secrets.yaml").exists()
+
+
+def test_talos_bootstrap_saved_identity_does_not_dead_end(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """The reported retry: secrets exist, the node wants a certificate, no BMC."""
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    _save_identity(config_dir)
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    captured = _install_probe(monkeypatch, insecure_state="cert", auth_ok=False)
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "failed"
+    error = job["error"]
+    assert "not in Talos maintenance mode" in error
+    assert "no management port" in error
+    assert "confirm on this job" in error.lower()
+    assert job["user_step"]["kind"] == "boot-installer"
+    assert "already looks bootstrapped" not in error
+    assert "Remove those files" not in error
+    assert (config_dir / "talos" / "secrets.yaml").is_file()
+    assert not any(argv[1:3] == ["gen", "config"] for argv in captured)
+    assert not any("--force" in argv for argv in captured)
+
+
+def test_talos_bootstrap_reboots_into_maintenance_then_applies(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    from datetime import datetime, timezone
+
+    from tests.test_baremetal import _make_node
+
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    _make_node(
+        env["id"],
+        name="cp1",
+        wiped_at=datetime.now(timezone.utc),
+        expected_ip="10.0.0.11",
+        pxe_mac="aa:bb:cc:dd:ee:41",
+    )
+    rebooted = {"ok": False}
+    calls: list[tuple] = []
+
+    def fake_boot(
+        db,
+        env_row,
+        node,
+        target,
+        *,
+        boot_now,
+        dry_run,
+        log,
+        settings=None,
+        replace_installed=False,
+    ):
+        calls.append((node.name, target, boot_now, dry_run, replace_installed))
+        rebooted["ok"] = True
+        return {"ok": True}
+
+    monkeypatch.setattr("app.services.baremetal.set_next_boot", fake_boot)
+    captured = _install_probe(
+        monkeypatch, insecure_state="cert", auth_ok=False, rebooted=rebooted
+    )
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "success", job["error"]
+    assert not job.get("user_step")
+    assert calls == [("cp1", "talos", True, False, True)]
+    assert any(
+        "apply-config" in argv and "--insecure" in argv for argv in captured
+    )
+    log_text = _job_log(client, admin_headers, job["id"])
+    assert "rebooting it into the Talos installer" in log_text
+    assert "back in maintenance mode" in log_text
+
+
+def test_talos_bootstrap_reconciles_a_mismatched_certificate(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """Console-owned machine, no prior wipe: wrong CA is drift, so reboot and apply."""
+    from tests.test_baremetal import _make_node
+
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    _make_node(env["id"], name="cp1", expected_ip="10.0.0.11", pxe_mac="aa:bb:cc:dd:ee:42")
+    rebooted = {"ok": False}
+    calls: list[tuple] = []
+
+    def fake_boot(
+        db,
+        env_row,
+        node,
+        target,
+        *,
+        boot_now,
+        dry_run,
+        log,
+        settings=None,
+        replace_installed=False,
+    ):
+        calls.append((node.name, target, boot_now, dry_run, replace_installed))
+        rebooted["ok"] = True
+        return {"ok": True}
+
+    monkeypatch.setattr("app.services.baremetal.set_next_boot", fake_boot)
+    captured = _install_probe(
+        monkeypatch, insecure_state="unknown-authority", auth_ok=False, rebooted=rebooted
+    )
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "success", job["error"]
+    assert not job.get("user_step")
+    assert calls == [("cp1", "talos", True, False, True)]
+    assert any(
+        "apply-config" in argv and "--insecure" in argv for argv in captured
+    )
+    log_text = _job_log(client, admin_headers, job["id"])
+    assert "does not match" in log_text
+
+
+def test_talos_bootstrap_down_node_does_not_write_an_identity(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    captured = _install_probe(monkeypatch, insecure_state="down", auth_ok=False)
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "failed"
+    assert "not answering" in job["error"]
+    assert "10.0.0.11" in job["error"]
+    assert "did not write a new cluster identity" in job["error"]
+    assert "confirm on this job" in job["error"].lower()
+    assert job["user_step"]["kind"] == "power-on"
+    assert job["user_step"]["confirm"] == "It is on — continue"
+    assert not any(argv[1:3] == ["gen", "config"] for argv in captured)
+    assert not (config_dir / "talos" / "secrets.yaml").exists()

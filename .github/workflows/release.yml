@@ -12,6 +12,16 @@ on:
         description: "Version matching app/version.py, with or without a leading v"
         required: true
         type: string
+      parts:
+        description: "all publishes the program, then the disk, then the ISO. binary publishes only the program. disk or iso uploads that file onto the existing release and does not change latest."
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - binary
+          - disk
+          - iso
 
 permissions:
   contents: write
@@ -74,6 +84,57 @@ jobs:
               fh.write(f"prerelease={'true' if prerelease else 'false'}\n")
               fh.write(f"make_latest={'false' if prerelease else 'true'}\n")
           print(f"tag={tag} version={version} prerelease={prerelease}")
+          PY
+
+      # disk and iso attach to a release the program publish already created.
+      # A missing release fails here. This step does not create one and does
+      # not change latest. Tag pushes are not workflow_dispatch, so they skip it.
+      - name: Require an existing release
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.parts == 'disk' || inputs.parts == 'iso') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          PARTS: ${{ inputs.parts }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import urllib.error
+          import urllib.request
+
+          tag = os.environ["TAG"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ.get("GH_TOKEN", "")
+          part = os.environ.get("PARTS", "")
+          if not token:
+              raise SystemExit("GH_TOKEN is empty; cannot read the release")
+          url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+          req = urllib.request.Request(
+              url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "User-Agent": "genestack-console-release",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as res:
+                  if res.status != 200:
+                      raise SystemExit(
+                          f"could not read GitHub Release {tag}: HTTP {res.status}"
+                      )
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  raise SystemExit(
+                      f"no GitHub Release for {tag}. "
+                      f"parts={part} uploads onto that release and does not create one "
+                      "or change latest. Publish the program first "
+                      "(parts=all or parts=binary)."
+                  )
+              raise SystemExit(
+                  f"could not read GitHub Release {tag}: HTTP {exc.code}"
+              )
+          print(f"release {tag} exists")
           PY
 
       - name: Compile tools
@@ -174,7 +235,10 @@ jobs:
           print(text)
           PY
 
+      # Tag pushes have no parts input; that is all, and this publish stays.
+      # disk and iso must not create a release or flip latest.
       - name: Publish GitHub Release
+        if: ${{ github.event_name != 'workflow_dispatch' || (inputs.parts != 'disk' && inputs.parts != 'iso') }}
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
@@ -204,7 +268,8 @@ jobs:
     if: >-
       github.repository == 'PIndustries/genestack-console' &&
       github.event.repository.fork == false &&
-      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v'))
+      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')) &&
+      (github.event_name != 'workflow_dispatch' || inputs.parts != 'binary')
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -227,25 +292,44 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y podman xz-utils
 
-      - name: Build the appliance disk and installer
+      # One job so podman keeps the appliance image between disk and ISO.
+      # The disk step builds the installer image first, then the qcow2, and
+      # that file is uploaded before the ISO is built. An ISO failure does
+      # not skip that upload and does not remove the qcow2 already attached.
+      - name: Build the appliance disk
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.parts != 'iso' }}
         run: |
           chmod 0755 dist/genestack-console-linux-amd64
-          ./scripts/build-appliance.sh dist/genestack-console-linux-amd64
+          ./scripts/build-appliance.sh dist/genestack-console-linux-amd64 disk
 
-      - name: Attach the disk and installer to the release
-        if: ${{ !cancelled() }}
+      - name: Attach the disk to the release
+        if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.parts != 'iso') }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.binary.outputs.tag }}
         run: |
           shopt -s nullglob
           disks=(dist/genestack-console-appliance-*.qcow2.xz)
-          isos=(dist/genestack-console-appliance-*.iso)
           if [ "${#disks[@]}" -eq 0 ]; then
             echo "no appliance qcow2 was built" >&2
             exit 1
           fi
           gh release upload "$TAG" "${disks[@]}" --clobber
+
+      - name: Build the installer ISO
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.parts != 'disk' }}
+        run: |
+          chmod 0755 dist/genestack-console-linux-amd64
+          ./scripts/build-appliance.sh dist/genestack-console-linux-amd64 iso
+
+      - name: Attach the installer to the release
+        if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.parts != 'disk') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.binary.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          isos=(dist/genestack-console-appliance-*.iso)
           if [ "${#isos[@]}" -eq 0 ]; then
             echo "no installer ISO was built" >&2
             exit 1

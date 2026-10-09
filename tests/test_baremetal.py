@@ -462,6 +462,9 @@ def _patch_provision_path(monkeypatch, ready=True):
     monkeypatch.setattr(redfish, "power", lambda *a: "ForceRestart")
     monkeypatch.setattr(baremetal, "talos_api_ready", lambda ip, log=None: ready)
     monkeypatch.setattr(
+        baremetal, "talos_insecure_maintenance", lambda ip, log=None: ready
+    )
+    monkeypatch.setattr(
         baremetal, "_prepare_pxe", lambda db, env, settings, log: {"ok": True}
     )
     if not ready:

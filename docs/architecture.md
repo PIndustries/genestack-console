@@ -49,7 +49,7 @@ Each server has its own next boot. The MAC address is the id of the network port
 - **talos** is served for that MAC only after the report is accepted. Talos is the operating system Kubernetes runs on for this install. The machine config is pushed after the wipe. It is not placed on the kernel command line.
 - **ubuntu** installs Ubuntu on that one machine. It uses the whole disk and the environment SSH public key. It does not require the commission wipe, and it does not install OpenStack or Kubernetes. The kernel and initrd are files you place at `data/pxe/ubuntu/vmlinuz` and `data/pxe/ubuntu/initrd`.
 
-An ISO boot is rejected for this path because it does not wipe the disks. A Talos ISO you boot yourself is a different start. Add the host by name and address, then Talos is already installed applies the config and does not power the machine. Ubuntu that is already installed is recorded with Already have an OS.
+An ISO boot is rejected for this path because it does not wipe the disks. A Talos ISO you boot yourself is a different start. Add the host by name and address, then Talos is already installed applies the config. A machine that already has Talos installed is rebooted into the installer when this console has its management port. If it cannot, the job names the one step left and waits for you to confirm that step. Ubuntu that is already installed is recorded with Already have an OS.
 
 ## Jobs
 

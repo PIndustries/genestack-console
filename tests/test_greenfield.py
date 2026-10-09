@@ -307,6 +307,7 @@ def test_host_boot_state_old_os_vs_maintenance(monkeypatch):
     from app.services import baremetal
 
     monkeypatch.setattr(baremetal, "talos_api_ready", lambda ip, log=None: True)
+    monkeypatch.setattr(baremetal, "talos_insecure_maintenance", lambda ip, log=None: True)
     monkeypatch.setattr(baremetal, "k8s_ready_for_ip", lambda ip, kube: True)
     assert baremetal.host_boot_state("10.200.0.41", "/kube") == "old-os"
     monkeypatch.setattr(baremetal, "k8s_ready_for_ip", lambda ip, kube: False)
@@ -327,6 +328,28 @@ def test_host_boot_state_old_os_vs_maintenance(monkeypatch):
     )
     monkeypatch.setattr(baremetal, "talos_api_ready", lambda ip, log=None: False)
     assert baremetal.host_boot_state("10.200.0.41", "/kube") == "down"
+
+
+def test_host_boot_state_certificate_required_is_not_fresh_maintenance(monkeypatch):
+    """TLS on :50000 plus a demand for a client cert is not maintenance."""
+    from datetime import datetime, timezone
+
+    from app.services import baremetal
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(baremetal, "talos_api_ready", lambda ip, log=None: True)
+    monkeypatch.setattr(baremetal, "talos_insecure_maintenance", lambda ip, log=None: False)
+    monkeypatch.setattr(baremetal, "k8s_ready_for_ip", lambda ip, kube: None)
+    assert (
+        baremetal.host_boot_state(
+            "10.200.0.41",
+            None,
+            require_fresh=True,
+            wiped_at=now,
+            talos_served_at=now,
+        )
+        == "installed"
+    )
 
 
 def test_k8s_ready_for_ip_matches_internal_ip(monkeypatch):

@@ -4,7 +4,7 @@
 // not power the machines. After that job succeeds, Deploy from infrastructure
 // starts OpenStack and does not run Talos bootstrap again.
 // Already have an OS only records Ubuntu that is already there.
-import { api, esc, skeletonHtml, toast } from "../api.js";
+import { api, downloadAuth, esc, skeletonHtml, toast } from "../api.js";
 import { canAdmin, canRun, gate } from "../store.js";
 import { openShell } from "./environment_terminal.js?v=ls48";
 import { ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
@@ -13,6 +13,7 @@ import { fetchMetalPath, osNameHtml } from "../metal_path.js";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
+// Worker and network stay checkboxes on Custom. They are not radios.
 const TOPOLOGY_PRESETS = {
   aio: {
     label: "All-in-One (single node)",
@@ -29,24 +30,14 @@ const TOPOLOGY_PRESETS = {
     desc: "Nova compute. No storage volumes on this machine.",
     roles: ["compute"],
   },
-  network: {
-    label: "Network",
-    desc: "OVN network node.",
-    roles: ["network"],
-  },
   storage: {
     label: "Storage",
     desc: "Dedicated storage node (longhorn)",
     roles: ["storage"],
   },
-  worker: {
-    label: "Worker",
-    desc: "Kubernetes workloads such as monitoring and gateways. No compute and no storage.",
-    roles: ["worker"],
-  },
   custom: {
     label: "Custom",
-    desc: "Manually select individual roles",
+    desc: "Tick each function. Worker is one of those checkboxes (Kubernetes workloads such as monitoring and gateways, no compute and no storage).",
     roles: [],
   },
 };
@@ -75,6 +66,7 @@ export function serversCardHtml() {
 #srv-card .card-empty .empty-hint { font-size:.7rem; color:var(--fg-muted, #555); margin-top:.3rem; }
 #srv-card .hint-row { display:flex; align-items:center; gap:.5rem; padding:.3rem 0; margin-bottom:.3rem; font-size:.72rem; color:var(--fg-muted, #666); }
 #srv-card .hint-row[hidden] { display:none !important; }
+#srv-card #srv-add-ssh[hidden] { display:none !important; }
 #srv-card .pill { display:inline-flex; align-items:center; padding:.15rem .45rem; border-radius:.2rem; font-size:.72rem; font-weight:500; }
 #srv-card .os-name { display:inline-flex; align-items:center; gap:.28rem; }
 #srv-card .os-mark { width:1rem; height:1rem; flex:none; display:block; }
@@ -140,8 +132,21 @@ export function serversCardHtml() {
     <span class="muted" id="srv-kicker">The list is these computers. Add a machine does not boot them.</span>
     <button class="btn-sm" id="srv-add-open" type="button" ${gate(canRun(), "operator")}>Add a machine</button>
     <button class="secondary btn-sm" id="srv-refresh" type="button">Refresh</button>
+    ${
+      canRun()
+        ? `<button type="button" class="secondary btn-sm" data-srv-dl="kubeconfig" title="Download the copy in this environment's vault">Kubeconfig</button>
+    <button type="button" class="secondary btn-sm" data-srv-dl="talosconfig" title="Download the copy in this environment's vault">Talosconfig</button>
+    <button type="button" class="secondary btn-sm" data-srv-renew="kubeconfig" title="Ask the cluster for a new client certificate and replace the vault copy">Regenerate kubeconfig</button>
+    <button type="button" class="secondary btn-sm" data-srv-renew="talosconfig" title="Ask the cluster for a new client certificate and replace the vault copy">Regenerate talosconfig</button>`
+        : ""
+    }
     <span id="srv-msg" class="muted"></span>
   </div>
+  ${
+    canRun()
+      ? `<p class="hint-row">Kubeconfig and Talosconfig are saved in this environment's vault. Download grabs that copy. Regenerate asks the cluster for a new client certificate, valid for one year, and replaces the vault copy.</p>`
+      : ""
+  }
   <div id="cluster-status-bar"></div>
   <p class="hint-row" id="srv-os-empty" hidden></p>
   <table>
@@ -163,7 +168,7 @@ export function serversCardHtml() {
     <p class="srv-become-note">Installs the selected rows. Already have an OS only records them.</p>
   </div>
   <div data-os-show="talos" id="srv-talos-actions">
-    <p class="hint-row" id="srv-hint">Talos is already installed applies the config to every saved address. It does not power the machines.</p>
+    <p class="hint-row" id="srv-hint">Talos is already installed applies the config to every saved address. When Talos is already running and this console has the management port, it reboots that machine into the installer. If it cannot, the job names the one step left and waits for you to confirm that step.</p>
     <div class="srv-flow-actions">
       <button class="btn-sm" id="srv-talos-installed" type="button">Talos is already installed</button>
       <button class="btn-sm" id="srv-talos-deploy" type="button" data-srv-talos-deploy disabled>Deploy from infrastructure</button>
@@ -215,6 +220,7 @@ let addModalKeyHandler = null;
 function openAddMachine() {
   const modal = document.getElementById("srv-add-modal");
   if (!modal) return;
+  resetAddDialogOs();
   modal.hidden = false;
   const input = document.getElementById("srv-add-hostname");
   if (input) input.focus();
@@ -256,7 +262,7 @@ function openMachineDetail(index) {
     ["Cluster", row.cluster || "—"],
     ["Reach", reach || "—"],
     ["Roles", roles.length ? roles.join(", ") : "No role"],
-    ["SSH user", row.ssh_user || "—"],
+    ...(row.os === "ubuntu" ? [["SSH user", row.ssh_user || "—"]] : []),
     ["Source", row.source || "—"],
     ["Management port", row.bmcHost || "—"],
   ];
@@ -275,6 +281,35 @@ function openMachineDetail(index) {
     <div class="row" style="gap:.5rem">${shell}${consoleBtn}</div>
     <p class="muted">Install, Save, and Remove stay on the row.</p>`;
   modal.hidden = false;
+}
+
+function noteCredentialDownload(source) {
+  if (source === "issued") {
+    toast("Regenerated. The new client certificate is in the vault and is valid for one year.", "ok", { timeout: 7000 });
+    return;
+  }
+  if (source === "filed") {
+    toast("Saved in this environment's vault.", "ok", { timeout: 7000 });
+    return;
+  }
+  if (source === "vault") {
+    toast("Downloaded from this environment's vault.", "ok", { timeout: 5000 });
+  }
+}
+
+async function downloadClientConfig(envId, kind, renew) {
+  if (!envId || (kind !== "kubeconfig" && kind !== "talosconfig")) return;
+  const filename = kind === "talosconfig" ? "talosconfig" : "kubeconfig";
+  try {
+    const source = await downloadAuth(
+      `/api/v1/environments/${encodeURIComponent(envId)}/access/${kind}`,
+      filename,
+      renew ? { method: "POST" } : undefined
+    );
+    noteCredentialDownload(source);
+  } catch (err) {
+    toast(`Download failed: ${err && err.message ? err.message : "unavailable"}`, "error");
+  }
 }
 
 export function wireServersCard(getEnvId) {
@@ -323,6 +358,16 @@ export function wireServersCard(getEnvId) {
     const rowEl = e.target.closest("#srv-tbody tr[data-row]");
     if (rowEl && !e.target.closest("button, input, a, select, label, .om-menu")) {
       openMachineDetail(Number(rowEl.dataset.row));
+      return;
+    }
+    const renew = e.target.closest("[data-srv-renew]");
+    if (renew && !renew.disabled) {
+      await downloadClientConfig(getEnvId(), renew.dataset.srvRenew, true);
+      return;
+    }
+    const cred = e.target.closest("[data-srv-dl]");
+    if (cred && !cred.disabled) {
+      await downloadClientConfig(getEnvId(), cred.dataset.srvDl, false);
       return;
     }
     if (e.target.closest("#srv-add-open")) {
@@ -409,8 +454,9 @@ function assignedRoleChips(roles) {
   return on.map((r) => `<span class="pill ok">${esc(ROLE_LABELS[r] || r)}</span>`).join(" ");
 }
 
-function roleEditor(scope, rowIdx, roles, sshUser) {
-  const ssh = sshUser == null
+function roleEditor(scope, rowIdx, roles, sshUser, os) {
+  // Talos has no SSH login, so this row has no SSH user field to submit.
+  const ssh = os === "talos" || sshUser == null
     ? ""
     : `<label class="muted" style="display:block;margin-top:.4rem;font-size:.75rem">SSH user
         <input type="text" data-ssh-user="${rowIdx}" value="${esc(sshUser || "")}" style="margin-left:.35rem" ${gate(canRun(), "operator")} />
@@ -1422,7 +1468,7 @@ function gateInstalled() {
   if (!btn) return;
   btn.disabled = !canAdmin();
   if (!canAdmin()) btn.title = "Requires admin role";
-  else btn.title = "Talos is already running, for example from an ISO. Does not power the machines.";
+  else btn.title = "Applies the Talos config. Reboots a machine into the installer when this console has its management port. If it cannot, the job names the one step left and waits for you to confirm that step.";
 }
 
 function osView() {
@@ -1937,7 +1983,7 @@ export async function loadServersCard(envId) {
   if (hint) {
     hint.textContent = ovhBound
       ? "Dedicated servers use a public NIC for management and a private NIC on the vRack."
-      : "Talos is already installed applies the config to every saved address. It does not power the machines.";
+      : "Talos is already installed applies the config to every saved address. When Talos is already running and this console has the management port, it reboots that machine into the installer. If it cannot, the job names the one step left and waits for you to confirm that step.";
   }
   rememberMetalPath(metalPath);
   window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: metalPath, quiet: true } }));
@@ -2061,7 +2107,7 @@ export async function loadServersCard(envId) {
             <td>${osNameHtml(machineOs)}</td>
             <td>${hostClusterCell(s, clusterIps)}</td>
             <td data-srv-reach="${esc(s.hostname || "")}">${checkingHtml()}</td>
-            <td>${roleEditor("inv", i, roles, s.ssh_user || "")}</td>
+            <td>${roleEditor("inv", i, roles, s.ssh_user || "", machineOs)}</td>
             <td class="srv-os-cell">
               ${osControlHtml(i, s, bootByName, becomeTargets[i], metalPath)}
               <button class="secondary btn-sm" type="button" data-save="${i}" ${gate(canRun(), "operator")}>Save</button>
@@ -2119,27 +2165,39 @@ export async function loadServersCard(envId) {
     return { ...req, count };
   });
 
+  const addOs = addDialogOsDefault();
+  const osChoice = (value) =>
+    `<label class="srv-os-choice${addOs === value ? " on" : ""}">` +
+    `<input type="radio" name="srv-add-os" value="${value}"${addOs === value ? " checked" : ""} ${gate(canRun(), "operator")} />` +
+    `${osNameHtml(value)}</label>`;
   const addHostHtml = `
-      <div class="sshkey-auth-section" style="margin-bottom:.4rem">
-        <label style="font-size:.8rem;display:flex;align-items:center;gap:.4rem">
-          <input type="radio" name="srv-auth-method" value="key" checked /> SSH Key (environment default)
-        </label>
-        <label style="font-size:.8rem;display:flex;align-items:center;gap:.4rem;margin-top:.2rem">
-          <input type="radio" name="srv-auth-method" value="password" /> Username &amp; Password
-        </label>
+      <div id="srv-add-os" class="srv-os-choices" role="radiogroup" aria-label="Operating system" style="margin:0 0 .55rem">
+        ${osChoice("talos")}${osChoice("ubuntu")}
       </div>
       <div id="srv-add-fields">
         <div class="row" style="flex-wrap:wrap;gap:.5rem;align-items:center">
           <input id="srv-add-hostname" type="text" placeholder="hostname" ${gate(canRun(), "operator")} />
           <input id="srv-add-ip" type="text" placeholder="IP address" ${gate(canRun(), "operator")} />
-          <input id="srv-add-ssh-user" type="text" placeholder="SSH user (default: root)" ${gate(canRun(), "operator")} />
-          <input id="srv-add-ssh-pass" type="password" placeholder="SSH password" style="display:none" ${gate(canRun(), "operator")} />
         </div>
-        <div class="srv-key-hint" style="font-size:.72rem;color:var(--fg-muted,#666);margin:.25rem 0">
-          <span>Auth: uses the environment's SSH key.</span>
-          <button type="button" data-srv-copy-key style="background:none;border:none;color:var(--accent,#4a9eff);cursor:pointer;font-size:.72rem;padding:0">Copy public key</button>
-          <span style="margin-left:.3rem">View on</span>
-          <button type="button" data-srv-view-key style="background:none;border:none;color:var(--accent,#4a9eff);cursor:pointer;font-size:.72rem;padding:0">Config tab → SSH Keys</button>
+        <div id="srv-add-ssh"${addOs === "ubuntu" ? "" : " hidden"}>
+          <div class="sshkey-auth-section" style="margin:.45rem 0 .4rem">
+            <label style="font-size:.8rem;display:flex;align-items:center;gap:.4rem">
+              <input type="radio" name="srv-auth-method" value="key" checked /> SSH Key (environment default)
+            </label>
+            <label style="font-size:.8rem;display:flex;align-items:center;gap:.4rem;margin-top:.2rem">
+              <input type="radio" name="srv-auth-method" value="password" /> Username &amp; Password
+            </label>
+          </div>
+          <div class="row" style="flex-wrap:wrap;gap:.5rem;align-items:center">
+            <input id="srv-add-ssh-user" type="text" placeholder="SSH user (default: root)" ${gate(canRun(), "operator")} />
+            <input id="srv-add-ssh-pass" type="password" placeholder="SSH password" style="display:none" ${gate(canRun(), "operator")} />
+          </div>
+          <div class="srv-key-hint" style="font-size:.72rem;color:var(--fg-muted,#666);margin:.25rem 0">
+            <span>Auth: uses the environment's SSH key.</span>
+            <button type="button" data-srv-copy-key style="background:none;border:none;color:var(--accent,#4a9eff);cursor:pointer;font-size:.72rem;padding:0">Copy public key</button>
+            <span style="margin-left:.3rem">View on</span>
+            <button type="button" data-srv-view-key style="background:none;border:none;color:var(--accent,#4a9eff);cursor:pointer;font-size:.72rem;padding:0">Config tab → SSH Keys</button>
+          </div>
         </div>
         <p class="muted" style="margin:.35rem 0 .2rem">Saving records the machine. It does not boot it.</p>
         <div style="margin-top:.35rem;font-size:.78rem;color:var(--fg-muted,#888)">Topology</div>
@@ -2159,8 +2217,13 @@ export async function loadServersCard(envId) {
   renderClusterStatus(clusterStatus);
   // Render topology preset selector
   renderTopologySelector();
+  // Talos has no SSH login. The OS radio only shows or hides that block.
+  document.querySelectorAll('#srv-add-os input[name="srv-add-os"]').forEach((radio) => {
+    radio.addEventListener("change", paintAddDialogOs);
+  });
+  paintAddDialogOs();
   // Toggle password field visibility based on auth method
-  const authRadios = document.querySelectorAll('input[name="srv-auth-method"]');
+  const authRadios = document.querySelectorAll('#srv-add-ssh input[name="srv-auth-method"]');
   authRadios.forEach(r => r.addEventListener('change', () => {
     const passField = document.getElementById('srv-add-ssh-pass');
     if (passField) passField.style.display = r.value === 'password' && r.checked ? '' : 'none';
@@ -2555,15 +2618,35 @@ export function destroyServersCard() {
   }
 }
 
+function addDialogOsDefault() {
+  return osView() === "ubuntu" ? "ubuntu" : "talos";
+}
+
+function paintAddDialogOs() {
+  const picked = document.querySelector('#srv-add-os input[name="srv-add-os"]:checked');
+  const ubuntu = !!(picked && picked.value === "ubuntu");
+  const block = document.getElementById("srv-add-ssh");
+  if (block) block.hidden = !ubuntu;
+  document.querySelectorAll("#srv-add-os .srv-os-choice").forEach((label) => {
+    const radio = label.querySelector("input");
+    label.classList.toggle("on", !!(radio && radio.checked));
+  });
+}
+
+function resetAddDialogOs() {
+  const want = addDialogOsDefault();
+  document.querySelectorAll('#srv-add-os input[name="srv-add-os"]').forEach((radio) => {
+    radio.checked = radio.value === want;
+  });
+  paintAddDialogOs();
+}
+
 async function addHost(envId, addBtn = null) {
   const card = document.getElementById("srv-card");
-  const authMethod = card?.querySelector('input[name="srv-auth-method"]:checked')?.value || "key";
   const err = document.getElementById("srv-add-err");
   if (err) err.innerHTML = "";
   const hostname = (document.getElementById("srv-add-hostname") || {}).value || "";
   const ip = (document.getElementById("srv-add-ip") || {}).value || "";
-  const sshUser = (document.getElementById("srv-add-ssh-user") || {}).value || "";
-  const sshPass = (document.getElementById("srv-add-ssh-pass") || {}).value || "";
   // Resolve roles from topology preset or manual checkboxes.
   const topoVal = card?.querySelector('input[name="srv-topology"]:checked')?.value || "control";
   let roles;
@@ -2578,15 +2661,21 @@ async function addHost(envId, addBtn = null) {
     return;
   }
   if (addBtn) { addBtn.disabled = true; addBtn.textContent = "Adding…"; }
+  const ubuntu = card?.querySelector('input[name="srv-add-os"]:checked')?.value === "ubuntu";
   const body = {
     hostname: hostname.trim(),
     ip: ip.trim() || null,
-    ssh_user: sshUser.trim() || null,
     roles,
-    ssh_auth_method: authMethod,
   };
-  if (authMethod === "password" && sshPass) {
-    body.ssh_password = sshPass;
+  // POST /servers/static has no os field. Talos has no SSH login, so those
+  // keys stay off the body even if the hidden inputs still hold a value.
+  if (ubuntu) {
+    const authMethod = card?.querySelector('#srv-add-ssh input[name="srv-auth-method"]:checked')?.value || "key";
+    const sshUser = (document.getElementById("srv-add-ssh-user") || {}).value || "";
+    const sshPass = (document.getElementById("srv-add-ssh-pass") || {}).value || "";
+    body.ssh_user = sshUser.trim() || null;
+    body.ssh_auth_method = authMethod;
+    if (authMethod === "password" && sshPass) body.ssh_password = sshPass;
   }
   try {
     await api(`/api/v1/environments/${encodeURIComponent(envId)}/servers/static`, {

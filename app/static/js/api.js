@@ -214,11 +214,12 @@ export async function api(path, opts = {}) {
 }
 
 // Authenticated file download (kubeconfig / talosconfig / similar blobs).
-export async function downloadAuth(path, filename) {
-  let res = await authedFetch(path, { headers: { Accept: "*/*" } });
+export async function downloadAuth(path, filename, opts = {}) {
+  const method = (opts && opts.method) || "GET";
+  let res = await authedFetch(path, { method, headers: { Accept: "*/*" } });
   if (res.status === 401 && getRefresh()) {
     const renewed = await refreshSession();
-    if (renewed) res = await authedFetch(path, { headers: { Accept: "*/*" } });
+    if (renewed) res = await authedFetch(path, { method, headers: { Accept: "*/*" } });
   }
   if (!res.ok) {
     const text = await res.text();
@@ -230,6 +231,7 @@ export async function downloadAuth(path, filename) {
     }
     throw httpError(res, data, text);
   }
+  const source = res.headers.get("X-Genestack-Credential") || "";
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -240,6 +242,7 @@ export async function downloadAuth(path, filename) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  return source;
 }
 
 // ---------- shared UI helpers ----------

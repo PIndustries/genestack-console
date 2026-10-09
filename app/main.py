@@ -72,6 +72,7 @@ from app.routers import (
     traces,
     ui,
     update,
+    vault,
     vms,
     workflow,
 )
@@ -325,9 +326,10 @@ def create_app() -> FastAPI:
     app.include_router(obs_proxy.router)
     app.include_router(jobs.router)
 
-    # Providers: OVH and hardware accounts.
+    # Providers: OVH, hardware accounts, and the tenant password vault.
     app.include_router(ovh.router)
     app.include_router(hardware_accounts.router)
+    app.include_router(vault.router)
 
     # Audit and Genestack service/state reads.
     app.include_router(audit.router)

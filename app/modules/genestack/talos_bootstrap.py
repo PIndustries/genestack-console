@@ -23,7 +23,11 @@ OPERATION = {
         "and install disk come from the doc's talos: section (defaults: "
         "env name, /dev/sda). Note: pin kube-ovn to v1.14.10 for talos and "
         "boot nodes from a Talos Image Factory image with iscsi-tools + "
-        "util-linux-tools extensions. Stops at the first failing phase."
+        "util-linux-tools extensions. Stops at the first failing phase. "
+        "A machine whose certificate does not match the saved config is "
+        "rebooted into the installer when this console has its management "
+        "port. Otherwise the job names the one step left and waits for you "
+        "to confirm that step."
     ),
     "required_role": "admin",
     "backend": "genestack",
