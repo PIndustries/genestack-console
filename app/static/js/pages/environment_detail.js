@@ -21,7 +21,7 @@ import { reachCardHtml, wireReachCard, loadReachCard, destroyReachCard } from ".
 import { hostsCardHtml, wireHostsCard, loadHostsCard, destroyHostsCard } from "./environment_hosts.js";
 import { appsCardHtml, wireAppsCard, loadAppsCard, destroyAppsCard } from "./environment_apps.js?v=slot2";
 import { observeCardHtml, wireObserveCard, loadObserveCard, destroyObserveCard } from "./environment_observe.js";
-import { envVaultCardHtml, wireEnvVault, loadEnvVault, destroyEnvVault } from "./environment_vault.js?v=ls62";
+import { envVaultCardHtml, wireEnvVault, loadEnvVault, destroyEnvVault } from "./environment_vault.js?v=ls63";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
 
 export const title = "Environment Detail";

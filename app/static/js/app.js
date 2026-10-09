@@ -10,7 +10,7 @@ import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js?v=ls57";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls62";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls63";
 import { mountQuake, destroyAllSessions } from "./pages/environment_terminal.js?v=ls48";
 import * as envWizard from "./pages/env_wizard.js?v=ls56";
 import * as admin from "./pages/admin.js";

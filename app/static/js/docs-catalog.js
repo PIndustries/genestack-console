@@ -82,6 +82,28 @@
       ],
     },
     {
+      id: "vault",
+      title: "Vault",
+      blurb: "Names stored for one environment. Values stay in the console. An admin can read, replace, and delete a record. The list never includes a value.",
+      routes: [
+        { m: "GET", p: "/api/v1/vault/items?tenant_id=&environment_id=", d: "Names and kinds for that environment. No values. Viewer." },
+        { m: "GET", p: "/api/v1/vault/records?tenant_id=&environment_id=&name=", d: "One record, including its value. Admin. Not cached. The name is a query parameter because names contain slashes." },
+        {
+          m: "PUT",
+          p: "/api/v1/vault/records",
+          d: "Replace ssh, a bmc/{machine} password, kubeconfig, talosconfig, or a note. Admin. The value is not returned. A kubeconfig or talosconfig must be that kind of file. The file on this console stays.",
+          body: '{"tenant_id":"$TENANT","environment_id":"$ENV","name":"lab","value":"…"}',
+        },
+        { m: "DELETE", p: "/api/v1/vault/records?tenant_id=&environment_id=&name=", d: "Remove that record. Admin. Deleting kubeconfig or talosconfig leaves the file on this console. Deleting ssh clears the key pair. Deleting a bmc password leaves the machine." },
+        {
+          m: "PUT",
+          p: "/api/v1/vault/items",
+          d: "Store a note. The name is saved under secret/. Admin. The value is not returned.",
+          body: '{"tenant_id":"$TENANT","environment_id":"$ENV","name":"lab","value":"…"}',
+        },
+      ],
+    },
+    {
       id: "reach",
       title: "Reach",
       blurb: "How this deploy host reaches an environment. WireGuard is served here. Tailscale and Cloudflare Tunnel are joined here. Secrets are write-only.",

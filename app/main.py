@@ -73,6 +73,7 @@ from app.routers import (
     ui,
     update,
     vault,
+    vault_records,
     vms,
     workflow,
 )
@@ -330,6 +331,7 @@ def create_app() -> FastAPI:
     app.include_router(ovh.router)
     app.include_router(hardware_accounts.router)
     app.include_router(vault.router)
+    app.include_router(vault_records.router)
 
     # Audit and Genestack service/state reads.
     app.include_router(audit.router)

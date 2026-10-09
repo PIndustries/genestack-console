@@ -29,7 +29,7 @@ Changelog is the button under that link. It lists the public pipeline and the re
 
 ## One environment
 
-Open an environment and the sidebar gains a second block: Overview, Image cache, Machines, Kubernetes, OpenStack, Observe, Vault, Settings. Vault lists the names stored for this environment. Values stay in the console. Download on kubeconfig and talosconfig grabs that copy. Regenerate stays on Machines. The screen is `app/static/js/pages/environment_detail.js`. It pulls the other cards in. Those cards are the other files whose names start with `environment_`. `environment_vault.js` is the Vault tab.
+Open an environment and the sidebar gains a second block: Overview, Image cache, Machines, Kubernetes, OpenStack, Observe, Vault, Settings. Vault lists the names stored for this environment. An admin can view, edit, and delete a record. The list does not include the values. Download on kubeconfig and talosconfig grabs that copy. Regenerate stays on Machines. The screen is `app/static/js/pages/environment_detail.js`. It pulls the other cards in. Those cards are the other files whose names start with `environment_`. `environment_vault.js` is the Vault tab.
 
 The bar above the tabs is the mode for this environment. Look around is selected when jobs only write a log. Apply is selected when jobs change the machines. The selected side is the mode you are in. It does not edit `config.yaml` and it does not restart a service. An operator can change it. A viewer sees it and cannot press it.
 
