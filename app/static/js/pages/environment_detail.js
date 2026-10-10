@@ -3,7 +3,7 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls60";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls65";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
@@ -13,7 +13,7 @@ import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard }
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap } from "./environment_deploy_map.js?v=ls45";
+import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap, pauseMapPoll, refreshFleetLine } from "./environment_deploy_map.js?v=ls64";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";
@@ -273,6 +273,7 @@ function switchTab(tabName, ptab, opts = {}) {
   if (panel) panel.classList.add("active");
   if (resolved === "platform") switchPlatformSubtab(platformPtab);
   else if (resolved === "settings") switchSettingsSubtab(stab[tabName] || ptab || "config");
+  if (resolved !== "workflow") pauseMapPoll();
   loadTab(resolved);
   if (resolved === "settings") loadDescriptor().catch(() => {});
   if (!opts.silent && envId) {
@@ -320,10 +321,11 @@ function switchPlatformSubtab(name) {
 
 // The fleet line lives in #env-health. Overview loads it with the map.
 // Any other first tab still needs that same read, or the line stays on
-// "Overview loading…" until the reader opens Overview.
+// "Overview loading…". That read is inventory and the registry. The map
+// poll stays on Overview, where its Kubernetes and cloud calls belong.
 function loadFleetLine() {
   if (!envId || activeTab === "workflow") return;
-  loadDeployMap(envId);
+  refreshFleetLine(envId);
 }
 
 function loadPlatformLayer(name) {
@@ -713,7 +715,7 @@ export async function render(root, { param, query } = {}) {
     if (activeTab === "settings" || activeTab === "expert") {
       loadDescriptor().catch(() => {});
     }
-    if (activeTab === "platform") loadClusterCard(envId);
+    if (activeTab === "platform" && activePtab === "kubernetes") loadClusterCard(envId);
     loadFleetLine();
   } else {
     loadComponentsCard("", null);
@@ -835,7 +837,7 @@ async function loadAll() {
   if (activeTab === "settings" || activeTab === "expert") {
     loadDescriptor().catch(() => {});
   }
-  if (activeTab === "platform") loadClusterCard(envId);
+  if (activeTab === "platform" && activePtab === "kubernetes") loadClusterCard(envId);
   loadFleetLine();
 }
 

@@ -22,11 +22,10 @@ Before any of that runs for real, each node is checked with
 already has a config answers ``tls: certificate required``. Applying a config
 is what leaves maintenance mode. When the saved client certificate still
 matches, the installed machine config stays in place and bootstrap continues.
-When it does not match and the console has a management port, the console
-reboots that machine into the Talos installer and applies the saved config.
-That is the reconcile: desired config versus the live certificate, with no
-confirm step. A machine with no management port is the one case the job
-cannot move, so it names that step and waits.
+When it does not match, the job names that machine and waits. Confirming
+replaces the running install. A management port can reboot that named machine
+into the Talos installer only after that confirm. A machine with no
+management port stays the manual step: boot the installer, then confirm.
 
 Two doc notes are surfaced in the op logs, never enforced:
   - pin kube-ovn to v1.14.10 in helm-chart-versions.yaml for talos
@@ -42,6 +41,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -400,6 +400,118 @@ def install_image_from_doc(doc: dict[str, Any]) -> str:
     raw = talos_cfg.get("install_image") if isinstance(talos_cfg, dict) else None
     image = str(raw or "").strip()
     return image or DEFAULT_TALOS_INSTALL_IMAGE
+
+
+def image_has_longhorn_extensions(image: str) -> bool:
+    """True when the install image names the factory schematic Longhorn needs."""
+    text = str(image or "")
+    if DEFAULT_FACTORY_SCHEMATIC in text:
+        return True
+    return all(name in text for name in FACTORY_IMAGE_EXTENSIONS)
+
+
+_CLIENT_TAG_RE = re.compile(r"Tag:\s*(v[0-9][^\s]*)")
+_client_tag_at = 0.0
+_client_tag = ""
+
+
+def talosctl_client_tag() -> str:
+    """Tag from ``talosctl version --client``, cached for a minute. Empty if absent."""
+    global _client_tag_at, _client_tag
+    now = time.monotonic()
+    if now - _client_tag_at < 60:
+        return _client_tag
+    _client_tag_at = now
+    binary = talosctl_bin()
+    if not binary:
+        _client_tag = ""
+        return ""
+    try:
+        proc = subprocess.run(
+            [binary, "version", "--client"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _client_tag = ""
+        return ""
+    match = _CLIENT_TAG_RE.search(proc.stdout or "")
+    _client_tag = match.group(1) if match else ""
+    return _client_tag
+
+
+def _readable_text(path: Path) -> str:
+    try:
+        if not path.is_file() or path.stat().st_size > 1_000_000:
+            return ""
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+
+
+def _readable_kubeconfig(path: Path) -> bool:
+    text = _readable_text(path)
+    return "clusters:" in text and ("apiVersion:" in text or "kind:" in text)
+
+
+def _readable_talosconfig(path: Path) -> bool:
+    text = _readable_text(path)
+    return "contexts:" in text and "ca:" in text
+
+
+def install_facts(
+    env: Environment,
+    doc: dict[str, Any] | None,
+    *,
+    kubeconfig_path: str | None,
+) -> dict[str, Any]:
+    """Image, client, and whether this console can read a kubeconfig.
+
+    This does not probe nodes. A Ready control plane is a separate read.
+    """
+    image = install_image_from_doc(doc or {})
+    kube_ok = False
+    candidates: list[Path] = []
+    if kubeconfig_path:
+        candidates.append(Path(kubeconfig_path))
+    config_dir = str(getattr(env, "genestack_config_dir", "") or "").strip()
+    root = Path(config_dir).expanduser() if config_dir else None
+    if root is not None:
+        candidates.append(root / KUBECONFIG_FALLBACK_RELPATH)
+        candidates.append(root / "talos" / "kubeconfig")
+    for path in candidates:
+        if _readable_kubeconfig(path):
+            kube_ok = True
+            break
+    talos_saved = bool(root is not None and _readable_talosconfig(root / "talos" / "talosconfig"))
+    tag = talosctl_client_tag()
+    return {
+        "client_pin": TALOSCTL_VERSION,
+        "client_version": tag,
+        "client_found": bool(tag) or talosctl_bin() is not None,
+        "boot_image": DEFAULT_TALOS_VERSION,
+        "install_image": image,
+        "extensions_present": image_has_longhorn_extensions(image),
+        "extensions": ["iscsi-tools", "util-linux-tools"],
+        "kubeconfig_readable": kube_ok,
+        "talosconfig_saved": talos_saved,
+    }
+
+
+def confirmed_hostnames(raw: Any) -> set[str]:
+    """Hostnames the user already confirmed for replacement."""
+    if isinstance(raw, str):
+        raw = [part for part in raw.split(",") if part.strip()]
+    if not isinstance(raw, (list, tuple, set)):
+        return set()
+    found: set[str] = set()
+    for item in raw:
+        name = str(item or "").strip()
+        if name and len(name) <= 200:
+            found.add(name)
+    return found
 
 
 def _rewrite_kubeconfig_text(text: str, server_url: str) -> str:
@@ -1235,6 +1347,61 @@ def installed_talos_message(hostname: str, ip: str) -> str:
     return str(installed_talos_guidance(hostname, ip)["error"])
 
 
+def replace_install_step(
+    hostname: str,
+    ip: str,
+    *,
+    detail: str = "",
+    why: str = "",
+) -> dict[str, Any]:
+    """Ask before rebooting one named machine. Does not power it."""
+    said = _talos_said(detail)
+    extra = f" {why.strip()}" if str(why or "").strip() else ""
+    guide = _guide(
+        kind="boot-installer",
+        hostname=hostname,
+        ip=ip,
+        title=f"Replace the Talos install on {hostname}",
+        detail=(
+            f"{hostname} at {ip} is already running Talos. "
+            "The saved identity does not match this machine. "
+            "Replacing reboots it into the installer and removes the "
+            f"running install. This console can do that reboot after you "
+            f"confirm.{extra}{said}"
+        ),
+        action=f"Confirm to replace the Talos install on {hostname}.",
+        confirm="Replace this install",
+        error=(
+            f"{hostname} at {ip} is not in Talos maintenance mode. "
+            "The saved identity does not match this machine. "
+            "This console can reboot it into the installer, and that "
+            "removes the running install. Confirm on this job to replace "
+            f"this install.{extra}{said}"
+        ),
+    )
+    guide["user_step"]["reboot"] = "1"
+    return guide
+
+
+def installed_machine_action(
+    hostname: str,
+    ip: str,
+    *,
+    can_reboot: bool,
+    picked: bool,
+    detail: str = "",
+) -> dict[str, Any]:
+    """A management port reboots only the hostname the user confirmed."""
+    if can_reboot and picked:
+        return {"reboot": True}
+    if can_reboot:
+        return {
+            "reboot": False,
+            "stop": replace_install_step(hostname, ip, detail=detail),
+        }
+    return {"reboot": False, "stop": installed_talos_guidance(hostname, ip)}
+
+
 def _power_on_guide(hostname: str, ip: str, *, detail: str = "") -> dict[str, Any]:
     said = _talos_said(detail)
     return _guide(
@@ -1288,8 +1455,9 @@ def _reboot_into_maintenance(
     ctl: str,
     probe_kwargs: dict[str, Any],
     detail: str,
+    confirmed: bool,
 ) -> dict[str, Any]:
-    """Power the node into the Talos installer when this console can."""
+    """Power one named node into the installer after the user confirms."""
     node = _baremetal_for_host(db, env, hostname)
     if node is None or not str(getattr(node, "bmc_host", "") or "").strip():
         return _boot_installer_guide(
@@ -1301,8 +1469,16 @@ def _reboot_into_maintenance(
             ),
             detail=detail,
         )
+    if not confirmed:
+        log(
+            f"[talos] {hostname} at {ip} is already running Talos. "
+            "The saved identity does not match. Replacing it reboots the "
+            "machine into the installer and removes the running install. "
+            "Waiting for confirm."
+        )
+        return replace_install_step(hostname, ip, detail=detail)
     log(
-        f"[talos] {hostname} at {ip} is not in maintenance mode. "
+        f"[talos] {hostname} at {ip} was confirmed. "
         "The certificate on the machine does not match this environment's "
         "config. This console is rebooting it into the Talos installer. "
         "That replaces the Talos install that is running."
@@ -1406,6 +1582,7 @@ def _prepare_live_nodes(
     remote_env: dict[str, str] | None,
     agent_env_id: str | None,
     extra_env: dict[str, str] | None,
+    replace_hosts: set[str] | None = None,
 ) -> dict[str, Any]:
     """Probe each node before gen config. Never mint an identity we cannot apply."""
     nodes = list(plan["control_planes"]) + list(plan["workers"])
@@ -1460,6 +1637,7 @@ def _prepare_live_nodes(
                 ctl=ctl,
                 probe_kwargs=probe_kwargs,
                 detail=detail,
+                confirmed=hostname in (replace_hosts or set()),
             )
             if recovered.get("ok"):
                 modes[hostname] = "maintenance"
@@ -1490,10 +1668,14 @@ def _prepare_live_nodes(
     return {"ok": True, "commands": commands}
 
 
-def log_talos_notes(log: LogFn | None) -> None:
+def log_talos_notes(log: LogFn | None, *, install_image: str = "") -> None:
     """Surface the docs/k8s-talos.md caveats (advisory, never enforced)."""
     if log is None:
         return
+    log(
+        f"[talos] note: client pin {TALOSCTL_VERSION}; boot image default "
+        f"{DEFAULT_TALOS_VERSION}. An older client cannot patch a newer node."
+    )
     log(
         f"[talos] note: pin kube-ovn to {KUBE_OVN_TALOS_PIN} in "
         "helm-chart-versions.yaml for talos (docs/k8s-talos.md)"
@@ -1502,6 +1684,11 @@ def log_talos_notes(log: LogFn | None) -> None:
         "[talos] note: nodes must boot a Talos Image Factory image with "
         f"{' + '.join(FACTORY_IMAGE_EXTENSIONS)} extensions (longhorn needs them)"
     )
+    if install_image and not image_has_longhorn_extensions(install_image):
+        log(
+            "[talos] note: this install image does not include iscsi-tools "
+            "and util-linux-tools. Longhorn needs them."
+        )
 
 
 def run_talos_bootstrap(
@@ -1516,6 +1703,7 @@ def run_talos_bootstrap(
     remote_env: dict[str, str] | None = None,
     agent_env_id: str | None = None,
     db: Any | None = None,
+    replace_hosts: Any = None,
 ) -> dict[str, Any]:
     """Run the talos bootstrap plan over the agent/ssh executor via the bridge.
 
@@ -1570,7 +1758,10 @@ def run_talos_bootstrap(
             "Set private_ip (vRack) on each host so the cluster fabric is not "
             "exposed to the internet"
         )
-    log_talos_notes(log)
+    log_talos_notes(log, install_image=str(plan.get("install_image") or ""))
+    picked = confirmed_hostnames(replace_hosts)
+    if picked:
+        log("[talos] replace confirmed for " + ", ".join(sorted(picked)))
     if allow_existing:
         log("[talos] using the Talos identity already saved for this environment")
 
@@ -1611,6 +1802,7 @@ def run_talos_bootstrap(
                 remote_env=remote_env,
                 agent_env_id=agent_env_id,
                 extra_env=extra_env,
+                replace_hosts=picked,
             )
             if not prepared.get("ok"):
                 message = str(

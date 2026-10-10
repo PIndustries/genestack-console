@@ -113,6 +113,7 @@ _USER_STEP_KEYS = (
     "detail",
     "action",
     "confirm",
+    "reboot",
 )
 
 
@@ -128,6 +129,36 @@ def _public_user_step(raw: Any) -> dict[str, str] | None:
     step["kind"] = kind[:64]
     step["confirm"] = confirm[:160]
     return step
+
+
+def merge_confirmed_replace(params: Any, user_step: Any) -> dict[str, Any]:
+    """Carry a confirmed hostname into the next run of the same job.
+
+    The confirm button retries with the same params. A boot-installer step
+    with reboot "1" is the user naming that one machine. Other drifted
+    machines stay on their own confirm.
+    """
+    out = dict(params) if isinstance(params, dict) else {}
+    if not isinstance(user_step, dict):
+        return out
+    if str(user_step.get("kind") or "").strip() != "boot-installer":
+        return out
+    if str(user_step.get("reboot") or "").strip() != "1":
+        return out
+    host = str(user_step.get("hostname") or "").strip()
+    if not host:
+        return out
+    current = out.get("replace_hosts")
+    if isinstance(current, str):
+        hosts = [part.strip() for part in current.split(",") if part.strip()]
+    elif isinstance(current, list):
+        hosts = [str(item).strip() for item in current if str(item).strip()]
+    else:
+        hosts = []
+    if host not in hosts:
+        hosts.append(host)
+    out["replace_hosts"] = hosts
+    return out
 
 
 def effective_timeout_seconds(op: OperationSpec | None, settings: Settings) -> int:

@@ -1087,13 +1087,31 @@ def test_talos_bootstrap_reboots_into_maintenance_then_applies(
     resp = _talos_job(client, admin_headers, env["id"])
     assert resp.status_code == 201, resp.text
     job = resp.json()
-    assert job["status"] == "success", job["error"]
-    assert not job.get("user_step")
-    assert calls == [("cp1", "talos", True, False, True)]
-    assert any(
-        "apply-config" in argv and "--insecure" in argv for argv in captured
+    assert job["status"] == "failed"
+    assert calls == []
+    step = job["user_step"]
+    assert step["kind"] == "boot-installer"
+    assert step["hostname"] == "cp1"
+    assert step["confirm"] == "Replace this install"
+    assert step["reboot"] == "1"
+    assert "removes the running install" in step["detail"]
+    assert not any("apply-config" in argv for argv in captured)
+    assert "rebooting it into the Talos installer" not in _job_log(
+        client, admin_headers, job["id"]
     )
-    log_text = _job_log(client, admin_headers, job["id"])
+
+    retry = client.post(
+        f"/api/v1/jobs/{job['id']}/retry",
+        headers=admin_headers,
+        json={"run_sync": True},
+    )
+    assert retry.status_code == 201, retry.text
+    job2 = retry.json()
+    assert job2["status"] == "success", job2.get("error")
+    assert calls == [("cp1", "talos", True, False, True)]
+    assert job2["params"]["replace_hosts"] == ["cp1"]
+    assert any("apply-config" in argv and "--insecure" in argv for argv in captured)
+    log_text = _job_log(client, admin_headers, job2["id"])
     assert "rebooting it into the Talos installer" in log_text
     assert "back in maintenance mode" in log_text
 
@@ -1138,14 +1156,26 @@ def test_talos_bootstrap_reconciles_a_mismatched_certificate(
     resp = _talos_job(client, admin_headers, env["id"])
     assert resp.status_code == 201, resp.text
     job = resp.json()
-    assert job["status"] == "success", job["error"]
-    assert not job.get("user_step")
-    assert calls == [("cp1", "talos", True, False, True)]
-    assert any(
-        "apply-config" in argv and "--insecure" in argv for argv in captured
+    assert job["status"] == "failed"
+    assert calls == []
+    assert job["user_step"]["reboot"] == "1"
+    assert job["user_step"]["confirm"] == "Replace this install"
+    assert "does not match" in _job_log(client, admin_headers, job["id"])
+
+    other = _talos_job(
+        client, admin_headers, env["id"], params={"replace_hosts": ["other"]}
     )
-    log_text = _job_log(client, admin_headers, job["id"])
-    assert "does not match" in log_text
+    assert other.status_code == 201, other.text
+    assert other.json()["status"] == "failed"
+    assert calls == []
+
+    picked = _talos_job(
+        client, admin_headers, env["id"], params={"replace_hosts": ["cp1"]}
+    )
+    assert picked.status_code == 201, picked.text
+    assert picked.json()["status"] == "success", picked.json().get("error")
+    assert calls == [("cp1", "talos", True, False, True)]
+    assert any("apply-config" in argv and "--insecure" in argv for argv in captured)
 
 
 def test_talos_bootstrap_down_node_does_not_write_an_identity(
@@ -1171,3 +1201,80 @@ def test_talos_bootstrap_down_node_does_not_write_an_identity(
     assert job["user_step"]["confirm"] == "It is on — continue"
     assert not any(argv[1:3] == ["gen", "config"] for argv in captured)
     assert not (config_dir / "talos" / "secrets.yaml").exists()
+
+
+def test_install_check_names_the_image_and_the_kubeconfig(
+    client, admin_headers, tmp_path
+):
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir)
+    )
+    first = client.get(
+        f"/api/v1/environments/{env['id']}/install-check",
+        headers=admin_headers,
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["client_pin"] == "v1.14.2"
+    assert body["boot_image"] == "v1.13.9"
+    assert body["extensions_present"] is True
+    assert body["kubeconfig_readable"] is False
+    assert body["talosconfig_saved"] is False
+    assert body["extensions"] == ["iscsi-tools", "util-linux-tools"]
+
+    vanilla = (
+        DOC_ONE_CP
+        + "talos:\n  install_image: factory.talos.dev/installer/vanilla:v1.14.2\n"
+    )
+    _put_doc(client, admin_headers, env["id"], doc=vanilla)
+    missing = client.get(
+        f"/api/v1/environments/{env['id']}/install-check",
+        headers=admin_headers,
+    )
+    assert missing.status_code == 200, missing.text
+    assert missing.json()["extensions_present"] is False
+
+    kube = config_dir / "inventory" / "artifacts"
+    kube.mkdir(parents=True)
+    (kube / "admin.conf").write_text(
+        "apiVersion: v1\nkind: Config\nclusters:\n- name: c\n",
+        encoding="utf-8",
+    )
+    readable = client.get(
+        f"/api/v1/environments/{env['id']}/install-check",
+        headers=admin_headers,
+    )
+    assert readable.json()["kubeconfig_readable"] is True
+
+
+def test_replace_waits_until_that_machine_is_named():
+    from app.services.job_runner import merge_confirmed_replace
+    from app.services.talos import installed_machine_action
+
+    waiting = installed_machine_action(
+        "cp1", "10.0.0.11", can_reboot=True, picked=False
+    )
+    assert waiting["reboot"] is False
+    assert waiting["stop"]["user_step"]["reboot"] == "1"
+    assert waiting["stop"]["user_step"]["confirm"] == "Replace this install"
+    assert waiting["stop"]["user_step"]["hostname"] == "cp1"
+
+    go = installed_machine_action(
+        "cp1", "10.0.0.11", can_reboot=True, picked=True
+    )
+    assert go == {"reboot": True}
+
+    manual = installed_machine_action(
+        "cp1", "10.0.0.11", can_reboot=False, picked=False
+    )
+    assert manual["stop"]["user_step"]["confirm"] == "The installer is up — continue"
+    assert "reboot" not in manual["stop"]["user_step"]
+
+    merged = merge_confirmed_replace({}, waiting["stop"]["user_step"])
+    assert merged["replace_hosts"] == ["cp1"]
+    again = merge_confirmed_replace(merged, waiting["stop"]["user_step"])
+    assert again["replace_hosts"] == ["cp1"]
+    plain = merge_confirmed_replace({}, manual["stop"]["user_step"])
+    assert "replace_hosts" not in plain

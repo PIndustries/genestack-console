@@ -4602,7 +4602,30 @@ function scheduleMetrics() {
   }, METRICS_MS);
 }
 
+function overviewOpen() {
+  const panel = document.querySelector('.tab-panel[data-panel="workflow"]');
+  return !!(panel && panel.classList.contains("active"));
+}
+
+// The map card stays in the page on every tab. Polling it from Machines
+// fills the browser's six connections with Kubernetes and cloud calls, and
+// Add a machine then dies as "Request timed out" while the host still answers.
+export function pauseMapPoll() {
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  if (metricsTimer) {
+    clearTimeout(metricsTimer);
+    metricsTimer = null;
+  }
+}
+
 function schedule() {
+  if (!overviewOpen()) {
+    pauseMapPoll();
+    return;
+  }
   if (timer) clearTimeout(timer);
   const running = isLive() || !!(pipe && pipe.running) || (job && ACTIVE.has(String(job.status || "")));
   const pxeHotNow = ((snap && snap.pxe && snap.pxe.hosts) || []).some((h) => h && pxeHot(h));
@@ -4611,13 +4634,44 @@ function schedule() {
 }
 
 async function tick() {
-  if (!envId || !document.getElementById("dm-card")) return;
+  if (!envId || !document.getElementById("dm-card") || !overviewOpen()) {
+    pauseMapPoll();
+    return;
+  }
   try {
     await fetchState();
   } catch {
     /* keep last frame */
   }
+  if (!overviewOpen()) {
+    pauseMapPoll();
+    return;
+  }
   schedule();
+}
+
+let fleetLineGen = 0;
+
+// Status line for a tab that is not Overview. Inventory and the registry
+// only. It does not open the map poll.
+export function refreshFleetLine(id) {
+  const next = id || "";
+  if (!next || overviewOpen()) return Promise.resolve();
+  pauseMapPoll();
+  const gen = ++fleetLineGen;
+  if (!envId) envId = next;
+  const srvP = api(`/api/v1/environments/${encodeURIComponent(next)}/servers`, { timeout: 8000 }).catch(() => null);
+  const regP = api(`/api/v1/environments/${encodeURIComponent(next)}/registry`, { timeout: 8000 }).catch(() => null);
+  return Promise.all([srvP, regP]).then(([srv, reg]) => {
+    if (gen !== fleetLineGen || overviewOpen() || (envId && envId !== next)) return;
+    applyFleetSources(null, srv);
+    if (reg && typeof reg === "object") {
+      snap = Object.assign({}, snap || {}, { registry: reg });
+      if (!envName && reg.environment_name) envName = reg.environment_name;
+    }
+    rememberEnvName();
+    renderEnvHealth();
+  });
 }
 
 async function repairCluster() {

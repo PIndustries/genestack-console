@@ -10,7 +10,7 @@ import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js?v=ls57";
 import * as operations from "./pages/operations.js";
 import * as observe from "./pages/observe.js";
-import * as environmentDetail from "./pages/environment_detail.js?v=ls63";
+import * as environmentDetail from "./pages/environment_detail.js?v=ls65";
 import { mountQuake, destroyAllSessions } from "./pages/environment_terminal.js?v=ls48";
 import * as envWizard from "./pages/env_wizard.js?v=ls56";
 import * as admin from "./pages/admin.js";
@@ -124,6 +124,7 @@ async function loadVersionLines() {
 
 // Drop a slow /health result once a newer route has started its own refresh.
 let topbarSeq = 0;
+let healthMisses = 0;
 
 async function refreshTopbar() {
   const seq = ++topbarSeq;
@@ -139,6 +140,7 @@ async function refreshTopbar() {
   try {
     const h = await api("/health");
     if (seq !== topbarSeq) return;
+    healthMisses = 0;
     store.health = h;
     setPill($("health-pill"), "health: " + (h.status || "ok"), "ok");
     const hl = $("user-health-line");
@@ -182,6 +184,13 @@ async function refreshTopbar() {
       setPill($("health-pill"), "health: restarting", "warn");
       const hl = $("user-health-line");
       if (hl) hl.textContent = "Console is restarting";
+      return;
+    }
+    healthMisses += 1;
+    if (healthMisses < 2 && store.health) {
+      setPill($("health-pill"), "health: slow", "warn");
+      const hl = $("user-health-line");
+      if (hl) hl.textContent = "The console took too long to answer.";
       return;
     }
     setPill($("health-pill"), "health: unreachable", "bad");

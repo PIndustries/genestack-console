@@ -25,13 +25,26 @@ OPERATION = {
         "boot nodes from a Talos Image Factory image with iscsi-tools + "
         "util-linux-tools extensions. Stops at the first failing phase. "
         "A machine whose certificate does not match the saved config is "
-        "rebooted into the installer when this console has its management "
-        "port. Otherwise the job names the one step left and waits for you "
-        "to confirm that step."
+        "named and waits. Confirming replaces the running install. A "
+        "management port reboots that named machine only after the confirm. "
+        "Otherwise the job names the one step left and waits until the "
+        "installer is up."
     ),
     "required_role": "admin",
     "backend": "genestack",
-    "params": [],
+    "params": [
+        {
+            "name": "replace_hosts",
+            "required": False,
+            "description": (
+                "Hostnames already confirmed for replacement. "
+                "The confirm button sets this for the named machine."
+            ),
+            "type": "string",
+            "default": None,
+            "enum": None,
+        }
+    ],
     "handler": "genestack_talos_bootstrap",
     "mutating": True,
     "timeout_seconds": 7200,
@@ -88,6 +101,7 @@ def run(
             remote_env=remote_env,
             agent_env_id=agent_env_id,
             db=self.db,
+            replace_hosts=params.get("replace_hosts") if isinstance(params, dict) else None,
         )
     except envconfig_service.ConfigValidationError as exc:
         log(f"[talos] {exc}")

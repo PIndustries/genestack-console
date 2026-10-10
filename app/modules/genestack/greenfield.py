@@ -20,8 +20,9 @@ OPERATION = {
         "wipe. Then deploy OpenStack from hosts. boot=iso is rejected "
         "because an ISO cannot run the wipe. stop_after=commission returns "
         "after the wipe report; stop_after=talos returns after fresh "
-        "maintenance and does not deploy. A machine still running the old "
-        "OS is not deployed onto. Requires a BMC row per server (or an "
+        "maintenance and does not deploy. A machine still running Talos "
+        "waits for confirm. A management port reboots that named machine "
+        "only after the confirm. Requires a BMC row per server (or an "
         "OVH-bound env, which uses BYOI). Workloads are destroyed."
     ),
     "required_role": "admin",
@@ -47,6 +48,12 @@ OPERATION = {
             "Optional hold: commission (after the wipe report, no Talos) "
             "or talos (after fresh maintenance, no OpenStack). "
             "Omit to run the full path.",
+        ),
+        _p(
+            "replace_hosts",
+            False,
+            "Hostnames already confirmed for replacement. A machine that "
+            "is still running Talos is rebooted only when it is named here.",
         ),
     ],
     "handler": "genestack_greenfield",
@@ -115,6 +122,7 @@ def run(
         parallelism=params.get("parallelism"),
         boot=boot,
         stop_after=stop_after,
+        replace_hosts=params.get("replace_hosts") if isinstance(params, dict) else None,
     )
     self.write_audit(
         actor=job.created_by or "system",

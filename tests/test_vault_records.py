@@ -386,7 +386,7 @@ def test_vault_page_offers_record_actions(client):
     page = client.get("/ui")
     assert page.status_code == 200
     assert "/static/js/app.js?v=" in page.text
-    assert "v=ls63" in page.text
+    assert "v=ls65" in page.text
     detail = client.get("/static/js/pages/environment_detail.js")
     assert 'environment_vault.js?v=ls63' in detail.text
     card = client.get("/static/js/pages/environment_vault.js")
@@ -399,4 +399,4 @@ def test_vault_page_offers_record_actions(client):
     assert 'els.area.value = value || ""' in text
     assert "innerHTML = payload" not in text
     shell = client.get("/static/js/app.js")
-    assert 'environment_detail.js?v=ls63' in shell.text
+    assert 'environment_detail.js?v=ls65' in shell.text

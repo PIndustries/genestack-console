@@ -97,6 +97,7 @@ def run_greenfield(
     boot: str = "auto",
     wait_seconds: int | None = None,
     stop_after: str = "",
+    replace_hosts: Any = None,
 ) -> dict[str, Any]:
     """PXE/BYOI every inventory server, then ``run_deploy`` from hosts."""
     boot_mode = str(boot or "auto").strip().lower()
@@ -305,6 +306,10 @@ def run_greenfield(
             deadline_wait = time.monotonic() + wait_s
             pending = {hostname: ip for hostname, _node, ip in plan}
             saw_down: dict[str, bool] = {hostname: False for hostname in pending}
+            from app.services.talos import confirmed_hostnames
+
+            replace_set = confirmed_hostnames(replace_hosts)
+            replaced_once: set[str] = set()
             attempt = 0
             waiting_for = (
                 "a commission report"
@@ -382,9 +387,52 @@ def run_greenfield(
                         talos_served_at=getattr(node, "talos_served_at", None),
                     )
                     if state == "installed":
-                        from app.services.talos import installed_talos_guidance
+                        from app.services.talos import (
+                            installed_machine_action,
+                            replace_install_step,
+                        )
 
-                        guide = installed_talos_guidance(hostname, probe_ip)
+                        has_bmc = bool(
+                            node is not None
+                            and str(getattr(node, "bmc_host", "") or "").strip()
+                        )
+                        action = installed_machine_action(
+                            hostname,
+                            probe_ip,
+                            can_reboot=has_bmc,
+                            picked=hostname in replace_set,
+                        )
+                        if action.get("reboot"):
+                            if hostname in replaced_once:
+                                continue
+                            replaced_once.add(hostname)
+                            log(
+                                f"[greenfield] {hostname} at {probe_ip} was "
+                                "confirmed. Rebooting it into the Talos "
+                                "installer. That replaces the install that "
+                                "is running."
+                            )
+                            booted = baremetal_service.set_next_boot(
+                                db,
+                                env,
+                                node,
+                                "talos",
+                                boot_now=True,
+                                dry_run=False,
+                                log=log,
+                                replace_installed=True,
+                            )
+                            if booted.get("ok"):
+                                continue
+                            why = str(
+                                booted.get("error")
+                                or "the management port did not accept the reboot"
+                            )
+                            guide = replace_install_step(
+                                hostname, probe_ip, why=why
+                            )
+                        else:
+                            guide = action["stop"]
                         msg = str(guide["error"])
                         log(f"[greenfield] {msg}")
                         return _stamp(
@@ -567,6 +615,7 @@ def run_greenfield(
         from_stage="hosts",
         deadline=deadline,
         check_cancel=check_cancel,
+        replace_hosts=replace_hosts,
         parallelism=workers,
     )
     if (

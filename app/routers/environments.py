@@ -176,6 +176,27 @@ def get_environment(
     return EnvironmentRead.from_orm_env(env)
 
 
+@router.get("/{environment_id}/install-check")
+def get_install_check(
+    db: Session = Depends(get_db),
+    env: Environment = Depends(get_env_scoped("viewer")),
+) -> dict[str, Any]:
+    """Client pin, boot image, and whether a kubeconfig can be read.
+
+    Does not probe machines. A Ready control plane is a separate request.
+    """
+    from app.services.envcontext import build_context
+    from app.services.talos import install_facts
+
+    current = envconfig_service.get_current(db, env)
+    doc = current[0] if current and isinstance(current[0], dict) else {}
+    ctx = build_context(env)
+    try:
+        return install_facts(env, doc, kubeconfig_path=ctx.kubeconfig)
+    finally:
+        ctx.cleanup()
+
+
 @router.get("/{environment_id}/inventory")
 def get_environment_inventory(
     db: Session = Depends(get_db),

@@ -371,6 +371,7 @@ def run_deploy(
     deadline: float | None = None,
     check_cancel: Callable[[], None] | None = None,
     parallelism: int | None = None,
+    replace_hosts: Any = None,
 ) -> dict[str, Any]:
     """Push the config document, then run the genestack pipeline.
 
@@ -603,6 +604,7 @@ def run_deploy(
                     remote_env=remote_env,
                     agent_env_id=agent_env_id,
                     db=db,
+                    replace_hosts=replace_hosts,
                 )
             except envconfig_service.ConfigValidationError as exc:
                 log(f"[deploy] FAILED at hosts/talos — {exc}")

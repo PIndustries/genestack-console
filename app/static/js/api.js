@@ -171,7 +171,7 @@ async function authedFetch(path, opts = {}) {
       throw new ApiError(0, "Console is restarting.", { isNetwork: true, isRestarting: true });
     }
     if (e.name === "AbortError" || String(e.message).includes("abort")) {
-      throw new ApiError(0, "Request timed out. Check your connection and try again.", { isTimeout: true });
+      throw new ApiError(0, "The console took too long to answer.", { isTimeout: true });
     }
     if (e.name === "TypeError" || e.name === "NetworkError") {
       throw new ApiError(0, "Console server unreachable. Check that the backend is running and your network connection is active.", { isNetwork: true });

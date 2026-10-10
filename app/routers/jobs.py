@@ -25,6 +25,7 @@ from app.services.job_runner import (
     ConflictError,
     JobRunner,
     execute_operation,
+    merge_confirmed_replace,
     release_env_mutex,
 )
 
@@ -231,7 +232,7 @@ def retry_job(
         return execute_operation(
             db,
             operation=job.operation,
-            params=job.params or {},
+            params=merge_confirmed_replace(job.params, job.user_step),
             environment_id=job.environment_id,
             created_by=principal.username,
             run_sync=body.run_sync if body else True,

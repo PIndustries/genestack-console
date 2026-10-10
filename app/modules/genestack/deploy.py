@@ -60,6 +60,12 @@ OPERATION = {
             "keystone is always installed first, independently",
             "integer",
         ),
+        _p(
+            "replace_hosts",
+            False,
+            "Hostnames already confirmed for a Talos install replacement. "
+            "Passed through when this deploy starts at hosts.",
+        ),
     ],
     "handler": "genestack_deploy",
     "mutating": True,
@@ -134,6 +140,7 @@ def run(
         deadline=deadline,
         check_cancel=check_cancel,
         parallelism=parallelism,
+        replace_hosts=params.get("replace_hosts") if isinstance(params, dict) else None,
     )
     self.write_audit(
         actor=job.created_by or "system",
