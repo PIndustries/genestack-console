@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.10.1
+
+A drifted Talos machine waits until you name it. Deploy from infrastructure stays closed until this console can read a kubeconfig and a control plane is Ready.
+
+- Adding a machine that takes too long checks whether it was saved. Reach ends as Up, Talos, or Down. One slow health check says the console is slow.
+- The saved Talos identity is one status. Adopt pastes the running cluster's talosconfig into the vault. Replace names one machine. Confirming reboots that machine into the installer and removes the running install.
+- OpenStack stages are on the environment: infrastructure, operators, kube-ovn, core, and compute-network. Continue from here starts at that stage.
+- Before bootstrap, the page names the Talos client pin, the boot image, and whether the image includes iscsi-tools and util-linux-tools.
+- A management port can reboot the named machine after that confirm. It does not reboot every drifted machine.
+
 ## 2026.10.09.2
 
 An admin can view, edit, and delete a record in an environment's vault.
