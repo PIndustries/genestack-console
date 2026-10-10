@@ -80,8 +80,8 @@ In the console, Guided setup:
 2. Deployment: open Advanced and choose Kubespray. Ubuntu is already installed, so Deploy uses SSH. Talos stays the usual install when the machine is not already Ubuntu.
 3. Servers: add the cloud machine by hostname and IP and set its roles. One machine that runs every role is an example on that step. Add more hosts when you have them. After the environment exists, Machines, the same roles are the preset **All-in-One (single node)**.
 4. **Apply on this environment.**
-5. Machines, then Ubuntu. Select the row. **Already have an OS.** That records the machine. It does not reboot it.
-6. Settings, then Config, then Deploy. Deploy installs Kubernetes and OpenStack over SSH.
+5. Open the environment. The next action is at the top of Overview and Machines.
+6. On Ubuntu, select the row and choose **Already have an OS.** That records the machine. It does not reboot it. Deploy then installs Kubernetes and OpenStack over SSH.
 
 ## One dedicated server
 
@@ -144,7 +144,7 @@ Use this when Talos is already running and waiting for a config. A Talos ISO doe
 
 1. Guided setup. Basics names the environment. Connect stays on this console unless a site is somewhere this machine cannot reach. Deployment stays on Talos. The cluster name is a short DNS name. The install disk is the device Talos writes, often `/dev/sda`. Confirm the name on the machine. Leave the image blank unless you have your own.
 2. Servers: add each host by hostname and IP, and set its roles. One machine that runs every role, and three machines with control, compute, and storage on separate machines, are examples. A worker is its own role. Add the hosts you have. Import or discover writes this same list.
-3. On the environment, open Machines and stay on Talos. The tab does not install an operating system.
+3. Open the environment. The next action is at the top of Overview and Machines. It sends you to Talos is already installed. The Machines tab does not install an operating system by being opened.
 4. Talos is already installed. An admin starts it. The job is `genestack.talos.bootstrap`. The deploy host has to reach each address. Talos in maintenance listens there. Guided setup has to have saved the inventory path, because the job writes under that directory. The job applies a Talos config to every saved address, bootstraps etcd once, and fetches the kubeconfig. The confirm names the whole inventory, not one row.
 5. Apply on this environment before you mean that job to run. While the environment only logs, the job records the commands and does not send them.
 

@@ -11,6 +11,7 @@ import { openShell } from "./environment_terminal.js?v=ls48";
 import { ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
 import { clearOvhPoll } from "../ovh.js";
 import { fetchMetalPath, osNameHtml } from "../metal_path.js";
+import { nextStripHtml, loadNextStrip } from "./environment_next.js?v=ls66";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
@@ -153,6 +154,7 @@ export function serversCardHtml() {
       ? `<p class="hint-row">Kubeconfig and Talosconfig are saved in this environment's vault. Download grabs that copy. Regenerate asks the cluster for a new client certificate, valid for one year, and replaces the vault copy.</p>`
       : ""
   }
+  ${nextStripHtml("machines")}
   <div id="cluster-status-bar"></div>
   <p class="hint-row" id="srv-os-empty" hidden></p>
   <table>
@@ -2103,6 +2105,7 @@ export async function loadServersCard(envId) {
     lastClusterIps = new Set();
   }
   loadTalosFlow(envId);
+  loadNextStrip(envId);
   becomeTargets = invRows.map((s) => {
     const boot = bootByName.get(String(s.hostname || "")) || {};
     const ip = String((s && (s.private_ip || s.ip)) || "");

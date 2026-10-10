@@ -3,7 +3,8 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls65";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls66";
+import { nextStripHtml, wireNextStrip, loadNextStrip, destroyNextStrip } from "./environment_next.js?v=ls66";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
@@ -443,6 +444,9 @@ export async function render(root, { param, query } = {}) {
     }
     .env-grid.full { grid-template-columns: 1fr; }
     #fleet-stats { margin: 0 0 .85rem; }
+    .env-next { margin: 0 0 .75rem; padding: .75rem .9rem; border: 1px solid var(--border, #243049); border-radius: .6rem; background: var(--card, transparent); }
+    .env-next h2 { margin: 0 0 .2rem; font-size: 1rem; }
+    .env-next .row { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-top: .45rem; }
     #fleet-stats .om-stats { margin-top: 0; }
     @media (max-width: 960px) {
       .env-grid { grid-template-columns: 1fr; }
@@ -478,7 +482,7 @@ export async function render(root, { param, query } = {}) {
 
     <!-- ═══ OVERVIEW TAB ═══ -->
     <div class="tab-panel active" data-panel="workflow" id="panel-workflow">
-      <p class="hint-row">This is the install. Add a machine on <button type="button" class="linkish" data-goto-ptab="machines">Machines</button>.</p>
+      ${nextStripHtml("overview")}
       ${deployMapHtml()}
       <div hidden>${progressCardHtml()}</div>
     </div>
@@ -688,6 +692,7 @@ export async function render(root, { param, query } = {}) {
   wireDeployMap();
   wireConfigCard(() => envId);
   wireServersCard(() => envId);
+  wireNextStrip(() => envId);
   wireBaremetalCard(() => envId);
   wireDiscoveryCard(() => envId);
   wirePxeCard(() => envId);
@@ -712,6 +717,7 @@ export async function render(root, { param, query } = {}) {
     window.dispatchEvent(new CustomEvent("gsc-nav-sync"));
     removePageLoading();
     loadEnvApply();
+    loadNextStrip(envId);
     if (activeTab === "settings" || activeTab === "expert") {
       loadDescriptor().catch(() => {});
     }
@@ -734,6 +740,7 @@ export function destroy() {
   destroyReachCard();
   destroyHostsCard();
   destroyServersCard();
+  destroyNextStrip();
   destroyBaremetalCard();
   destroyDiscoveryCard();
   destroyPxeCard();

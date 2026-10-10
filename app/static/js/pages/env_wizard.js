@@ -13,7 +13,7 @@
 //            → Deploy host: PATCHes ssh host, then → Step 2
 //   Step 2 — Deployment (Talos, or Kubespray when Ubuntu is already installed)
 //   Step 3 — Inventory: hostname and IP. Import or discover stays behind that.
-//   Step 4 — Summary. Open Machines. A running cluster is Adopt on Settings.
+//   Step 4 — Summary. Open the environment. The next action is on Overview and Machines.
 import { api, esc, toast } from "../api.js";
 import { loadEnvs, canRun, gate, store } from "../store.js";
 import { ROLES, REQUIRED_ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
@@ -603,7 +603,7 @@ function wireSummaryApply() {
         body: JSON.stringify({ dry_run: false }),
       });
       if (slot) {
-        slot.textContent = "This environment applies. Open Machines and record Talos or Ubuntu on each row.";
+        slot.textContent = "This environment applies. Open it. The next action is at the top of Overview and Machines.";
       }
       btn.textContent = "This environment applies";
       toast("This environment applies", "ok");
@@ -616,10 +616,9 @@ function wireSummaryApply() {
 
 function summaryOpen() {
   if (!state.envId) return { url: "#/environments", label: "Open environments" };
-  const os = v("provider", "talos") === "kubespray" ? "ubuntu" : "talos";
   return {
-    url: "#/environment_detail/" + encodeURIComponent(state.envId) + "?tab=platform&ptab=machines&os=" + os,
-    label: "Open Machines",
+    url: "#/environment_detail/" + encodeURIComponent(state.envId),
+    label: "Open the environment",
   };
 }
 
@@ -628,9 +627,7 @@ function metalNextHint(src, provider) {
   if (src === "pxe") return "Claim the sighting on Hardware, Inventory. It joins this same list.";
   if (src === "bmc") return "Register the management port on Hardware, Bare metal. It joins this same list.";
   if (src === "static" || src === "ovh") {
-    return provider === "talos"
-      ? "Open Machines. Record Talos or Ubuntu on each row, then Deploy."
-      : "Open Machines, Ubuntu. Already have an OS records the row. Deploy uses SSH.";
+    return "Open the environment. The next action is at the top of Overview and Machines.";
   }
   return "Open Machines.";
 }

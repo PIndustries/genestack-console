@@ -10,8 +10,10 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert "refreshFleetLine(envId)" in text
     assert "loadDeployMap(envId)" not in text
     assert 'activePtab === "kubernetes"' in text
-    assert "environment_servers.js?v=ls65" in text
+    assert "environment_servers.js?v=ls66" in text
+    assert "environment_next.js?v=ls66" in text
     assert "environment_deploy_map.js?v=ls64" in text
+    assert 'nextStripHtml("overview")' in text
 
     servers = client.get("/static/js/pages/environment_servers.js")
     assert servers.status_code == 200
@@ -33,7 +35,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     page = client.get("/ui")
     assert page.status_code == 200
     assert "app.js?v=" in page.text
-    assert "v=ls65" in page.text
+    assert "v=ls66" in page.text
 
     assert "The console took too long to answer" in body
     assert "No answer" in body
@@ -52,3 +54,19 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     shell = client.get("/static/js/app.js")
     assert "healthMisses" in shell.text
     assert "health: slow" in shell.text
+    assert "environment_detail.js?v=ls66" in shell.text
+    assert "env_wizard.js?v=ls66" in shell.text
+
+    nxt = client.get("/static/js/pages/environment_next.js")
+    assert nxt.status_code == 200
+    assert "Add the machines." in nxt.text
+    assert "Adding a machine does not boot it" in nxt.text
+    assert "Install Talos on the machines you added." in nxt.text
+    assert "Install the cloud from infrastructure." in nxt.text
+    assert "The cloud is installed." in nxt.text
+    assert "This environment only logs." in nxt.text
+    assert 'id="env-next-overview"' not in nxt.text or "env-next-" in nxt.text
+
+    wizard = client.get("/static/js/pages/env_wizard.js")
+    assert wizard.status_code == 200
+    assert "The next action is at the top of Overview and Machines." in wizard.text
