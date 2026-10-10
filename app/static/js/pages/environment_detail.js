@@ -23,6 +23,7 @@ import { hostsCardHtml, wireHostsCard, loadHostsCard, destroyHostsCard } from ".
 import { appsCardHtml, wireAppsCard, loadAppsCard, destroyAppsCard } from "./environment_apps.js?v=slot2";
 import { observeCardHtml, wireObserveCard, loadObserveCard, destroyObserveCard } from "./environment_observe.js";
 import { envVaultCardHtml, wireEnvVault, loadEnvVault, destroyEnvVault } from "./environment_vault.js?v=ls63";
+import { rackCardHtml, wireRackCard, loadRackCard, destroyRackCard } from "./environment_rack.js?v=ls67";
 import { setBreadcrumbs } from "../components/breadcrumbs.js";
 
 export const title = "Environment Detail";
@@ -362,6 +363,7 @@ const TAB_LOADERS = {
   cache: [loadImageCache],
   observe: [loadObserveCard],
   vault: [loadEnvVault],
+  rack: [loadRackCard],
   settings: [loadConfigCard, loadAppsCard, loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard, loadComponentsCard],
   inventory: [loadSshKeysCard, loadAgentsCard, loadReachCard, loadHostsCard, loadBaremetalCard, loadDiscoveryCard, loadPxeCard],
   config: [loadConfigCard],
@@ -381,6 +383,7 @@ function loadTab(tabName) {
     cache: "Loading image cache…",
     observe: "Loading observe…",
     vault: "Loading vault…",
+    rack: "Loading rack…",
     settings: "Loading settings…",
   };
   showPanelLoading(panel, labels[tabName] || "Loading…");
@@ -470,6 +473,7 @@ export async function render(root, { param, query } = {}) {
       <button class="tab" data-tab="platform" data-ptab="machines">Machines</button>
       <button class="tab" data-tab="platform" data-ptab="kubernetes">Kubernetes</button>
       <button class="tab" data-tab="platform" data-ptab="openstack">OpenStack</button>
+      <button class="tab" data-tab="rack">Rack</button>
       <button class="tab" data-tab="observe">Observe</button>
       <button class="tab" data-tab="vault">Vault</button>
       <button class="tab" data-tab="settings">Settings</button>
@@ -580,6 +584,12 @@ export async function render(root, { param, query } = {}) {
         <div class="env-grid full">
           ${cloudCardHtml()}
         </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-panel="rack" id="panel-rack">
+      <div class="env-grid full">
+        ${rackCardHtml()}
       </div>
     </div>
 
@@ -704,6 +714,7 @@ export async function render(root, { param, query } = {}) {
   wireAppsCard(() => envId);
   wireObserveCard(() => envId, { onGoto: (ptab) => switchTab("platform", ptab) });
   wireEnvVault(() => envId);
+  wireRackCard(() => envId);
   wireOverlayEditor();
 
   syncDemoBanner();
@@ -752,6 +763,7 @@ export function destroy() {
   destroyAppsCard();
   destroyObserveCard();
   destroyEnvVault();
+  destroyRackCard();
   closeOverlay();
   tabLoads.clear();
 }

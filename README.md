@@ -22,7 +22,7 @@ curl -fsSL https://get.genestack.dev/console.sh | bash
 
 ## What to do next
 
-The console is up when that command finishes. The computer that runs the console stays outside the cluster. Inventory is one list, on Machines. Add each machine by hostname and IP. A virtual machine and a physical server are the same row. On Machines, record Talos or Ubuntu, then Deploy.
+The console is up when that command finishes. The computer that runs the console stays outside the cluster. Inventory is one list, on Machines. Add each machine by hostname and IP. A virtual machine and a physical server are the same row. On Machines, boot the Talos ISO yourself, then choose Talos is already installed. That button does not boot it. For Ubuntu, select the rows and choose Already have an OS, then Deploy over SSH.
 
 A provider account or a network sighting can import that same list. Guided setup keeps those under Import or discover.
 

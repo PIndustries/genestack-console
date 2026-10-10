@@ -64,6 +64,7 @@ from app.routers import (
     ovh,
     platform,
     pxe,
+    rack,
     reach,
     state,
     stream,
@@ -318,6 +319,7 @@ def create_app() -> FastAPI:
     app.include_router(descriptor.router)
     app.include_router(workflow.router)
     app.include_router(fleet.router)
+    app.include_router(rack.router)
 
     # Logs and dashboards, then jobs.
     # OpenStack routes share the /cloud/ prefix with the dashboard proxy.

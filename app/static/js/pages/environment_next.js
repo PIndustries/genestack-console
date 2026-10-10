@@ -15,6 +15,7 @@ const STAGES = [
 let gen = 0;
 let timer = null;
 let currentEnv = "";
+let currentModel = null;
 let onDry = null;
 
 export function nextStripHtml(place) {
@@ -51,12 +52,14 @@ export function loadNextStrip(envId) {
     timer = null;
   }
   if (!envId) {
+    currentModel = null;
     paint("Select an environment.", "", []);
     return;
   }
   paint("Checking the next action.", "", []);
   collect(envId).then((model) => {
     if (mine !== gen || currentEnv !== envId) return;
+    currentModel = model;
     const view = describe(model);
     paint(view.title, view.detail, view.actions, view.log);
     if (view.live) timer = setTimeout(() => loadNextStrip(envId), 5000);
@@ -94,7 +97,7 @@ function render(title, detail, actions, log) {
 }
 
 async function collect(envId) {
-  const [serversRes, jobs, facts, k8s, provider, env, registry] = await Promise.all([
+  const [serversRes, jobs, facts, k8s, provider, env, registry, baremetal] = await Promise.all([
     api(`/api/v1/environments/${encodeURIComponent(envId)}/servers`).catch(() => null),
     api(`/api/v1/jobs?environment_id=${encodeURIComponent(envId)}&limit=20`).catch(() => []),
     api(`/api/v1/environments/${encodeURIComponent(envId)}/install-check`, { timeout: 8000 }).catch(() => null),
@@ -102,23 +105,46 @@ async function collect(envId) {
     fetchMetalPath(api, envId),
     api(`/api/v1/environments/${encodeURIComponent(envId)}`).catch(() => null),
     api(`/api/v1/environments/${encodeURIComponent(envId)}/registry`, { timeout: 4000 }).catch(() => null),
+    api(`/api/v1/environments/${encodeURIComponent(envId)}/baremetal`, { timeout: 8000 }).catch(() => null),
   ]);
   const raw = Array.isArray(serversRes)
     ? serversRes
     : (serversRes && Array.isArray(serversRes.servers) ? serversRes.servers : []);
   const servers = raw.filter((row) => row && row.hostname && row.assigned !== false);
   const list = Array.isArray(jobs) ? jobs : [];
+  const kept = facts && facts.client_pin
+    ? facts
+    : (facts ? { unavailable: true, boot_image: facts.boot_image || "" } : null);
+  const bmcHosts = matchingBmcHosts(servers, baremetal);
   return {
     servers,
     provider: provider === "kubespray" ? "kubespray" : "talos",
-    facts: facts && facts.client_pin ? facts : (facts ? { unavailable: true } : null),
+    facts: kept,
     k8sOk: k8s != null,
     clusterIps: readyIps(k8s),
     bootstrap: list.find((job) => job && job.operation === "genestack.talos.bootstrap") || null,
     deploy: list.find((job) => job && job.operation === "genestack.deploy") || null,
+    greenfield: list.find((job) => job && job.operation === "genestack.greenfield") || null,
     logsOnly: logsOnly(env),
     cacheDown: registry != null && registry.running === false,
+    hasBmc: bmcHosts.length > 0,
+    bmcHosts,
   };
+}
+
+function matchingBmcHosts(servers, baremetal) {
+  const nodes = baremetal && Array.isArray(baremetal.nodes) ? baremetal.nodes : [];
+  const names = new Set();
+  for (const node of nodes) {
+    const name = String((node && node.name) || "").trim().toLowerCase();
+    if (name) names.add(name);
+  }
+  const hosts = [];
+  for (const row of servers) {
+    const host = String((row && row.hostname) || "").trim();
+    if (host && names.has(host.toLowerCase())) hosts.push(host);
+  }
+  return hosts;
 }
 
 function readyIps(k8s) {
@@ -137,6 +163,19 @@ function logsOnly(env) {
 
 function serverIp(server) {
   return String((server && (server.private_ip || server.ip)) || "");
+}
+
+function bootImage(model) {
+  const image = model && model.facts && model.facts.boot_image;
+  return image ? String(image) : "v1.13.9";
+}
+
+function outsideCluster(model) {
+  if (!model.k8sOk) return [];
+  return model.servers.filter((row) => {
+    const ip = serverIp(row);
+    return ip && !model.clusterIps.has(ip);
+  });
 }
 
 function fleetSentence(model) {
@@ -265,6 +304,40 @@ function adminTitle() {
   return canAdmin() ? "" : "Requires admin role";
 }
 
+function cloudStagesOpen(model) {
+  const states = stageStates(model.deploy);
+  return STAGES.some(([id]) => states[id] !== "done");
+}
+
+// A management port can wipe disks. Offer it only before the cloud is up.
+function managementAction(model) {
+  if (!model.hasBmc || readyControlPlane(model) || !cloudStagesOpen(model)) return [];
+  return [{
+    act: "greenfield",
+    label: "Install from the management port",
+    primary: false,
+    disabled: !canAdmin(),
+    title: adminTitle() || "Replaces the running install and wipes the disks.",
+  }];
+}
+
+function rackAction() {
+  return { act: "rack", label: "Open rack", primary: false };
+}
+
+function osAction(model) {
+  if (model.provider === "kubespray") {
+    return { act: "ubuntu", label: "Open Ubuntu machines", primary: true };
+  }
+  return {
+    act: "talos",
+    label: "Talos is already installed",
+    primary: true,
+    disabled: !canAdmin(),
+    title: adminTitle() || "Applies the Talos config. A machine already running Talos is replaced only after you confirm that machine by name.",
+  };
+}
+
 export function describe(model) {
   const fleet = model.servers.length ? fleetSentence(model) : "";
   const logging = logLine(model);
@@ -272,19 +345,22 @@ export function describe(model) {
     return {
       title: "Add the machines.",
       detail: "A hostname and an address are enough. Adding a machine does not boot it and does not install OpenStack.",
-      actions: [{
-        act: "add",
-        label: "Add a machine",
-        primary: true,
-        disabled: !canRun(),
-        title: canRun() ? "" : "Requires operator role",
-      }],
+      actions: [
+        {
+          act: "add",
+          label: "Add a machine",
+          primary: true,
+          disabled: !canRun(),
+          title: canRun() ? "" : "Requires operator role",
+        },
+        rackAction(),
+      ],
       live: false,
     };
   }
-  if (live(model.bootstrap) || live(model.deploy)) {
-    const job = live(model.deploy) ? model.deploy : model.bootstrap;
-    const which = live(model.deploy) ? "Deploy" : "Talos bootstrap";
+  if (live(model.bootstrap) || live(model.deploy) || live(model.greenfield)) {
+    const job = live(model.greenfield) ? model.greenfield : (live(model.deploy) ? model.deploy : model.bootstrap);
+    const which = live(model.greenfield) ? "Install from the management port" : (live(model.deploy) ? "Deploy" : "Talos bootstrap");
     return {
       title: `${which} is running.`,
       detail: `${fleet} The log is in Activity.${logging}`,
@@ -300,6 +376,8 @@ export function describe(model) {
       actions: [
         { act: "adopt", label: "Adopt talosconfig", primary: true },
         { act: "replace", label: "Choose the machine", primary: false },
+        rackAction(),
+        ...managementAction(model),
         ...applyAction(model),
       ],
       log: jobLog(model.bootstrap, "Confirm on the job"),
@@ -312,11 +390,34 @@ export function describe(model) {
   const started = STAGES.some(([id]) => states[id] !== "not-started");
   if (model.provider === "kubespray" && !started) {
     if (!pending) return operate(model, fleet);
+    const unrecorded = model.servers.some((row) => !String((row && row.adopt) || "").trim());
+    if (unrecorded) {
+      return {
+        title: "Record Ubuntu on each machine.",
+        detail: `${fleet} Select the rows on the Ubuntu tab, then Already have an OS. That records the machine. It does not reboot it.${cacheLine(model)}${logging}`,
+        actions: [
+          { act: "ubuntu", label: "Open Ubuntu machines", primary: true },
+          rackAction(),
+          ...managementAction(model),
+          ...cacheAction(model),
+          ...applyAction(model),
+        ],
+        live: false,
+      };
+    }
     return {
-      title: "Record the machines that already have Ubuntu, then install the cloud.",
-      detail: `${fleet} Already have an OS records the row. It does not reboot the machine. Deploy uses SSH.${cacheLine(model)}${logging}`,
+      title: "Deploy over SSH.",
+      detail: `${fleet} Already have an OS recorded these machines. Deploy installs Kubernetes and OpenStack over SSH. It does not reboot them.${cacheLine(model)}${logging}`,
       actions: [
-        { act: "ubuntu", label: "Open Ubuntu machines", primary: true },
+        {
+          act: "deploy",
+          label: "Deploy over SSH",
+          primary: true,
+          disabled: !canAdmin(),
+          title: adminTitle() || "Installs Kubernetes and OpenStack over SSH. It does not reboot the machines.",
+        },
+        rackAction(),
+        ...managementAction(model),
         ...cacheAction(model),
         ...applyAction(model),
       ],
@@ -326,9 +427,10 @@ export function describe(model) {
   if (model.provider === "kubespray" && !pending) return operate(model, fleet);
   if (model.provider !== "kubespray" && block && (!model.deploy || !pending || states[pending[0]] === "not-started")) {
     const boot = model.bootstrap && model.bootstrap.status === "success";
+    const installing = `Boot the Talos ISO on each machine yourself. This button does not boot it. The boot image default is ${bootImage(model)}. The install disk defaults to /dev/sda. When the machine is waiting for a config, use Talos is already installed. A machine already running Talos is replaced only after that machine is named.`;
     return {
       title: boot ? block : "Install Talos on the machines you added.",
-      detail: `${fleet} ${boot ? "Talos bootstrap already finished." : "Talos is already installed applies the config to every saved address. A machine already running Talos waits until you name it."}${cacheLine(model)}${logging}`,
+      detail: `${fleet} ${boot ? "Talos bootstrap already finished." : installing}${cacheLine(model)}${logging}`,
       actions: [
         {
           act: "talos",
@@ -337,6 +439,8 @@ export function describe(model) {
           disabled: !canAdmin(),
           title: adminTitle() || "Applies the Talos config. A machine already running Talos is replaced only after you confirm that machine by name.",
         },
+        rackAction(),
+        ...managementAction(model),
         ...cacheAction(model),
         ...applyAction(model),
       ],
@@ -363,6 +467,8 @@ export function describe(model) {
         disabled: !canAdmin() || !!block,
         title: !canAdmin() ? "Requires admin role" : (block || `Start at ${next[1]}`),
       },
+      rackAction(),
+      ...managementAction(model),
       ...cacheAction(model),
       ...applyAction(model),
     ],
@@ -372,15 +478,41 @@ export function describe(model) {
 }
 
 function operate(model, fleet) {
+  const outside = outsideCluster(model);
+  const shared = [
+    { act: "config", label: "Change a service", primary: false },
+    { act: "check", label: "Check the cloud", primary: false, disabled: !canRun(), title: canRun() ? "Short verify. It does not install OpenStack again." : "Requires operator role" },
+    { act: "openstack", label: "Open OpenStack", primary: false },
+    rackAction(),
+    ...cacheAction(model),
+  ];
+  if (outside.length) {
+    const named = outside.map((row) => row.hostname).filter(Boolean).join(", ");
+    return {
+      title: "A machine is not in the cloud yet.",
+      detail: `${fleet} ${named} is not in the cloud yet. It still needs an operating system, then the compute stage. Adding it did not join it. Change a service in Settings, Config. Save stores a version. Push writes it. Check the cloud runs a short verify.${cacheLine(model)} Kubeconfig and talosconfig are in the vault. Renew them from Machines before the client certificate is a year old.`,
+      actions: [
+        osAction(model),
+        {
+          act: "deploy",
+          label: "Continue from compute-network",
+          stage: "compute-network",
+          primary: false,
+          disabled: !canAdmin(),
+          title: adminTitle() || "Start at compute-network",
+        },
+        { act: "capacity", label: "Add capacity", primary: false, disabled: !canRun(), title: canRun() ? "" : "Requires operator role" },
+        ...shared,
+      ],
+      live: false,
+    };
+  }
   return {
     title: "The cloud is installed.",
     detail: `${fleet} Add capacity records a machine. It still needs an operating system, then the compute stage. Change a service in Settings, Config. Save stores a version. Push writes it. Check the cloud runs a short verify.${cacheLine(model)} Kubeconfig and talosconfig are in the vault. Renew them from Machines before the client certificate is a year old.`,
     actions: [
       { act: "capacity", label: "Add capacity", primary: true, disabled: !canRun(), title: canRun() ? "" : "Requires operator role" },
-      { act: "config", label: "Change a service", primary: false },
-      { act: "check", label: "Check the cloud", primary: false, disabled: !canRun(), title: canRun() ? "Short verify. It does not install OpenStack again." : "Requires operator role" },
-      { act: "openstack", label: "Open OpenStack", primary: false },
-      ...cacheAction(model),
+      ...shared,
     ],
     live: false,
   };
@@ -438,6 +570,10 @@ async function runAction(btn) {
     clickTab('.tab[data-tab="platform"][data-ptab="openstack"]');
     return;
   }
+  if (act === "rack") {
+    clickTab('.tab[data-tab="rack"]');
+    return;
+  }
   if (act === "apply") {
     const apply = document.querySelector('[data-env-mode="apply"]');
     if (apply) apply.click();
@@ -451,8 +587,28 @@ async function runAction(btn) {
     await enqueue(envId, "genestack.talos.bootstrap", {}, "Talos bootstrap");
     return;
   }
+  if (act === "greenfield") {
+    const hosts = currentModel && Array.isArray(currentModel.bmcHosts) ? currentModel.bmcHosts : [];
+    const named = hosts.join(", ");
+    if (!window.confirm(
+      `Install from the management port on ${named}?\n\nThe running install will be replaced and the disks are wiped.\n\nIf this environment only logs, the job writes a log and does not change the machines.`
+    )) return;
+    await enqueue(envId, "genestack.greenfield", {
+      skip_push: true,
+      boot: "auto",
+      parallelism: 2,
+    }, "Install from the management port");
+    return;
+  }
   if (act === "deploy") {
-    const stage = btn.dataset.nextStage || "infrastructure";
+    const stage = btn.dataset.nextStage || "";
+    if (!stage || stage === "hosts") {
+      if (!window.confirm(
+        "Deploy over SSH?\n\nDeploy installs Kubernetes and OpenStack over SSH. It does not reboot the machines.\n\nIf this environment only logs, the job writes a log and does not change the machines."
+      )) return;
+      await enqueue(envId, "genestack.deploy", {}, "Deploy over SSH");
+      return;
+    }
     const label = (STAGES.find(([id]) => id === stage) || ["", stage])[1];
     if (!window.confirm(
       `Continue from ${label}?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nIf this environment only logs, the job writes a log and does not change the machines.`
