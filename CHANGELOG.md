@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.10.3
+
+The machines you added can be drawn as a rack, and the next action says how to install.
+
+- With nothing typed, every machine is 1U on Rack 1, stacked from U1. A machine past U48 stays beside that rack. Flat is the elevation. Space is the same cabinet. Cloud puts that rack beside Metal, Kubernetes, and Instances.
+- A solid line is a fact this console already has. A dashed line is a connection you typed. The console does not invent a switch or a PDU cable. Add a switch, a PDU, or a layer when you want one, with a height in U.
+- Boot the Talos ISO yourself. That button does not boot it. Ubuntu is recorded on each machine, then Deploy over SSH. A machine that is not in the cloud yet still needs an operating system, then the compute stage.
+- Install from the management port is offered only before the cloud is up. Confirming names the hosts, replaces the running install, and wipes the disks.
+
 ## 2026.10.10.2
 
 Overview and Machines open on the same next action. The sentence changes as the cloud grows.
