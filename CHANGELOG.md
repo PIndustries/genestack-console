@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.10.2
+
+Overview and Machines open on the same next action. The sentence changes as the cloud grows.
+
+- No machines yet: add a hostname and an address. Adding a machine does not boot it and does not install OpenStack.
+- Talos that is already running is one step. A drifted machine still waits until you name it.
+- OpenStack continues from the stage that is left: infrastructure, operators, kube-ovn, core, or compute-network. A disk wipe stays a separate action.
+- After those stages succeed, the next action is add capacity, change a service, or check the cloud.
+- While the environment only logs, the strip says the run writes a log and does not change the machines. Guided setup opens the environment on this strip.
+
 ## 2026.10.10.1
 
 A drifted Talos machine waits until you name it. Deploy from infrastructure stays closed until this console can read a kubeconfig and a control plane is Ready.
