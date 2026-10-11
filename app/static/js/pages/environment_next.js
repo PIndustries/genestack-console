@@ -606,14 +606,14 @@ async function runAction(btn) {
       if (!window.confirm(
         "Deploy over SSH?\n\nDeploy installs Kubernetes and OpenStack over SSH. It does not reboot the machines.\n\nIf this environment only logs, the job writes a log and does not change the machines."
       )) return;
-      await enqueue(envId, "genestack.deploy", {}, "Deploy over SSH");
+      await enqueue(envId, "genestack.deploy", { parallelism: 2 }, "Deploy over SSH");
       return;
     }
     const label = (STAGES.find(([id]) => id === stage) || ["", stage])[1];
     if (!window.confirm(
       `Continue from ${label}?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nIf this environment only logs, the job writes a log and does not change the machines.`
     )) return;
-    await enqueue(envId, "genestack.deploy", { from_stage: stage }, `Deploy from ${label}`);
+    await enqueue(envId, "genestack.deploy", { from_stage: stage, parallelism: 2 }, `Deploy from ${label}`);
     return;
   }
   if (act === "check") {

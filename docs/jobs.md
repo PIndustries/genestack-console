@@ -39,6 +39,8 @@ These run on the console computer. They are not a cloud install.
 
 These drive the checkout at `/opt/genestack`. A push writes the saved settings into `/etc/genestack`. A deploy then runs the pipeline. The pipeline is the ordered list of install scripts in `app/services/service_registry.py`.
 
+Deploy over SSH from the next action passes `parallelism` 2. Keystone still finishes first. Placement and Glance then run together. Every other stage stays one script at a time. The job log ends with a `[timing] scoreboard` of seconds per stage, plus how many items waited and how many ran beside another. A release runs the build matrix before it compiles, and publishes `build-report.json` with one row per intake. Those rows record the jobs and mark the hardware as not run.
+
 | Id | File | What it does |
 | --- | --- | --- |
 | `genestack.config.push` | `app/modules/genestack/config_push.py` | Writes the saved settings onto the deploy host. |

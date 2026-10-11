@@ -63,6 +63,26 @@ def test_attach_stage_times_copies_seconds():
     assert "seconds" not in stages[0]["items"][1]
 
 
+def test_parse_timings_keeps_waited_and_beside():
+    log = """
+[timing] stage=core item=keystone mode=waited seconds=280.4
+[timing] stage=core item=glance mode=beside seconds=90.0
+[timing] stage=core item=placement mode=beside seconds=88.5
+[timing] stage=core seconds=390.2
+"""
+    parsed = parse_timings(log)
+    core = next(s for s in parsed["stages"] if s["id"] == "core")
+    assert core["seconds"] == 390.2
+    by_name = {item["name"]: item for item in core["items"]}
+    assert by_name["keystone"] == {"name": "keystone", "seconds": 280.4, "mode": "waited"}
+    assert by_name["glance"] == {"name": "glance", "seconds": 90.0, "mode": "beside"}
+    assert by_name["placement"] == {
+        "name": "placement",
+        "seconds": 88.5,
+        "mode": "beside",
+    }
+
+
 def test_fmt_duration():
     assert fmt_duration(12) == "12s"
     assert fmt_duration(75) == "1m15s"

@@ -127,6 +127,7 @@ def _run_services_parallel(
     stages_total: int,
     version: int | None,
     from_stage: str | None,
+    item_modes: dict[str, int],
 ) -> dict[str, Any] | None:
     """Run the OpenStack services stage: keystone first, then the rest in parallel.
 
@@ -141,7 +142,7 @@ def _run_services_parallel(
         with log_lock:
             log(msg)
 
-    def run_item(item: dict[str, str]) -> Any:
+    def run_item(item: dict[str, str], *, mode: str) -> Any:
         item_t0 = deploy_timing.now()
         if agent_env_id is not None:
             # The DB-backed agent relay drives the shared session, which is
@@ -171,12 +172,16 @@ def _run_services_parallel(
                 agent_env_id=agent_env_id,
                 log=tlog,
             )
-        deploy_timing.log_timing(
-            tlog,
-            stage=stage["id"],
-            item=item["name"],
-            seconds=deploy_timing.elapsed(item_t0),
-        )
+        seconds = deploy_timing.elapsed(item_t0)
+        with log_lock:
+            deploy_timing.log_timing(
+                log,
+                stage=stage["id"],
+                item=item["name"],
+                seconds=seconds,
+                mode=mode,
+            )
+            item_modes[mode] += 1
         return result.get("returncode")
 
     def failure_dict(failed_item: dict[str, str], rc: Any) -> dict[str, Any]:
@@ -205,7 +210,7 @@ def _run_services_parallel(
         )
         if check_cancel is not None:
             check_cancel()
-        rc = run_item(keystone)
+        rc = run_item(keystone, mode="waited")
         if rc not in (0, None) and not dry_run:
             log(
                 f"[deploy] FAILED at {stage['id']}/keystone rc={rc} — stopping pipeline"
@@ -223,7 +228,9 @@ def _run_services_parallel(
     order = {id(item): i for i, item in enumerate(rest)}
     failures: list[tuple[int, dict[str, str], Any]] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=parallelism) as pool:
-        futures = {pool.submit(run_item, item): item for item in rest}
+        futures = {
+            pool.submit(run_item, item, mode="beside"): item for item in rest
+        }
         for future in concurrent.futures.as_completed(futures):
             item = futures[future]
             try:
@@ -527,6 +534,7 @@ def run_deploy(
     t0 = deploy_timing.now()
     timings: list[dict[str, Any]] = []
     optional_failed: list[str] = []
+    item_modes: dict[str, int] = {"waited": 0, "beside": 0}
 
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
         total = round(deploy_timing.elapsed(t0), 1)
@@ -540,7 +548,10 @@ def run_deploy(
                 f"{row.get('id')}={float(row.get('seconds') or 0):.0f}s"
                 for row in timings
             )
-            log(f"[timing] scoreboard {score} total={total:.0f}s")
+            log(
+                f"[timing] scoreboard {score} total={total:.0f}s "
+                f"beside={item_modes['beside']} waited={item_modes['waited']}"
+            )
         return out
 
     _parallelism = _effective_parallelism(parallelism)
@@ -613,7 +624,9 @@ def run_deploy(
                     stage="hosts",
                     item="talos",
                     seconds=deploy_timing.elapsed(stage_t0),
+                    mode="waited",
                 )
+                item_modes["waited"] += 1
                 return finish(
                     {
                         "ok": False,
@@ -641,7 +654,9 @@ def run_deploy(
                     stage="hosts",
                     item="talos",
                     seconds=deploy_timing.elapsed(stage_t0),
+                    mode="waited",
                 )
+                item_modes["waited"] += 1
                 reach = failed_phase == "reach" and plain
                 payload: dict[str, Any] = {
                     "ok": False,
@@ -666,7 +681,10 @@ def run_deploy(
                     payload["user_step"] = step
                 return finish(payload)
             hosts_s = round(deploy_timing.elapsed(stage_t0), 1)
-            deploy_timing.log_timing(log, stage="hosts", item="talos", seconds=hosts_s)
+            deploy_timing.log_timing(
+                log, stage="hosts", item="talos", seconds=hosts_s, mode="waited"
+            )
+            item_modes["waited"] += 1
             deploy_timing.log_timing(log, stage="hosts", seconds=hosts_s)
             timings.append(
                 {
@@ -705,6 +723,7 @@ def run_deploy(
                 stages_total=stages_total,
                 version=version,
                 from_stage=from_stage,
+                item_modes=item_modes,
             )
             if failure is not None:
                 deploy_timing.log_timing(
@@ -729,8 +748,13 @@ def run_deploy(
                 )
                 item_s = round(deploy_timing.elapsed(item_t0), 1)
                 deploy_timing.log_timing(
-                    log, stage=stage["id"], item=item["name"], seconds=item_s
+                    log,
+                    stage=stage["id"],
+                    item=item["name"],
+                    seconds=item_s,
+                    mode="waited",
                 )
+                item_modes["waited"] += 1
                 stage_items.append({"name": item["name"], "seconds": item_s})
                 rc = result.get("returncode")
                 if rc not in (0, None) and not result.get("dry_run"):

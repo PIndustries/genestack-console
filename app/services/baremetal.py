@@ -1106,19 +1106,23 @@ def iso_boot(
     dry_run: bool,
     log: LogFn,
     settings: Settings | None = None,
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     """Boot node via Redfish virtual CD (Talos ISO).
 
     Returns {"ok": bool, "image_url": str, ...}.
+    A non-empty ``image_url`` is used as given (stripped); otherwise the
+    environment ISO from :func:`iso_image_url` is mounted.
     """
     settings = settings or Settings()
+    chosen = str(image_url).strip() if image_url else ""
+    if not chosen:
+        from app.services import envconfig as envconfig_service
 
-    from app.services import envconfig as envconfig_service
-
-    current = envconfig_service.get_current(db, env)
-    doc = current[0] if current else {}
-
-    image_url = iso_image_url(env, doc, settings)
+        current = envconfig_service.get_current(db, env)
+        doc = current[0] if current else {}
+        chosen = iso_image_url(env, doc, settings)
+    image_url = chosen
 
     if dry_run:
         log(f"[dry-run] would mount {image_url} on {node.name} and reboot")

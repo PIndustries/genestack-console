@@ -189,9 +189,23 @@ def system_macs(host: str, username: str, password: str) -> list[str]:
 def insert_virtual_media(
     host: str, username: str, password: str, image_url: str
 ) -> str:
-    """Insert virtual CD/DVD media (ISO image) into the system."""
-    # Stub implementation - would use Redfish VirtualMedia endpoints
-    return "/redfish/v1/Managers/1/VirtualMedia/CD"
+    """Insert a virtual CD via the generic Redfish InsertMedia action.
+
+    iLO and iDRAC share this path. There is no vendor-specific manager URL.
+    """
+    image = (image_url or "").strip()
+    if not image:
+        raise RedfishError("image_url is empty")
+    path = "/redfish/v1/Managers/1/VirtualMedia/CD/Actions/VirtualMedia.InsertMedia"
+    _request(
+        "POST",
+        host,
+        username,
+        password,
+        path,
+        json={"Image": image, "Inserted": True},
+    )
+    return path
 
 
 def force_restart(host: str, username: str, password: str) -> None:

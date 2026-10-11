@@ -137,6 +137,17 @@ jobs:
           print(f"release {tag} exists")
           PY
 
+      # Fleet gate. A non-zero pytest fails the tag before Compile.
+      # The report is published with the binary, not the disk or ISO.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Build-matrix pytest
+        run: |
+          mkdir -p dist
+          uv run --extra dev pytest tests/test_build_matrix.py tests/test_redfish_contract.py tests/test_deploy_timing.py -q --tb=line
+          BUILD_REPORT_PATH=dist/build-report.json uv run --extra dev python -c "from app.services.build_matrix import write_report; print(write_report())"
+
       - name: Compile tools
         run: |
           set -euo pipefail
@@ -253,6 +264,7 @@ jobs:
             dist/version.json
             dist/console.sh
             dist/console.ps1
+            dist/build-report.json
           body_path: dist/NOTES.md
 
       - name: Upload binary for the appliance disk

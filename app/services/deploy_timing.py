@@ -19,6 +19,7 @@ TIMING_RE = re.compile(
     r"(?:\s+stage=(?P<stage>\S+))?"
     r"(?:\s+item=(?P<item>\S+))?"
     r"(?:\s+host=(?P<host>\S+))?"
+    r"(?:\s+mode=(?P<mode>waited|beside))?"
     r"\s+seconds=(?P<seconds>[0-9]+(?:\.[0-9]+)?)"
 )
 
@@ -55,6 +56,7 @@ def log_timing(
     item: str = "",
     phase: str = "",
     host: str = "",
+    mode: str = "",
 ) -> None:
     if log is None:
         return
@@ -67,6 +69,8 @@ def log_timing(
         bits.append(f"item={item}")
     if host:
         bits.append(f"host={host}")
+    if mode:
+        bits.append(f"mode={mode}")
     bits.append(f"seconds={float(seconds):.1f}")
     log("[timing] " + " ".join(bits))
 
@@ -89,6 +93,7 @@ def parse_timings(log_text: str | None) -> dict[str, Any]:
         stage = match.group("stage") or ""
         item = match.group("item") or ""
         host = match.group("host") or ""
+        mode = match.group("mode") or ""
         if phase == "total":
             total_s = seconds
             continue
@@ -108,7 +113,10 @@ def parse_timings(log_text: str | None) -> dict[str, Any]:
             continue
         rec = stages.setdefault(stage, {"id": stage, "seconds": None, "items": []})
         if item:
-            rec["items"].append({"name": item, "seconds": seconds})
+            entry: dict[str, Any] = {"name": item, "seconds": seconds}
+            if mode:
+                entry["mode"] = mode
+            rec["items"].append(entry)
         else:
             rec["seconds"] = seconds
     out_stages = list(stages.values())
