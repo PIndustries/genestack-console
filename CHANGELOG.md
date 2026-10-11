@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.1
+
+A release now has to pass the build matrix before it compiles, and a deploy says where the time went.
+
+- The nine intakes are outside ISO, this console's PXE, virtual CD, PXE with no management port, user-installed Ubuntu, existing Talos, existing Kubernetes, Talos then Ubuntu then Kubespray, and Look around. The report marks the hardware as not run.
+- Virtual CD insert posts the generic Redfish InsertMedia action. iLO and iDRAC use that same path. An outside ISO URL is the image that gets mounted. The test does not call a BMC.
+- Deploy over SSH passes parallelism 2. Keystone finishes first. Placement and Glance then run together. The other stages stay one at a time. The log ends with a scoreboard of seconds, waited items, and items that ran beside another.
+
 ## 2026.10.10.3
 
 The machines you added can be drawn as a rack, and the next action says how to install.
