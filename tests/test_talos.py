@@ -326,7 +326,8 @@ def test_private_cidr_pins_fabric_and_nodeports():
     patch = network_patch_yaml(doc)
     assert "10.10.0.0/24" in patch
     assert "10.0.0.0/8" not in patch
-    assert "nodeport-addresses" in patch
+    assert "nodePortAddresses" in patch
+    assert "KubeProxyConfig" in patch
     assert "healthz-bind-address" in patch
     fw = firewall_yaml(doc)
     assert "10.10.0.0/24" in fw
@@ -340,6 +341,7 @@ talos:
   cluster_name: example
   install_disk: /dev/sda
 ovh:
+  vrack: pn-example
   vlan_id: 10
   private_cidr: 10.10.0.0/24
 servers:
@@ -368,7 +370,7 @@ def test_vlan_patch_tags_private_nic_by_mac(tmp_path):
     assert "vlanId: 10" in patch
     assert "10.10.0.11/24" in patch
     assert "addresses:" in patch
-    loaded = yaml.safe_load(patch)
+    loaded = next(yaml.safe_load_all(patch))
     iface = loaded["machine"]["network"]["interfaces"][0]
     assert "addresses" not in iface
     assert iface["vlans"][0]["vlanId"] == 10
@@ -421,11 +423,12 @@ servers:
 
 
 def test_missing_vlan_id_defaults_to_100(tmp_path):
-    """Fabric UI default is VLAN 100; a doc that never saved fabric must not land untagged."""
+    """A selected vRack with no vlan uses VLAN 100."""
     doc = _doc(
         """\
 provider: talos
 ovh:
+  vrack: pn-example
   private_cidr: 10.10.0.0/24
 servers:
   ns1:
@@ -439,21 +442,77 @@ servers:
     patch = node_vlan_patch_yaml("ns1", doc["servers"]["ns1"], doc)
     assert patch is not None
     assert "vlanId: 100" in patch
-    loaded = yaml.safe_load(patch)
+    loaded = next(yaml.safe_load_all(patch))
     assert loaded["machine"]["network"]["interfaces"][0]["vlans"][0]["vlanId"] == 100
     plan = build_talos_plan(doc, _env(tmp_path))
     assert plan["vlan_id"] == 100
 
 
+def test_vlan_without_vrack_stays_untagged():
+    assert vlan_id_from_doc({"ovh": {}}) == 0
+    assert vlan_id_from_doc({"ovh": {"vlan_id": 100, "private_cidr": "10.10.0.0/24"}}) == 0
+    assert vlan_id_from_doc({"ovh": {"vlan_id": 10}}) == 0
+
+
+def test_saved_ovh_defaults_do_not_tag_a_flat_network(tmp_path):
+    doc = _doc(
+        """\
+provider: talos
+ovh:
+  vlan_id: 100
+  private_cidr: 10.10.0.0/24
+servers:
+  cp1:
+    ip: 192.168.50.12
+    roles: [k8s_control_plane]
+"""
+    )
+    assert vlan_id_from_doc(doc) == 0
+    patch = node_vlan_patch_yaml("cp1", doc["servers"]["cp1"], doc)
+    assert "HostnameConfig" in patch
+    assert "auto: 'off'" in patch
+    assert "vlanId" not in patch
+    assert "interfaces:" not in patch
+    shared = network_patch_yaml(doc)
+    assert "KubeNodeConfig" in shared
+    assert "KubeletConfig" in shared
+    assert "KubeProxyConfig" not in shared
+    assert "nodePortAddresses" not in shared
+    assert "10.10.0.0/24" not in shared
+    assert "10.0.0.0/8" in shared
+    plan = build_talos_plan(doc, _env(tmp_path))
+    assert plan["vlan_id"] == 0
+
+
+def test_vrack_without_private_mac_is_refused(tmp_path):
+    doc = _doc(
+        """\
+provider: talos
+ovh:
+  vrack: pn-example
+  vlan_id: 100
+  private_cidr: 10.10.0.0/24
+servers:
+  cp1:
+    ip: 10.10.0.11
+    private_ip: 10.10.0.11
+    roles: [k8s_control_plane]
+"""
+    )
+    with pytest.raises(ConfigValidationError, match="private MAC"):
+        build_talos_plan(doc, _env(tmp_path))
+
+
 def test_invalid_vlan_id_defaults_to_100():
-    assert vlan_id_from_doc({"ovh": {}}) == 100
-    assert vlan_id_from_doc({"ovh": {"vlan_id": None}}) == 100
-    assert vlan_id_from_doc({"ovh": {"vlan_id": ""}}) == 100
-    assert vlan_id_from_doc({"ovh": {"vlan_id": "not-a-vlan"}}) == 100
-    assert vlan_id_from_doc({"ovh": {"vlan_id": 4001}}) == 100
-    assert vlan_id_from_doc({"ovh": {"vlan_id": -1}}) == 100
-    assert vlan_id_from_doc({"ovh": {"vlan_id": 0}}) == 0
-    assert vlan_id_from_doc({"ovh": {"vlan_id": 10}}) == 10
+    selected = {"ovh": {"vrack": "pn-example"}}
+    assert vlan_id_from_doc(selected) == 100
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": None}}) == 100
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": ""}}) == 100
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": "not-a-vlan"}}) == 100
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": 4001}}) == 100
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": -1}}) == 100
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": 0}}) == 0
+    assert vlan_id_from_doc({"ovh": {"vrack": "pn-example", "vlan_id": 10}}) == 10
 
 
 def test_plan_defaults_cluster_name_and_disk(tmp_path):

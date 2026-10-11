@@ -288,7 +288,7 @@ def cluster_cidrs_from_doc(doc: dict[str, Any]) -> list[str]:
         out = [str(item).strip() for item in raw if _valid_cidr(str(item).strip())]
         if out:
             return out
-    private = private_cidr_from_doc(doc)
+    private = private_cidr_from_doc(doc) if vrack_selected(doc) else ""
     if private and _valid_cidr(private):
         cidrs = [private]
         for extra in (
@@ -308,8 +308,29 @@ def _ovh_map(doc: dict[str, Any]) -> dict[str, Any]:
     return section if isinstance(section, dict) else {}
 
 
+def vrack_selected(doc: dict[str, Any]) -> bool:
+    """True when an OVH vRack is the cluster fabric.
+
+    VLAN 100 and 10.10.0.0/24 belong to that vRack. A saved copy of those
+    values does not tag a flat network. The vRack is selected when
+    ``ovh.vrack`` is set or a server carries a vRack VNI.
+    """
+    if str(_ovh_map(doc).get("vrack") or "").strip():
+        return True
+    for entry in _doc_servers(doc).values():
+        if isinstance(entry, dict) and str(entry.get("vrack_vni") or "").strip():
+            return True
+    return False
+
+
 def vlan_id_from_doc(doc: dict[str, Any]) -> int:
-    """Return the private-NIC VLAN. Missing/null/invalid → 100; explicit 0 is untagged."""
+    """VLAN on the vRack private NIC. No vRack means untagged.
+
+    Missing or invalid vlan on a selected vRack is 100. Explicit 0 stays
+    untagged.
+    """
+    if not vrack_selected(doc):
+        return 0
     section = _ovh_map(doc)
     if "vlan_id" not in section or section.get("vlan_id") is None:
         return DEFAULT_VLAN_ID
@@ -388,7 +409,9 @@ def public_management_cidrs_from_doc(doc: dict[str, Any]) -> list[str]:
 
 
 def nodeport_bind_cidrs_from_doc(doc: dict[str, Any]) -> list[str]:
-    """CIDRs kube-proxy may bind NodePorts on (private fabric only)."""
+    """CIDRs kube-proxy may bind NodePorts on (vRack fabric only)."""
+    if not vrack_selected(doc):
+        return []
     private = private_cidr_from_doc(doc)
     if private and _valid_cidr(private):
         return [str(ipaddress.ip_network(private, strict=False))]
@@ -556,7 +579,12 @@ def _node_record(hostname: str, entry: dict[str, Any]) -> dict[str, str]:
 
 
 def network_patch_yaml(doc: dict[str, Any]) -> str:
-    """Strategic merge patch applied to every node: certSANs + kubelet fabric."""
+    """Patch applied to every node: certSANs plus Talos 1.14 kubelet documents.
+
+    ``machine.kubelet`` and ``cluster.proxy`` stay out of the v1alpha1
+    document. Talos 1.14 already emits KubeletConfig, KubeNodeConfig, and
+    KubeProxyConfig, and rejects the same fields in both places.
+    """
     cidrs = cluster_cidrs_from_doc(doc)
     sans: list[str] = []
     for hostname, entry in _doc_servers(doc).items():
@@ -568,29 +596,33 @@ def network_patch_yaml(doc: dict[str, Any]) -> str:
                 sans.append(addr)
         if hostname and hostname not in sans:
             sans.append(str(hostname))
-    kubelet: dict[str, Any] = {
-        "nodeIP": {"validSubnets": cidrs},
-        "extraArgs": {
-            "healthz-bind-address": "127.0.0.1",
-            "read-only-port": "0",
+    documents: list[dict[str, Any]] = [
+        {
+            "apiVersion": "v1alpha1",
+            "kind": "KubeNodeConfig",
+            "nodeIP": {"validSubnets": cidrs},
         },
-    }
-    patch: dict[str, Any] = {
-        "machine": {
-            "certSANs": sans,
-            "kubelet": kubelet,
+        {
+            "apiVersion": "v1alpha1",
+            "kind": "KubeletConfig",
+            "extraArgs": {
+                "healthz-bind-address": "127.0.0.1",
+                "read-only-port": "0",
+            },
         },
-    }
+    ]
     nodeports = nodeport_bind_cidrs_from_doc(doc)
     if nodeports:
-        patch["cluster"] = {
-            "proxy": {
-                "extraArgs": {
-                    "nodeport-addresses": ",".join(nodeports),
-                }
+        documents.append(
+            {
+                "apiVersion": "v1alpha1",
+                "kind": "KubeProxyConfig",
+                "config": {"nodePortAddresses": nodeports},
             }
-        }
-    return yaml.safe_dump(patch, sort_keys=False)
+        )
+    merge = yaml.safe_dump({"machine": {"certSANs": sans}}, sort_keys=False).rstrip()
+    extra = yaml.safe_dump_all(documents, sort_keys=False, explicit_start=True).rstrip()
+    return f"{merge}\n{extra}\n"
 
 
 def etcd_patch_yaml(doc: dict[str, Any]) -> str:
@@ -607,42 +639,60 @@ def etcd_patch_yaml(doc: dict[str, Any]) -> str:
     return yaml.safe_dump(patch, sort_keys=False)
 
 
+def _named_private_nic(entry: dict[str, Any]) -> tuple[str, str]:
+    mac = str(entry.get("private_mac") or "").strip()
+    kernel = str(entry.get("private_iface") or "").strip()
+    return mac, kernel
+
+
 def node_vlan_patch_yaml(
     hostname: str, entry: dict[str, Any], doc: dict[str, Any]
-) -> str | None:
-    """Per-node patch: 802.1q on the private NIC (vRack) plus its cluster address.
+) -> str:
+    """Per-node patch: HostnameConfig, plus a private NIC when one is named.
 
-    VLAN 0 is untagged — pin the address on the private MAC. VLAN 1-4000
-    puts the cluster address on ``vlans: [{vlanId}]`` and clears the parent
-    so we do not keep an untagged IP next to the tagged one.
-    Returns None when there is nothing to pin (no MAC, no private IP).
+    The hostname is a Talos 1.14 document. ``machine.network.hostname``
+    conflicts with the HostnameConfig that ``gen config`` already writes.
+
+    VLAN 0 pins an untagged address on the private MAC. A vRack VLAN is
+    placed only on a MAC or a kernel interface name. A device with neither
+    is left out.
     """
-    mac = str(entry.get("private_mac") or "").strip()
-    ip = node_cluster_ip(entry, hostname)
+    mac, kernel = _named_private_nic(entry)
+    raw_ip = _clean_ip(entry.get("private_ip")) or _clean_ip(entry.get("ip"))
     vlan_id = vlan_id_from_doc(doc)
     cidr = private_cidr_from_doc(doc)
-    addr = address_with_prefix(ip, cidr) if ip else ""
-    if not mac and not (vlan_id > 0 and addr):
-        return None
-    iface: dict[str, Any] = {"dhcp": False}
-    if mac:
-        iface["deviceSelector"] = {"hardwareAddr": mac}
-    if vlan_id > 0:
+    addr = address_with_prefix(raw_ip, cidr) if raw_ip else ""
+    iface: dict[str, Any] | None = None
+    if vlan_id > 0 and (mac or kernel):
+        iface = {"dhcp": False}
+        if mac and not kernel:
+            iface["deviceSelector"] = {"hardwareAddr": mac}
+        if kernel:
+            iface["interface"] = kernel
         vlan: dict[str, Any] = {"vlanId": vlan_id}
         if addr:
             vlan["addresses"] = [addr]
         iface["vlans"] = [vlan]
-        # Parent must not keep the cluster IP untagged. Omit addresses rather
-        # than [] — Talos strategic-merge leaves an existing list alone.
-        iface.pop("addresses", None)
-        kernel = str(entry.get("private_iface") or "").strip()
-        if kernel:
-            iface["interface"] = kernel
-            iface.pop("deviceSelector", None)
-    elif addr:
-        iface["addresses"] = [addr]
-    network: dict[str, Any] = {"hostname": hostname, "interfaces": [iface]}
-    return yaml.safe_dump({"machine": {"network": network}}, sort_keys=False)
+    elif mac and addr:
+        iface = {
+            "dhcp": False,
+            "deviceSelector": {"hardwareAddr": mac},
+            "addresses": [addr],
+        }
+    host_doc = {
+        "apiVersion": "v1alpha1",
+        "kind": "HostnameConfig",
+        "hostname": hostname,
+        "auto": "off",
+    }
+    host_yaml = yaml.safe_dump(host_doc, sort_keys=False).rstrip()
+    if iface is None:
+        return host_yaml + "\n"
+    network_yaml = yaml.safe_dump(
+        {"machine": {"network": {"interfaces": [iface]}}},
+        sort_keys=False,
+    ).rstrip()
+    return f"{network_yaml}\n---\n{host_yaml}\n"
 
 
 def firewall_yaml(doc: dict[str, Any]) -> str:
@@ -899,6 +949,19 @@ def build_talos_plan(
         )
     servers_doc = _doc_servers(doc)
     vlan_id = vlan_id_from_doc(doc)
+    if vlan_id > 0:
+        unnamed = []
+        for node in control_planes + workers:
+            entry = servers_doc.get(node["hostname"])
+            entry = entry if isinstance(entry, dict) else {}
+            if not any(_named_private_nic(entry)):
+                unnamed.append(node["hostname"])
+        if unnamed:
+            raise ConfigValidationError(
+                f"VLAN {vlan_id} is the OVH vRack private NIC. "
+                f"These machines have no private MAC: {', '.join(unnamed)}. "
+                "Name that NIC, or clear the vRack for an untagged network."
+            )
 
     def _apply_for(node: dict[str, str], phase: str, filename: str) -> None:
         entry = servers_doc.get(node["hostname"])

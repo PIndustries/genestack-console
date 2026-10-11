@@ -28,8 +28,6 @@ const STEPS = ["Basics", "Connect", "Deployment", "Servers", "Summary"];
 const TIERS = ["dev", "lab", "staging", "prod"];
 const INSTALL_POLL_MS = 5000;
 const MAX_SERVER_ROWS = 12;
-const DEFAULT_VLAN_ID = 100;
-const DEFAULT_PRIVATE_CIDR = "10.10.0.0/24";
 
 // Plain-English labels for the checkbox UI. Inventory ids are unchanged.
 const ROLE_PLAIN = {
@@ -1448,8 +1446,8 @@ function finishWizardToSummary({ delayMs = 0 } = {}) {
 // row is rendered from state, so a failure must not block the finish flow.
 // NOTE: kubespray ssh_password is stored per-server (encrypted) by addServers;
 // the deploy: section is pushed to the host as plaintext YAML — never secrets.
-// VLAN 100 / 10.10.0.0/24 is written best-effort afterwards so Talos does not
-// treat a missing vlan_id as 0 (untagged).
+// VLAN 100 / 10.10.0.0/24 is the OVH vRack fabric. It is saved from the vRack
+// card after a vRack is selected, not from this wizard.
 async function saveDeploymentConfig(envId) {
   const provider = v("provider", "talos");
   const body = { provider };
@@ -1466,14 +1464,6 @@ async function saveDeploymentConfig(envId) {
     method: "PUT",
     body: JSON.stringify(body),
   });
-  try {
-    await api(`/api/v1/environments/${encodeURIComponent(envId)}/ovh/vrack`, {
-      method: "PUT",
-      body: JSON.stringify({ vlan_id: DEFAULT_VLAN_ID, private_cidr: DEFAULT_PRIVATE_CIDR }),
-    });
-  } catch {
-    // Swallow 4xx (and anything else) — do not block the wizard.
-  }
 }
 
 // ---------- legacy compatibility: buildBody kept for external use ----------
