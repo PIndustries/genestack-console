@@ -348,6 +348,46 @@ def private_cidr_from_doc(doc: dict[str, Any]) -> str:
     return str(_ovh_map(doc).get("private_cidr") or "").strip()
 
 
+def _network_map(doc: dict[str, Any]) -> dict[str, Any]:
+    section = doc.get("network") if isinstance(doc, dict) else None
+    return section if isinstance(section, dict) else {}
+
+
+def management_gateway(doc: dict[str, Any]) -> str:
+    """Default route for an untagged management NIC. Empty when unset."""
+    raw = str(_network_map(doc).get("gateway") or "").strip()
+    if not raw:
+        return ""
+    try:
+        return str(ipaddress.ip_address(raw))
+    except ValueError:
+        return ""
+
+
+def management_cidr(doc: dict[str, Any]) -> str:
+    """Subnet of the untagged management NIC. Empty when unset or invalid."""
+    raw = str(_network_map(doc).get("cidr") or "").strip()
+    if raw and _valid_cidr(raw):
+        return str(ipaddress.ip_network(raw, strict=False))
+    return ""
+
+
+def prefix_cidr_for_address(addr: str, doc: dict[str, Any]) -> str:
+    """CIDR whose prefix is written on an untagged address.
+
+    ``network.cidr`` wins when the address sits inside it. Otherwise the
+    saved private CIDR still supplies the prefix length.
+    """
+    mgmt = management_cidr(doc)
+    if mgmt:
+        try:
+            if ipaddress.ip_address(addr) in ipaddress.ip_network(mgmt, strict=False):
+                return mgmt
+        except ValueError:
+            pass
+    return private_cidr_from_doc(doc)
+
+
 def address_with_prefix(ip: str, cidr: str) -> str:
     addr = str(ip or "").split("/", 1)[0].strip()
     if not addr:
@@ -673,12 +713,16 @@ def node_vlan_patch_yaml(
         if addr:
             vlan["addresses"] = [addr]
         iface["vlans"] = [vlan]
-    elif mac and addr:
+    elif mac and raw_ip:
+        pinned = address_with_prefix(raw_ip, prefix_cidr_for_address(raw_ip, doc))
         iface = {
             "dhcp": False,
             "deviceSelector": {"hardwareAddr": mac},
-            "addresses": [addr],
+            "addresses": [pinned or raw_ip],
         }
+        gateway = management_gateway(doc)
+        if gateway:
+            iface["routes"] = [{"network": "0.0.0.0/0", "gateway": gateway}]
     host_doc = {
         "apiVersion": "v1alpha1",
         "kind": "HostnameConfig",
@@ -962,6 +1006,11 @@ def build_talos_plan(
                 f"These machines have no private MAC: {', '.join(unnamed)}. "
                 "Name that NIC, or clear the vRack for an untagged network."
             )
+    net = _network_map(doc)
+    if str(net.get("gateway") or "").strip() and not management_gateway(doc):
+        raise ConfigValidationError("network.gateway is invalid")
+    if str(net.get("cidr") or "").strip() and not management_cidr(doc):
+        raise ConfigValidationError("network.cidr is invalid")
 
     def _apply_for(node: dict[str, str], phase: str, filename: str) -> None:
         entry = servers_doc.get(node["hostname"])
@@ -1794,6 +1843,8 @@ def run_talos_bootstrap(
             f"[talos] private NIC carries 802.1q VLAN {vlan_id} "
             "(vRack interconnect — untagged parent, tagged cluster fabric)"
         )
+    elif management_gateway(doc):
+        log(f"[talos] management gateway {management_gateway(doc)}")
     if plan.get("lock_public"):
         ports = ",".join(str(p) for p in DEFAULT_PUBLIC_MANAGEMENT_PORTS)
         mgmt = public_management_cidrs_from_doc(doc)

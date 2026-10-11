@@ -20,7 +20,7 @@ Older server rows may still say ``source: maas``; they still load::
                    service_name: <ovh internal name|null>,
                    public_ip, private_ip, private_mac, vrack_vni>}
     ovh: {vrack, vlan_id, private_cidr}        # dedicated/Rise fabric (802.1q on private NIC)
-    network: {gateway_domain, acme_email, hyperconverged,
+    network: {gateway, cidr, gateway_domain, acme_email, hyperconverged,
               container_interface,  # kube-ovn IFACE; Talos: VLAN iface with the private IP (e.g. enp3934127.100), not the untagged parent
               compute_interface,    # must NOT be the public / default-route NIC
               ovn: {external_interface, ...},  # br-ex uplink; never the public NIC (empty does not fall back to compute_interface)
@@ -183,6 +183,8 @@ KNOWN_NETWORK_KEYS = frozenset(
         "ovn",
         "metallb_pools",
         "ovn_bridge_mappings",
+        "gateway",
+        "cidr",
     }
 )
 
@@ -1342,6 +1344,7 @@ def set_provider(
     provider: str,
     talos: dict | None = None,
     deploy: dict | None = None,
+    network: dict | None = None,
 ) -> tuple[EnvConfigVersion, list[str]]:
     """Set the deployment provider (+ talos/deploy sections) as a NEW config version.
 
@@ -1361,6 +1364,8 @@ def set_provider(
         raise ConfigValidationError("set_provider: talos must be a mapping")
     if deploy is not None and not isinstance(deploy, dict):
         raise ConfigValidationError("set_provider: deploy must be a mapping")
+    if network is not None and not isinstance(network, dict):
+        raise ConfigValidationError("set_provider: network must be a mapping")
     current = get_current(db, env)
     doc: dict[str, Any] = dict(current[0]) if current else {}
     doc["provider"] = provider
@@ -1379,6 +1384,10 @@ def set_provider(
         merged = dict(doc.get("deploy") or {})
         merged.update({k: v for k, v in deploy.items() if v is not None})
         doc["deploy"] = merged
+    if network is not None:
+        merged_net = dict(doc.get("network") or {})
+        merged_net.update({k: v for k, v in network.items() if v is not None})
+        doc["network"] = merged_net
     row, warnings = put_version(db, env, _dump(doc), actor)
     warnings.extend(
         f"deploy: unknown key '{key}' (ignored)"

@@ -484,6 +484,62 @@ servers:
     assert plan["vlan_id"] == 0
 
 
+def test_management_gateway_pins_the_untagged_nic(tmp_path):
+    doc = _doc(
+        """\
+provider: talos
+ovh:
+  vlan_id: 100
+  private_cidr: 10.10.0.0/24
+network:
+  cidr: 172.16.40.0/24
+  gateway: 172.16.40.254
+servers:
+  cp1:
+    ip: 172.16.40.12
+    private_mac: "00:50:56:ac:00:12"
+    roles: [k8s_control_plane]
+"""
+    )
+    assert vlan_id_from_doc(doc) == 0
+    patch = node_vlan_patch_yaml("cp1", doc["servers"]["cp1"], doc)
+    loaded = next(yaml.safe_load_all(patch))
+    iface = loaded["machine"]["network"]["interfaces"][0]
+    assert iface["addresses"] == ["172.16.40.12/24"]
+    assert iface["routes"] == [{"network": "0.0.0.0/0", "gateway": "172.16.40.254"}]
+    assert iface["deviceSelector"]["hardwareAddr"] == "00:50:56:ac:00:12"
+    assert "vlans" not in iface
+    plan = build_talos_plan(doc, _env(tmp_path))
+    assert plan["vlan_id"] == 0
+
+
+def test_vrack_pin_does_not_take_the_management_gateway():
+    doc = _doc(DOC_TALOS_VLAN)
+    doc["network"] = {"gateway": "203.0.113.1", "cidr": "203.0.113.0/24"}
+    patch = node_vlan_patch_yaml("ns1", doc["servers"]["ns1"], doc)
+    loaded = next(yaml.safe_load_all(patch))
+    iface = loaded["machine"]["network"]["interfaces"][0]
+    assert "routes" not in iface
+    assert iface["vlans"][0]["vlanId"] == 10
+
+
+def test_invalid_management_gateway_is_refused(tmp_path):
+    doc = _doc(
+        """\
+provider: talos
+network:
+  gateway: not-an-ip
+servers:
+  cp1:
+    ip: 172.16.40.12
+    private_mac: "00:50:56:ac:00:12"
+    roles: [k8s_control_plane]
+"""
+    )
+    with pytest.raises(ConfigValidationError, match="network.gateway"):
+        build_talos_plan(doc, _env(tmp_path))
+
+
 def test_vrack_without_private_mac_is_refused(tmp_path):
     doc = _doc(
         """\

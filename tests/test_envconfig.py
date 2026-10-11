@@ -1509,6 +1509,20 @@ def test_set_provider_stores_talos_and_merges(db_session):
     }
     assert doc["deploy"] == {"ssh_host": "deployer.example.com", "ssh_user": "deploy"}
 
+    v3, warnings = envconfig_service.set_provider(
+        db,
+        env,
+        "tester",
+        provider="talos",
+        network={"gateway": "172.16.12.254", "cidr": "172.16.12.0/24"},
+    )
+    db.commit()
+    doc, _ = envconfig_service.parse_document(v3.yaml_text)
+    assert doc["network"]["gateway"] == "172.16.12.254"
+    assert doc["network"]["cidr"] == "172.16.12.0/24"
+    assert doc["talos"]["cluster_name"] == "gs1"
+    assert not any("network: unknown key" in item for item in warnings)
+
 
 def test_set_provider_rejects_unknown_provider(db_session):
     db, env = db_session

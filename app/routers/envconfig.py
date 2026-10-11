@@ -54,6 +54,7 @@ class ProviderPut(BaseModel):
     provider: str = Field(min_length=1)
     talos: dict[str, Any] | None = None
     deploy: dict[str, Any] | None = None
+    network: dict[str, Any] | None = None
 
 
 class ServerRemove(BaseModel):
@@ -206,6 +207,7 @@ def put_config_provider(
             provider=body.provider,
             talos=body.talos,
             deploy=body.deploy,
+            network=body.network,
         )
     except envconfig_service.ConfigValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
