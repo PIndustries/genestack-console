@@ -19,7 +19,7 @@ The sidebar is:
 | Hardware | `#/hardware` | `app/static/js/pages/hardware.js` | Inventory, bare metal, and provider accounts. |
 | Activity | `#/activity` | `app/static/js/pages/activity.js` | Jobs, alerts, and the audit log. Three tabs. |
 | Catalog | `#/operations` | `app/static/js/pages/operations.js` | Every operation the console can run. The same list as `GET /api/v1/operations`. |
-| Admin | `#/admin` | `app/static/js/pages/admin.js` | People, tenants, memberships, and, on `main`, Reach and Database. Hidden unless you are a platform admin. |
+| Admin | `#/admin` | `app/static/js/pages/admin.js` | People, tenants, memberships, Reach, and Database. Hidden unless you are a platform admin. |
 
 A new install opens on a welcome. It says this machine stays outside the cluster, and inventory is one list. Add each machine by hostname and IP. A virtual machine and a physical server are the same row. On Machines, boot the Talos ISO yourself, then choose Talos is already installed. That button does not boot it. For Ubuntu, select the rows and choose Already have an OS, then Deploy over SSH. A cluster that is already running is Settings, Access, Adopt Kubespray. Guided setup is `#/setup`, `app/static/js/pages/env_wizard.js`. The Servers step is that list. Import or discover stays behind it and writes the same rows. The Talos image field stays blank, and the page shows the ISO to boot yourself. The summary has Apply on this environment and opens Machines. An empty address, and a company login that lands on `#/fleet`, stay on the fleet. `#/setup` and `#/admin` are left alone.
 
@@ -49,7 +49,7 @@ Machines is the list of computers. The cluster strip (Ready, Talos, Kubernetes, 
 
 Rack is the same machines, drawn as a cabinet. Nothing typed means one rack named Rack 1, one U each, stacked from U1. A machine past U48 stays beside that rack. Flat is the elevation, with U1 at the bottom. Space is that cabinet, and you can orbit it. Cloud puts the rack beside Metal, Kubernetes, and Instances. A solid line is a fact this console already has: a Ready address, a saved management port, or a virtual machine on that host. A dashed line is a connection you typed. The console does not invent a switch or a PDU cable. Add gear when you want a switch, a PDU, or a layer, with a height in U. `environment_rack.js`. `GET /api/v1/environments/{id}/rack`.
 
-On a row, Ubuntu and Talos are the two choices. The outlined choice is the operating system already recorded. The button says Reinstall when you keep that system, and Install when you pick the other one. Ubuntu queues `hosts.ubuntu.bringup`. Talos on a row that has a management port queues `baremetal.node.next_boot` with the next boot set to Talos and boot now. Talos on a row with no management port, and the Talos is already installed button, queue `genestack.talos.bootstrap` for every saved host. That job does not reboot a machine until you confirm that machine by name. Confirming replaces the running install. A management port can do that reboot after the confirm. If this console cannot reboot it, the job names the one step left and waits until the installer is up. An admin starts it. Already have an OS records the selected hosts that already have Ubuntu. It does not install. A management port is optional. Open wall lists the management ports. Select a server and its console appears. Select it again and that console goes away. Show all live opens the rest. Clear and Close empty the stage. Opening a console does not power or boot the machine. The row and the wall ship in `v2026.10.04.1`. The `v2026.10.03` binary does not have this row or this wall.
+On a row, Ubuntu and Talos are the two choices. The outlined choice is the operating system already recorded. The button says Reinstall when you keep that system, and Install when you pick the other one. Ubuntu queues `hosts.ubuntu.bringup`. Talos on a row that has a management port queues `baremetal.node.next_boot` with the next boot set to Talos and boot now. Talos on a row with no management port, and the Talos is already installed button, queue `genestack.talos.bootstrap` for every saved host. That job does not reboot a machine until you confirm that machine by name. Confirming replaces the running install. A management port can do that reboot after the confirm. If this console cannot reboot it, the job names the one step left and waits until the installer is up. An admin starts it. Already have an OS records the selected hosts that already have Ubuntu. It does not install. A management port is optional. Open wall lists the management ports. Select a server and its console appears. Select it again and that console goes away. Show all live opens the rest. Clear and Close empty the stage. Opening a console does not power or boot the machine. The row and the wall ship in `v2026.10.04.1`.
 
 Settings is four more tabs.
 
@@ -67,18 +67,18 @@ Activity has three tabs.
 | Tab | File | What it shows |
 | --- | --- | --- |
 | Jobs | `jobs.js` | Queued, running, and finished jobs, and the log of the one you open. |
-| Alerts | `alerts.js` | Rules, firing events, and, on `main`, the notification channels. |
+| Alerts | `alerts.js` | Rules, firing events, and the notification channels. |
 | Audit | `audit.js` | Who changed what. |
 
-A notification channel is a Slack, Discord, or Teams webhook, or a Resend or Twilio credential. An admin saves it on the Alerts tab. The secret is encrypted and is not shown again. A rule can send through that channel and through its own webhook URL. This is on `main`. The `v2026.10.03` binary does not have that card.
+A notification channel is a Slack, Discord, or Teams webhook, or a Resend or Twilio credential. An admin saves it on the Alerts tab. The secret is encrypted and is not shown again. A rule can send through that channel and through its own webhook URL.
 
-On `main`, Admin has a Reach card for the deploy host, and Settings → Access has a Reach card for one environment. A WireGuard client config is shown once. A Tailscale auth key and a Cloudflare tunnel token are not shown again. The `v2026.10.03` binary does not have those cards.
+Admin has a Reach card for the deploy host, and Settings → Access has a Reach card for one environment. A WireGuard client config is shown once. A Tailscale auth key and a Cloudflare tunnel token are not shown again.
 
-On `main`, Admin has a Database card that shows SQLite or Postgres, the URL with the password hidden, and Move. Move copies every table onto an empty target, writes `database_url`, and tells you to restart. The `v2026.10.03` binary does not have that card.
+Admin has a Database card that shows SQLite or Postgres, the URL with the password hidden, and Move. Move copies every table onto an empty target, writes `database_url`, and tells you to restart.
 
-Traces are API-only. An admin reads and posts spans at `/api/v1/traces`. There is no traces screen. This is on `main`. It is not in the `v2026.10.03` binary.
+Traces are API-only. An admin reads and posts spans at `/api/v1/traces`. There is no traces screen.
 
-On `main`, Settings → Access has the cluster-already-running card. Adopt Kubespray is the first form. Paste the kubeconfig there. That records a cluster that is already up. It does not add servers. Servers are added on Machines. Ubuntu autoinstall and MicroK8s stay behind that form. Talos stays on Machines. Install Ubuntu on the bare-metal row is the boot that puts Ubuntu on the machine. The `v2026.10.03` binary does not have this card. Install Ubuntu is on `main` and is not in that binary either.
+Settings → Access has the cluster-already-running card. Adopt Kubespray is the first form. Paste the kubeconfig there. That records a cluster that is already up. It does not add servers. Servers are added on Machines. Ubuntu autoinstall and MicroK8s stay behind that form. Talos stays on Machines. Install Ubuntu on the bare-metal row is the boot that puts Ubuntu on the machine.
 
 ## What the other screen files are
 

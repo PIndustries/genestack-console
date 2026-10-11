@@ -2,7 +2,7 @@
 
 The SDK is the `genestack_sdk` package in this repository. It is a Python client for the console HTTP API. The client calls the console the customer runs. `my.genestack.dev` is not a hosted console and it is not this library.
 
-This is on `main`. It is not in the `v2026.10.03` binary. The license is Apache-2.0.
+The license is Apache-2.0.
 
 ## Calling the API
 

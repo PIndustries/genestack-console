@@ -1,6 +1,6 @@
 # The console HTTP API
 
-The web page, a script, and the Apple apps all call the same API. It is served by the console on the deploy host, at `/api/v1`. This page is the map of that API. The path-by-path reference is the OpenAPI document on a running console, at `/swagger`, and the [API reference](https://github.com/PIndustries/genestack-console/blob/v2026.10.03/API_REFERENCE.md){:target="_blank"} for the `v2026.10.03` binary. The source on `main` can be ahead of that file.
+The web page, a script, and the Apple apps all call the same API. It is served by the console on the deploy host, at `/api/v1`. This page is the map of that API. The path-by-path reference is the OpenAPI document on a running console, at `/swagger`, and the [API reference](https://github.com/PIndustries/genestack-console/blob/main/API_REFERENCE.md){:target="_blank"} in this repository.
 
 The install chapter is [Genestack Console](genestack-guide.md). The jobs the API queues are [Console jobs](jobs.md). How one of those jobs is claimed and run is [How a job runs](runtime.md).
 
@@ -37,9 +37,9 @@ A route that names an environment checks your membership in that environment's t
 | `app/routers/update.py` | Whether a newer console release is published, and `GET /api/v1/update/feed` for the release notes and the public pipeline. The check reads `update.url` in `config.yaml`. The default in the program is the `version.json` file on the GitHub Release. A viewer can read both. The running console installs a newer build when `update.watch` is on and no job is queued or running. |
 | `app/routers/ui.py` | The web page at `/ui`, and `/docs` on the console itself. |
 | `app/routers/agents.py` | The agent install script, unauthenticated, and the agent API. The install script is the curl the remote machine runs. The agent then connects out. |
-| `app/routers/reach.py` | WireGuard, Tailscale, and Cloudflare Tunnel on this deploy host, and the address used for one environment. A platform admin saves the hub. An operator attaches an environment. Private keys, auth keys, and tunnel tokens are not returned. A WireGuard client config is returned once, when the peer is created. On `main`. Not in the `v2026.10.03` binary. |
-| `app/routers/database.py` | Copy this console's database between SQLite and Postgres. A platform admin reads the engine and the masked URL, or moves every table onto an empty target and writes `database_url`. The console must be restarted. The password is not returned. On `main`. Not in the `v2026.10.03` binary. |
-| `app/routers/traces.py` | Spans of this process and of modules people add. `GET /api/v1/traces` and `POST /api/v1/traces`. Admin only. The buffer is in memory and a restart clears it. No tokens. On `main`. Not in the `v2026.10.03` binary. |
+| `app/routers/reach.py` | WireGuard, Tailscale, and Cloudflare Tunnel on this deploy host, and the address used for one environment. A platform admin saves the hub. An operator attaches an environment. Private keys, auth keys, and tunnel tokens are not returned. A WireGuard client config is returned once, when the peer is created. |
+| `app/routers/database.py` | Copy this console's database between SQLite and Postgres. A platform admin reads the engine and the masked URL, or moves every table onto an empty target and writes `database_url`. The console must be restarted. The password is not returned. |
+| `app/routers/traces.py` | Spans of this process and of modules people add. `GET /api/v1/traces` and `POST /api/v1/traces`. Admin only. The buffer is in memory and a restart clears it. No tokens. |
 
 `GET /` redirects a browser to `/ui`.
 
@@ -82,7 +82,7 @@ The boot order, and why the console is the DHCP server, is on the [install chapt
 | `app/routers/livestate.py` | The latest snapshot the collector wrote. |
 | `app/routers/stream.py` | A server-sent stream of job and alert events. The page uses it instead of polling every row. |
 | `app/routers/alerts.py` | Alert rules and the events they fired. |
-| `app/routers/notify.py` | Saved Slack, Discord, Teams, Resend, and Twilio credentials. On `main`. Not in the `v2026.10.03` binary. A viewer can list the name. An admin can save. The secret is not returned. |
+| `app/routers/notify.py` | Saved Slack, Discord, Teams, Resend, and Twilio credentials. A viewer can list the name. An admin can save. The secret is not returned. |
 | `app/routers/metrics.py` | Metric samples the collector stored. |
 
 ### This repository, and providers

@@ -1,6 +1,6 @@
 # The console program
 
-[Genestack Console](genestack-guide.md) is the program you install on the deploy host. This page is how that program is put together. The binary named on the install chapter is `v2026.10.03`. These chapters describe the source on `main`, which can be ahead of that tag. When a step and that binary disagree, follow the tag.
+[Genestack Console](genestack-guide.md) is the program you install on the deploy host. This page is how that program is put together. Getting Started installs the latest release.
 
 Genestack is the scripts, Ansible, and charts that install OpenStack on Kubernetes. This repository is the console, the program that runs those scripts. The Python package is `app`.
 
@@ -71,7 +71,7 @@ Passwords, kubeconfigs, management-port secrets, and notification credentials ar
 | `agent_credentials`, `agent_commands` | An agent enrolled at a remote site, and a command sent to it. |
 | `cluster_snapshots`, `metric_samples`, `config_drift` | What the collector last saw, a few metric samples, and a difference between saved settings and the cluster. |
 | `alert_rules`, `alert_events` | A rule, and the time it fired. |
-| `notify_channels` | A Slack, Discord, Teams, Resend, or Twilio credential, encrypted. This table is on `main`. It is not in the `v2026.10.03` binary. |
+| `notify_channels` | A Slack, Discord, Teams, Resend, or Twilio credential, encrypted. |
 | `apps` | An application the console can deploy onto a cloud that is already up. |
 
 An older `config.yaml` that still has a `maas` block still loads. The console does not use it. The next save drops the block. Talos is installed by this program, from the network.
@@ -92,7 +92,7 @@ A company login is optional. It is off until `oidc.enabled` is set. The account 
 
 The collector asks the cluster, on a timer, and writes a snapshot. The web page reads the snapshot. It does not open Kubernetes on each click. If the cluster stops answering, the snapshot goes stale and the console can still power the servers and run the install. It cannot invent a live answer from a cluster that is down.
 
-An alert rule watches that snapshot. The conditions are a node that is not Ready, a pod in a crash loop, a failed probe, and a service that is down. The rule fires once when the condition starts. It does not send again when the condition clears. A rule can post to its own webhook URL. On `main`, it can also send through a saved channel. The channel is Slack, Discord, Teams, Resend, or Twilio. The secret is stored encrypted and is not returned after you save it. A missing or disabled channel is skipped. The webhook still fires.
+An alert rule watches that snapshot. The conditions are a node that is not Ready, a pod in a crash loop, a failed probe, and a service that is down. The rule fires once when the condition starts. It does not send again when the condition clears. A rule can post to its own webhook URL. It can also send through a saved channel. The channel is Slack, Discord, Teams, Resend, or Twilio. The secret is stored encrypted and is not returned after you save it. A missing or disabled channel is skipped. The webhook still fires.
 
 ## The agent
 

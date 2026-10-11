@@ -1,6 +1,6 @@
 # How a job runs
 
-[Genestack Console](genestack-guide.md) records a job when you click. This page is what happens after that, on the deploy host. The binary named on the install chapter is `v2026.10.03`. These chapters describe the source on `main`, which can be ahead of that tag.
+[Genestack Console](genestack-guide.md) records a job when you click. This page is what happens after that, on the deploy host. Getting Started installs the latest release.
 
 How the program is split is [The console program](program.md). The operation names are [Console jobs](jobs.md).
 
@@ -149,7 +149,7 @@ The event bus in `app/services/events.py` is inside one process. The worker is a
 
 The browser cannot put an `Authorization` header on that stream, or on the terminal socket. It trades the session for a one-use ticket at `POST /api/v1/auth/ticket` and connects with `?ticket=`. The ticket is kept in memory for that API process. It is not written to the database.
 
-Alert rules watch the snapshot. The conditions are a node that is not Ready, a pod in a crash loop, a failed probe, and a service that is down. A rule fires when the condition starts. It does not send a second message when the condition clears. On `main`, a rule can name a saved Slack, Discord, Teams, Resend, or Twilio channel. A missing or disabled channel is skipped. A webhook URL on the rule is checked again before it is called, so a saved URL cannot be pointed at a local address later.
+Alert rules watch the snapshot. The conditions are a node that is not Ready, a pod in a crash loop, a failed probe, and a service that is down. A rule fires when the condition starts. It does not send a second message when the condition clears. A rule can name a saved Slack, Discord, Teams, Resend, or Twilio channel. A missing or disabled channel is skipped. A webhook URL on the rule is checked again before it is called, so a saved URL cannot be pointed at a local address later.
 
 Once a day, and once when the worker starts, `app/services/retention.py` prunes. The defaults are 30 days of jobs, 90 days of audit rows, 7 days of agent commands, 30 days of alert events, and 50 saved config versions per environment.
 
@@ -167,7 +167,7 @@ The agent also reports what it sees. `GSC_PXE_LEASES` is an optional path to a d
 
 `hub.advertise_url` in `config.yaml` is the address the agent is told to use when the console's own bind address is loopback. The agent has to be able to open that address. The console does not open an inbound path to the site.
 
-WireGuard, Tailscale, and Cloudflare Tunnel are separate. They are how this deploy host reaches a site that is not L2 with it. They are off until you turn them on in Admin → Reach, or in `config.yaml`, and then apply. Apply does not run when the process starts. The console generates the WireGuard keys, assigns `10.67.67.1` to itself and the next free address to a peer, and writes a `wg-quick` file. The peer's client config is shown once. A Tailscale auth key and a Cloudflare tunnel token are stored encrypted and are not shown again. `tailscale up` is a short command. `cloudflared tunnel run` is a process the console starts and can stop. A missing `wg-quick`, `tailscale`, or `cloudflared` is reported. The file is still written. The agent program is unchanged: it still dials out with `GSC_HUB_URL` and `GSC_AGENT_TOKEN`. This is on `main`. The `v2026.10.03` binary does not include it.
+WireGuard, Tailscale, and Cloudflare Tunnel are separate. They are how this deploy host reaches a site that is not L2 with it. They are off until you turn them on in Admin → Reach, or in `config.yaml`, and then apply. Apply does not run when the process starts. The console generates the WireGuard keys, assigns `10.67.67.1` to itself and the next free address to a peer, and writes a `wg-quick` file. The peer's client config is shown once. A Tailscale auth key and a Cloudflare tunnel token are stored encrypted and are not shown again. `tailscale up` is a short command. `cloudflared tunnel run` is a process the console starts and can stop. A missing `wg-quick`, `tailscale`, or `cloudflared` is reported. The file is still written. The agent program is unchanged: it still dials out with `GSC_HUB_URL` and `GSC_AGENT_TOKEN`.
 
 ## config.yaml
 

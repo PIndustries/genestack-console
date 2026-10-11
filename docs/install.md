@@ -153,8 +153,7 @@ The console can also reach a site on a path it runs on the deploy host.
 These paths are off until you turn them on. Apply is a button or an API
 call. The console does not start them when the process starts. If the
 program is not installed, the status says the tool is missing and the
-config file is still written. This is on `main`. The `v2026.10.03`
-binary does not include it.
+config file is still written.
 
 WireGuard is a VPN the console manages. The deploy host is the server,
 on interface `wg-gsc`, network `10.67.67.0/24`. Pick a network that does

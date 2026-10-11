@@ -1,7 +1,5 @@
 # The console database
 
-This is on `main`. It is not in the `v2026.10.03` binary.
-
 The console runs on a dedicated Linux server. That server is the deploy host. The deploy host is the machine that installs the cloud, and it stays outside the cluster. The cluster is the Kubernetes and OpenStack cloud this console builds. Users, jobs, and saved secrets for the console itself stay on the deploy host. They are not stored in the cluster.
 
 By default that data is in SQLite. SQLite is a database kept in one file on the deploy host. A new install uses `data/console.db`. The `database_url` key in `config.yaml` is `sqlite:///./data/console.db`. Postgres is the other supported database. Postgres is a database server the console can open instead of that file. A Postgres URL starts with `postgresql+psycopg://`.

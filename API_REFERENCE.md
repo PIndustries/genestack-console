@@ -120,8 +120,6 @@ A platform admin reads and saves the hub. An operator attaches one environment. 
 
 `POST /api/v1/reach/{kind}/apply` writes the config and applies it. A missing `wg-quick`, `tailscale`, or `cloudflared` sets `status` to `tool_missing`. The console does not apply on startup.
 
-This is on `main`. The `v2026.10.03` binary does not include these routes.
-
 ```bash
 curl -X PUT http://localhost:8000/api/v1/reach/wireguard \
   -H "X-API-Key: $KEY" \
@@ -137,8 +135,6 @@ curl -X PUT http://localhost:8000/api/v1/reach/wireguard \
 
 `POST /api/v1/database/move` copies every table onto an empty SQLite or Postgres database, writes `database_url`, and leaves the running process on the old database. Restart the console after. The target must have no rows. The password is not returned.
 
-This is on `main`. The `v2026.10.03` binary does not include these routes.
-
 ```bash
 curl -X POST http://localhost:8000/api/v1/database/move \
   -H "X-API-Key: $KEY" \
@@ -151,8 +147,6 @@ curl -X POST http://localhost:8000/api/v1/database/move \
 ## Traces
 
 `GET /api/v1/traces` returns recent spans, newest last. `POST /api/v1/traces` appends one span. Admin only. The buffer is in memory. A restart clears it. The payload has no tokens.
-
-This is on `main`. The `v2026.10.03` binary does not include these routes.
 
 ```bash
 curl http://localhost:8000/api/v1/traces \
