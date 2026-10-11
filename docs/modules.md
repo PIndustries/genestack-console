@@ -30,7 +30,7 @@ Built-in modules and a module you write use the same shape.
 | `app/modules/genestack/` | Push config, run the install scripts, and check the cloud. |
 | `app/modules/ansible/` | A host check, or an allow-listed playbook. |
 | `app/modules/openstack/` | List servers, and start, stop, reboot, or delete one. |
-| `app/modules/hostvm/` | Virtual machines on the console host. |
+| `app/modules/hostvm/` | Virtual machines on the console host, including the lab. |
 | `app/modules/agents/` | See an agent, run an allow-listed command, or install the agent. |
 | `app/modules/platform/` | Day-2 actions on a node that is already installed, including Kubernetes drain and apply. |
 | `app/modules/ovh/` | Reinstall an OVH server, or attach it to a vRack. |

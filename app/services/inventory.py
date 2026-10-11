@@ -184,6 +184,14 @@ def build_inventory_from_environment(
         entry = {"ansible_host": server.get("ip") or name}
         if source in ("static", "terraform"):
             entry["ansible_user"] = server.get("ssh_user") or "ubuntu"
+        ssh_port = server.get("ssh_port")
+        if ssh_port not in (None, ""):
+            try:
+                port = int(ssh_port)
+            except (TypeError, ValueError):
+                port = 0
+            if 1 <= port <= 65535:
+                entry["ansible_port"] = port
         inventory["all"]["hosts"][name] = {
             k: v for k, v in entry.items() if v is not None
         }

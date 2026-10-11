@@ -22,6 +22,7 @@ let refreshTimer = null;
 let lastVms = []; // last rendered list — rows re-render from this on job updates
 const vmJobs = new Map(); // vm_id -> { id, label, status } (buttons disabled while set)
 const vmDoneIds = new Set(); // terminal jobs already toasted/refreshed for
+let labJob = null; // { id, status } while Create lab is queued or running
 let streamHandle = null;
 let sseLive = false;
 let jobPollTimer = null;
@@ -176,7 +177,7 @@ function paint(data) {
     if (count) count.textContent = "";
     body.classList.add("muted");
     body.innerHTML = `<div class="hv-empty">No VMs discovered.
-      <div style="font-size:.82rem;margin-top:.35rem">Hypervisor discovery roots are configurable on the console host — add a root or define a VM manually to see it here.</div>
+      <div style="font-size:.82rem;margin-top:.35rem">Create lab starts Ubuntu guests on this computer. A VM that is already here shows up when its discovery root is configured.</div>
     </div>`;
     return;
   }
@@ -192,6 +193,66 @@ const VM_OPS = {
   stop: { operation: "hostvm.stop", label: "stop", confirm: (n) => `Stop VM '${n}'?` },
   restart: { operation: "hostvm.restart", label: "restart", confirm: (n) => `Restart VM '${n}'?` },
 };
+
+const LAB_ROLES = {
+  3: "lab-1 is control, lab-2 is compute and network, lab-3 is storage.",
+  4: "lab-1 is control, lab-2 is compute and network, lab-3 is storage, lab-4 is a worker.",
+  5: "lab-1 is control, lab-2 is compute and network, lab-3 is storage, lab-4 is a worker, lab-5 is a second compute.",
+};
+
+function paintLabLine() {
+  const line = document.getElementById("hv-lab-line");
+  const btn = document.getElementById("btn-hv-lab");
+  const active = !!(labJob && JOB_ACTIVE.has(String(labJob.status || "queued")));
+  if (btn && canRun()) btn.disabled = active;
+  if (!line) return;
+  if (!labJob || !labJob.id) {
+    line.innerHTML = "";
+    return;
+  }
+  const id = String(labJob.id);
+  line.innerHTML =
+    `<span class="pill warn">lab ${esc(labJob.status || "queued")}</span> ` +
+    `<a href="#/activity?tab=jobs&job=${esc(id)}">job ${esc(id.slice(0, 8))}…</a>`;
+}
+
+async function startLab() {
+  const select = document.getElementById("hv-lab-count");
+  const count = Number(select && select.value) || 3;
+  const message =
+    `Create a ${count}-node lab on this console host?\n\n` +
+    "This is not a production workload. The console stays outside the cluster.\n" +
+    "Each guest is Ubuntu, 4 vCPU, 16 GiB, and a thin 80 GB disk.\n" +
+    `${LAB_ROLES[count] || ""}\n` +
+    "OpenStack does not install until you Apply on the environment.";
+  if (!confirm(message)) return;
+  labJob = { id: "", status: "queued" };
+  paintLabLine();
+  try {
+    const job = await api("/api/v1/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        operation: "hostvm.lab",
+        params: { count, confirm: true },
+      }),
+    });
+    const id = job && job.id != null ? String(job.id) : "";
+    if (!id) {
+      labJob = null;
+      paintLabLine();
+      return;
+    }
+    labJob = { id, status: "queued" };
+    toast(`Lab job ${id.slice(0, 8)}… created`, "ok");
+    paintLabLine();
+    scheduleJobPolling();
+  } catch (e) {
+    labJob = null;
+    paintLabLine();
+    toast(`Create lab failed to start: ${e.message}`, "bad");
+    if (e.status === 403) toast("Insufficient role: operator required", "bad");
+  }
+}
 
 function vmAction(vm, op) {
   const spec = VM_OPS[op];
@@ -247,6 +308,16 @@ function trackedVmId(jobId) {
 // jobs topic event: {type:"job", id, status}.
 function onJobEvent(payload) {
   if (!payload || payload.id == null) return;
+  if (labJob && String(labJob.id) === String(payload.id)) {
+    const status = String(payload.status || "").toLowerCase();
+    if (JOB_ACTIVE.has(status)) {
+      labJob = { id: String(payload.id), status };
+      paintLabLine();
+      return;
+    }
+    finishLabJob(String(payload.id), status);
+    return;
+  }
   const vmId = trackedVmId(payload.id);
   if (vmId == null) return;
   const status = String(payload.status || "").toLowerCase();
@@ -263,6 +334,19 @@ function onJobEvent(payload) {
 
 // Terminal state: drop the row lock, toast once, reload so the new power
 // state shows.
+async function finishLabJob(jobId, status) {
+  labJob = null;
+  paintLabLine();
+  if (!vmDoneIds.has(jobId)) {
+    vmDoneIds.add(jobId);
+    toast(
+      `lab ${status === "success" ? "succeeded" : status || "finished"}`,
+      status === "success" ? "ok" : "bad"
+    );
+  }
+  await loadVms({ background: true });
+}
+
 async function finishVmJob(vmId, jobId, status) {
   const job = vmJobs.get(vmId);
   vmJobs.delete(vmId);
@@ -285,6 +369,20 @@ function scheduleJobPolling() {
 async function pollVmJobs() {
   jobPollTimer = null;
   if (!mounted || !document.getElementById("hv-card")) return;
+  if (labJob && labJob.id) {
+    try {
+      const job = await api(`/api/v1/jobs/${encodeURIComponent(labJob.id)}`);
+      const status = String(job && job.status ? job.status : "").toLowerCase();
+      if (JOB_ACTIVE.has(status)) {
+        labJob = { id: String(labJob.id), status };
+        paintLabLine();
+      } else {
+        await finishLabJob(String(labJob.id), status);
+      }
+    } catch {
+      // transient fetch failure — retry on the next tick
+    }
+  }
   for (const [vmId, j] of [...vmJobs]) {
     if (!j.id) continue;
     let job;
@@ -303,7 +401,7 @@ async function pollVmJobs() {
       await finishVmJob(vmId, String(j.id), status);
     }
   }
-  if (vmJobs.size && !sseLive) scheduleJobPolling();
+  if ((vmJobs.size || (labJob && labJob.id)) && !sseLive) scheduleJobPolling();
 }
 
 // ---------- serial console panel ----------
@@ -378,6 +476,7 @@ export function destroy() {
   sseLive = false;
   lastVms = [];
   vmJobs.clear();
+  labJob = null;
   serialVmId = null;
 }
 
@@ -390,9 +489,18 @@ export async function render(root) {
       <h2>Host VMs</h2>
       <span id="hv-count" class="muted"></span>
       <button class="secondary btn-sm" id="btn-hv-refresh" type="button">Refresh</button>
+      <label class="muted hv-lines-label">lab
+        <select id="hv-lab-count" ${gate(canRun(), "operator")}>
+          <option value="3" selected>3 nodes</option>
+          <option value="4">4 nodes</option>
+          <option value="5">5 nodes</option>
+        </select>
+      </label>
+      <button class="secondary btn-sm" id="btn-hv-lab" type="button" ${gate(canRun(), "operator")}>Create lab</button>
       <span class="muted" id="hv-updated" style="font-size:.78rem"></span>
     </div>
-    <p class="muted hv-sub">VMs discovered on this hypervisor from the configured discovery roots, re-scanned on every load.</p>
+    <p class="muted hv-sub">VMs discovered on this hypervisor. Create lab starts a 3 to 5 node Ubuntu cluster on this computer. It is not a production workload.</p>
+    <div id="hv-lab-line"></div>
     <div id="hv-err"></div>
     <div id="hv-body" class="muted">—</div>
   </div>
@@ -419,6 +527,8 @@ export async function render(root) {
     document.getElementById("btn-hv-serial-latest")
   );
   document.getElementById("btn-hv-refresh").addEventListener("click", () => loadVms());
+  document.getElementById("btn-hv-lab").addEventListener("click", () => startLab());
+  paintLabLine();
   document.getElementById("btn-hv-serial-refresh").addEventListener("click", () => loadSerial());
   document.getElementById("btn-hv-serial-close").addEventListener("click", () => closeSerial());
   document.getElementById("hv-serial-lines").addEventListener("change", (e) => {

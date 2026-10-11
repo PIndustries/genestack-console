@@ -59,6 +59,7 @@ CATALOG_ORDER = (
     "hostvm.start",
     "hostvm.stop",
     "hostvm.restart",
+    "hostvm.lab",
     "agent.status",
     "agent.command",
     "agent.install",

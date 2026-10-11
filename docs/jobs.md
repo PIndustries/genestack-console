@@ -149,6 +149,7 @@ The platform jobs are day-2. The server is already in the cluster. They are not 
 | `hostvm.start` | `app/modules/hostvm/power.py` | Starts one. |
 | `hostvm.stop` | `app/modules/hostvm/power.py` | Stops one. |
 | `hostvm.restart` | `app/modules/hostvm/power.py` | Restarts one. |
+| `hostvm.lab` | `app/modules/hostvm/lab.py` | Starts a 3 to 5 node lab on this console host. The default is 3. Pass confirm to start the guests. Without confirm, the job writes the plan. The environment stays rehearsed until you Apply. |
 | `agent.status` | `app/modules/agents/status.py` | Reports whether the agent at a site is connected. |
 | `agent.install` | `app/modules/agents/install.py` | Installs the agent. |
 | `agent.command` | `app/modules/agents/command.py` | Runs one allow-listed command on a connected agent. |

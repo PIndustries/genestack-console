@@ -18,6 +18,11 @@ curl -fsSL https://get.genestack.dev/console.sh | bash -s -- --version 2026.10.0
 The rest of the install is in [install.md](install.md). `--with-aio-vm` stays a
 local dev/test extra. Production deployments are multi-node from real inventory.
 
+Hosts, Create lab, starts a 3 to 5 node lab on a console that is already
+installed. The default is 3. Each guest is 4 vCPU, 16 GiB, and a thin 80 GB
+disk. The lab is not a production workload. `--with-aio-vm` creates one guest
+named `genestack-aio`.
+
 ## When you are changing the console
 
 Clone the repository and pass `--from-source` while you are editing the

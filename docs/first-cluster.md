@@ -103,6 +103,8 @@ Use this when you want control, compute, and storage on separate machines. The t
 
 A starting lab is 4 vCPU, 16 GiB of memory, and an 80 GB disk on each of the three. Talos can boot on less. Deploy is where a small machine runs out of room. The console does not refuse a small machine.
 
+On the console host, open Hosts and choose Create lab. That starts Ubuntu guests on this computer. The default is three: control, compute and network, and storage. Four adds a worker. Five adds a second compute. Each guest is 4 vCPU, 16 GiB, and a thin 80 GB disk. The console host stays outside the cluster. This lab is not a production workload. The environment stays rehearsed until you Apply, and Deploy over SSH is the step that installs Genestack.
+
 Talos is the operating system this console prefers. Boot the three machines from this ISO. It is the same image the console applies. Leave the image field in Guided setup blank. Guided setup shows this same address.
 
 ```text

@@ -882,6 +882,12 @@ def test_job_hostvm_ops_require_operator(client, viewer_headers):
 
 def test_hostvm_ops_not_environment_scoped():
     # Host VMs are host-level infra: catalog ops take no environment params.
-    for op_id in ("hostvm.list", "hostvm.start", "hostvm.stop", "hostvm.restart"):
+    for op_id in (
+        "hostvm.list",
+        "hostvm.start",
+        "hostvm.stop",
+        "hostvm.restart",
+        "hostvm.lab",
+    ):
         op = get_operation(op_id)
         assert all(p.name != "environment_id" for p in op.params)

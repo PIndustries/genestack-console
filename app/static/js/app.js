@@ -4,7 +4,7 @@ import { store, loadEnvs, applyEnvLifecycle, refreshEnvSelects } from "./store.j
 import { connect, closeAll } from "./stream.js";
 import { initTenantSwitcher, resetTenantSwitcher } from "./pages/tenant.js";
 import * as fleet from "./pages/fleet.js?v=ls39";
-import * as hosts from "./pages/hosts.js";
+import * as hosts from "./pages/hosts.js?v=ls69";
 import * as environments from "./pages/environments.js?v=ls30";
 import * as hardware from "./pages/hardware.js";
 import * as activity from "./pages/activity.js?v=ls57";
