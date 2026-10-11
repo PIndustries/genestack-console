@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.2
+
+Hosts can start a lab on the console computer.
+
+- Create lab starts three Ubuntu guests. Four adds a worker. Five adds a second compute. Each guest is 4 vCPU, 16 GiB, and a thin 80 GB disk. The three are control, compute and network, and storage. The console host stays outside the cluster. This is not a production workload.
+- The environment stays rehearsed until you Apply. SSH is ubuntu@127.0.0.1 from port 2222. Confirm starts the guests. Without confirm, the job writes the plan. A guest that is already up is left alone.
+- If qemu is not installed, the job installs qemu-system-x86 and qemu-utils.
+
 ## 2026.10.11.1
 
 A release now has to pass the build matrix before it compiles, and a deploy says where the time went.
