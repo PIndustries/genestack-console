@@ -1528,6 +1528,19 @@ def render_to_files(
                 base = dict(TALOS_KUBE_OVN_HELM.get(nested) or {})
                 base.update(existing[nested])
                 merged[nested] = base
+        network = doc.get("network")
+        if isinstance(network, dict) and network.get("container_interface"):
+            iface = str(network["container_interface"])
+            networking = merged.get("networking")
+            if not isinstance(networking, dict):
+                networking = {}
+            networking["IFACE"] = iface
+            vlan = networking.get("vlan")
+            if not isinstance(vlan, dict):
+                vlan = {}
+            vlan.setdefault("VLAN_INTERFACE_NAME", iface)
+            networking["vlan"] = vlan
+            merged["networking"] = networking
         files[kube_ovn_path] = _dump(merged)
 
     kustomize_patches = doc.get("kustomize_patches")
@@ -2114,6 +2127,93 @@ def ensure_kustomize_layout(
                 )
 
     return created
+
+
+def ensure_runtime_tree(
+    config_dir: str | Path,
+    genestack_root: str | Path,
+    log: Callable[[str], None] | None = None,
+) -> list[str]:
+    """Place bootstrap's runtime files in the env config dir when they are missing.
+
+    ``bootstrap.sh`` writes chart versions, manifests, helm-config directories,
+    and kustomize bases under ``/etc/genestack``. A Talos environment skips
+    that script. ``setup-infrastructure.sh`` still reads those paths. Existing
+    files and directories are left alone. Returns the relative paths added.
+    """
+    cfg = Path(config_dir)
+    root = Path(genestack_root)
+    added: list[str] = []
+
+    charts_src = root / "helm-chart-versions.yaml"
+    charts_dst = cfg / "helm-chart-versions.yaml"
+    if charts_src.is_file() and not charts_dst.exists():
+        charts_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(charts_src, charts_dst)
+        added.append("helm-chart-versions.yaml")
+
+    manifests_src = root / "manifests"
+    manifests_dst = cfg / "manifests"
+    if manifests_src.is_dir() and not manifests_dst.exists():
+        shutil.copytree(manifests_src, manifests_dst, symlinks=True)
+        added.append("manifests")
+
+    base_helm = root / "base-helm-configs"
+    if base_helm.is_dir():
+        for src in sorted(base_helm.iterdir()):
+            if not src.is_dir():
+                continue
+            dest = cfg / "helm-configs" / src.name
+            if not dest.is_dir():
+                dest.mkdir(parents=True, exist_ok=True)
+                added.append(f"helm-configs/{src.name}")
+        global_dir = cfg / "helm-configs" / "global_overrides"
+        if not global_dir.is_dir():
+            global_dir.mkdir(parents=True, exist_ok=True)
+            added.append("helm-configs/global_overrides")
+
+    added.extend(_link_kustomize_bases(cfg, root))
+    if added and log is not None:
+        log("[deploy] config dir layout: " + ", ".join(added))
+    return added
+
+
+def _link_kustomize_bases(config_dir: Path, genestack_root: Path) -> list[str]:
+    """Symlink base-kustomize entries into the config dir, matching bootstrap.sh.
+
+    An overlay directory the console already wrote is not replaced. ``base``
+    is linked beside it. Manifests are copied, not linked, because the
+    infrastructure script edits a storage class in place.
+    """
+    source = genestack_root / "base-kustomize"
+    target = config_dir / "kustomize"
+    added: list[str] = []
+    if not source.is_dir():
+        return added
+    for service in sorted(p for p in source.iterdir() if p.is_dir()):
+        name = service.name
+        children = list(service.iterdir())
+        dest_service = target / name
+        if not any(child.is_dir() for child in children):
+            if not dest_service.exists() and not dest_service.is_symlink():
+                dest_service.parent.mkdir(parents=True, exist_ok=True)
+                dest_service.symlink_to(service)
+                added.append(f"kustomize/{name}")
+            continue
+        dest_service.mkdir(parents=True, exist_ok=True)
+        for item in children:
+            link = dest_service / item.name
+            if link.exists() or link.is_symlink():
+                continue
+            link.symlink_to(item)
+            added.append(f"kustomize/{name}/{item.name}")
+    script = source / "kustomize.sh"
+    link = target / "kustomize.sh"
+    if script.is_file() and not link.exists() and not link.is_symlink():
+        target.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(script)
+        added.append("kustomize/kustomize.sh")
+    return added
 
 
 def sync_chart_versions_from_repo(ctx, log, dry_run=False):

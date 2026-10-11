@@ -121,6 +121,27 @@ def test_sweep_staged_kubeconfigs_missing_dir_is_noop(tmp_path):
     assert sweep_staged_kubeconfigs(tmp_path) == 0
 
 
+def test_kubeconfig_contexts_do_not_share_a_file(tmp_path, monkeypatch):
+    """A second reader must not unlink the file a running job still uses."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    payload = "apiVersion: v1\nclusters: []\ncurrent-context: live\n"
+    env = _env(kubeconfig_data=encrypt_secret(payload, settings))
+
+    first = build_context(env, settings)
+    second = build_context(env, settings)
+    assert first.kubeconfig != second.kubeconfig
+    assert Path(first.kubeconfig).read_text(encoding="utf-8") == payload
+    assert Path(second.kubeconfig).read_text(encoding="utf-8") == payload
+
+    first.cleanup()
+    assert not Path(first.kubeconfig).exists()
+    assert Path(second.kubeconfig).is_file()
+    assert second.subprocess_env()["KUBECONFIG"] == second.kubeconfig
+    second.cleanup()
+    assert not Path(second.kubeconfig).exists()
+
+
 def test_kubeconfig_path_used_when_no_blob(tmp_path):
     settings = get_settings()
     kube = tmp_path / "kubeconfig"

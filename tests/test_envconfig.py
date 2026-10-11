@@ -306,6 +306,53 @@ def test_talos_provider_renders_kube_ovn_writable_hostpaths():
     assert body["cni_conf"]["MOUNT_LOCAL_BIN_DIR"] is False
 
 
+def test_talos_kube_ovn_uses_the_saved_container_interface():
+    env = Environment(id="env-talos", name="env-talos")
+    files = envconfig_service.render_to_files(
+        {
+            "provider": "talos",
+            "network": {"container_interface": "eth0"},
+        },
+        env,
+    )
+    body = yaml.safe_load(files["helm-configs/kube-ovn/console-rendered.yaml"])
+    assert body["networking"]["IFACE"] == "eth0"
+    assert body["networking"]["vlan"]["VLAN_INTERFACE_NAME"] == "eth0"
+
+
+def test_runtime_tree_copies_charts_and_links_bases(tmp_path):
+    root = tmp_path / "genestack"
+    (root / "base-helm-configs" / "kube-ovn").mkdir(parents=True)
+    base = root / "base-kustomize" / "openstack" / "base"
+    base.mkdir(parents=True)
+    (base / "kustomization.yaml").write_text("kind: Kustomization\n", encoding="utf-8")
+    (root / "base-kustomize" / "kustomize.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    manifests = root / "manifests" / "longhorn"
+    manifests.mkdir(parents=True)
+    (manifests / "longhorn-namespace.yaml").write_text("kind: Namespace\n", encoding="utf-8")
+    (root / "helm-chart-versions.yaml").write_text(
+        "charts:\n  kube-ovn: v1.15.4\n", encoding="utf-8"
+    )
+    cfg = tmp_path / "etc-genestack"
+    overlay = cfg / "kustomize" / "openstack" / "overlay"
+    overlay.mkdir(parents=True)
+    (overlay / "kustomization.yaml").write_text("resources:\n- ../base\n", encoding="utf-8")
+
+    added = envconfig_service.ensure_runtime_tree(cfg, root)
+    assert "helm-chart-versions.yaml" in added
+    assert "manifests" in added
+    assert (cfg / "helm-chart-versions.yaml").read_text(encoding="utf-8").startswith("charts:")
+    assert (cfg / "manifests" / "longhorn" / "longhorn-namespace.yaml").is_file()
+    assert (cfg / "helm-configs" / "kube-ovn").is_dir()
+    link = cfg / "kustomize" / "openstack" / "base"
+    assert link.is_symlink()
+    assert link.resolve() == base.resolve()
+    assert (overlay / "kustomization.yaml").is_file()
+
+    again = envconfig_service.ensure_runtime_tree(cfg, root)
+    assert again == []
+
+
 def test_render_to_files_service_level_partial():
     """Absent sections produce no files (never wipe existing ones)."""
     env = Environment(id="env-x", name="env-x")

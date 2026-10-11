@@ -37,6 +37,7 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import re
+import shlex
 import threading
 import time
 from pathlib import Path
@@ -82,6 +83,8 @@ _OVH_TALOS_POLL_S = 10.0
 # first control-plane node; the deploy host copy lands under the config dir.
 REMOTE_ADMIN_CONF = "/etc/kubernetes/admin.conf"
 KUBECONFIG_FALLBACK_RELPATH = "inventory/artifacts/admin.conf"
+_UPSTREAM_CONFIG = "/etc/genestack"
+_INFRASTRUCTURE_SCRIPT = "bin/setup-infrastructure.sh"
 _SERVER_LINE_RE = re.compile(r"^(\s*server:\s*)\S+.*$", re.MULTILINE)
 
 # Parallel OpenStack services: the stage that installs keystone fans its
@@ -359,6 +362,46 @@ def _fetch_kubeconfig(
         log(f"[deploy] WARNING kubeconfig fetch failed: {exc}")
 
 
+def _pipeline_command(
+    script: str,
+    ctx: EnvContext,
+    *,
+    dry_run: bool,
+    local: bool,
+) -> list[str]:
+    """Argv for one pipeline script.
+
+    A local live run of setup-infrastructure.sh rewrites the upstream
+    ``/etc/genestack`` prefix to this environment's config dir. Install
+    scripts already honor GENESTACK_OVERRIDES_DIR. The infrastructure script
+    does not, and neither does the envoy setup it calls. A dry run, a remote
+    executor, and every other script stay ``bash <script>``.
+    """
+    config = ctx.config_dir
+    if (
+        dry_run
+        or not local
+        or config is None
+        or script != _INFRASTRUCTURE_SCRIPT
+        or str(config) == _UPSTREAM_CONFIG
+    ):
+        return ["bash", script]
+    cfg = str(config)
+    root = str(ctx.genestack_root)
+    if any(char in cfg or char in root for char in "|&\\\n'\"`$"):
+        return ["bash", script]
+    program = (
+        "{\n"
+        f"printf '%s\\n' {shlex.quote('cfg=' + shlex.quote(cfg))}\n"
+        "printf '%s\\n' 'rewrite() { local file=\"$1\"; shift; "
+        f"sed \"s|{_UPSTREAM_CONFIG}|${{cfg}}|g\" \"$file\" | bash -s -- \"$@\"; }}'\n"
+        f"sed {shlex.quote(f's|{_UPSTREAM_CONFIG}|{cfg}|g; s|{root}/bin/setup-envoy-gateway.sh|rewrite {root}/bin/setup-envoy-gateway.sh|g')} "
+        f"{shlex.quote(root + '/' + script)}\n"
+        "} | bash\n"
+    )
+    return ["bash", "-c", program]
+
+
 def run_deploy(
     db: Session,
     env: Environment,
@@ -397,6 +440,13 @@ def run_deploy(
     # Executor preference: agent (connected) -> ssh deploy host -> local.
     executor = pick_executor(env, ctx, settings)
     agent_env_id = executor.agent_env_id
+    local_executor = executor.kind == "local"
+    if ctx.config_dir is not None:
+        secrets_out = str(Path(ctx.config_dir) / "kubesecrets.yaml")
+        extra_env = dict(extra_env)
+        extra_env.setdefault("GENESTACK_SECRETS_OUTPUT", secrets_out)
+        remote_env = dict(remote_env)
+        remote_env.setdefault("GENESTACK_SECRETS_OUTPUT", secrets_out)
     if executor.kind == "agent":
         log("[deploy] executor: via agent — pipeline stages run on the agent host")
     elif executor.kind == "ssh":
@@ -492,6 +542,14 @@ def run_deploy(
         )
         if created:
             log(f"[deploy] kustomize layout: {created} missing overlay(s) created")
+        if (
+            local_executor
+            and ctx.config_dir is not None
+            and str(ctx.config_dir) != _UPSTREAM_CONFIG
+        ):
+            envconfig_service.ensure_runtime_tree(
+                ctx.config_dir, ctx.genestack_root, log
+            )
 
     components = (doc or {}).get("components")
     if not isinstance(components, dict):
@@ -736,7 +794,12 @@ def run_deploy(
                     check_cancel()
                 item_t0 = deploy_timing.now()
                 result = bridge.run_command(
-                    ["bash", item["script"]],
+                    _pipeline_command(
+                        item["script"],
+                        ctx,
+                        dry_run=dry_run,
+                        local=local_executor,
+                    ),
                     cwd=ctx.genestack_root,
                     timeout=clamp_deadline_timeout(timeout, deadline),
                     dry_run=dry_run,

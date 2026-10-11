@@ -75,6 +75,64 @@ def _job_log(client, headers, job_id) -> str:
     return resp.json()["log_text"]
 
 
+def test_infrastructure_command_follows_the_environment_config_dir(tmp_path):
+    """A local live infrastructure run reads this environment, not /etc/genestack."""
+    import subprocess
+
+    from app.services.deploy import _pipeline_command
+    from app.services.envcontext import EnvContext
+
+    root = tmp_path / "opt" / "genestack"
+    script = root / "bin" / "setup-infrastructure.sh"
+    script.parent.mkdir(parents=True)
+    envoy = root / "bin" / "setup-envoy-gateway.sh"
+    script.write_text(
+        "#!/bin/bash\n"
+        "set -e\n"
+        "echo INFRA:/etc/genestack/provider\n"
+        f"{root}/bin/setup-envoy-gateway.sh -e a@b -d cluster.local\n",
+        encoding="utf-8",
+    )
+    envoy.write_text(
+        "#!/bin/bash\n"
+        "set -e\n"
+        'echo "ENVOY:/etc/genestack/kustomize $*"\n',
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "env" / "etc-genestack"
+    cfg.mkdir(parents=True)
+    ctx = EnvContext(
+        environment=None,
+        genestack_root=root,
+        config_dir=cfg,
+        dry_run=False,
+        kubeconfig=None,
+    )
+
+    rehearsed = _pipeline_command(
+        "bin/setup-infrastructure.sh", ctx, dry_run=True, local=True
+    )
+    assert rehearsed == ["bash", "bin/setup-infrastructure.sh"]
+    remote = _pipeline_command(
+        "bin/setup-infrastructure.sh", ctx, dry_run=False, local=False
+    )
+    assert remote == ["bash", "bin/setup-infrastructure.sh"]
+    other = _pipeline_command(
+        "bin/install-keystone.sh", ctx, dry_run=False, local=True
+    )
+    assert other == ["bash", "bin/install-keystone.sh"]
+
+    argv = _pipeline_command(
+        "bin/setup-infrastructure.sh", ctx, dry_run=False, local=True
+    )
+    assert argv[0] == "bash" and argv[1] == "-c"
+    result = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert f"INFRA:{cfg}/provider" in result.stdout
+    assert f"ENVOY:{cfg}/kustomize -e a@b -d cluster.local" in result.stdout
+    assert "/etc/genestack" not in result.stdout
+
+
 def test_deploy_op_in_catalog():
     op = get_operation("genestack.deploy")
     assert op is not None

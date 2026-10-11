@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,11 +92,16 @@ class EnvContext:
 
 
 def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
-    """Decrypt env.kubeconfig_data to <data_dir>/kubeconfigs/<env_id>.yaml (0600).
+    """Decrypt env.kubeconfig_data to a private file under kubeconfigs/ (0600).
 
     The staging directory is 0700: it holds decrypted cluster credentials for
     every environment, so only the console user may list/read it even while a
     job is mid-flight and the file is on disk.
+
+    One file per context. The collector and every cluster read stage a
+    kubeconfig and delete it when they return. A shared name is rewritten or
+    unlinked while a deploy is still running, and the next kubectl falls
+    through to http://localhost:8080.
     """
     raw = decrypt_secret(env.kubeconfig_data, settings) or ""
     target_dir = settings.data_dir / "kubeconfigs"
@@ -103,7 +109,7 @@ def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
     # makedirs applies the mode subject to umask, and does not touch a
     # pre-existing dir — chmod explicitly so the 0700 guarantee holds either way.
     os.chmod(target_dir, 0o700)
-    target = target_dir / f"{env.id}.yaml"
+    target = target_dir / f"{env.id}.{uuid.uuid4().hex}.yaml"
     target.write_text(raw, encoding="utf-8")
     os.chmod(target, 0o600)
     return str(target)
