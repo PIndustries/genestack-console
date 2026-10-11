@@ -194,8 +194,8 @@ def test_gen_config_refuses_both_pki_markers(tmp_path):
         build_talos_plan(_doc(DOC_TALOS), _env(tmp_path))
 
 
-def test_resume_skips_gen_and_never_passes_force(tmp_path):
-    """A saved identity is reused. gen config --force is still refused."""
+def test_resume_rewrites_stale_machine_yaml(tmp_path):
+    """A saved identity is kept. Stale machine yaml is rewritten from it."""
     env = _env(tmp_path)
     workdir = tmp_path / "etc-genestack" / "talos"
     workdir.mkdir(parents=True)
@@ -203,7 +203,11 @@ def test_resume_skips_gen_and_never_passes_force(tmp_path):
     (workdir / "talosconfig").write_text("context: fake\n", encoding="utf-8")
     (workdir / "controlplane.yaml").write_text("version: v1alpha1\n", encoding="utf-8")
     plan = build_talos_plan(_doc(DOC_TALOS), env, allow_existing_pki=True)
-    assert not any(command["phase"] == "gen-config" for command in plan["commands"])
+    gen = next(
+        command["argv"] for command in plan["commands"] if command["phase"] == "gen-config"
+    )
+    assert gen[gen.index("--with-secrets") + 1] == "secrets.yaml"
+    assert "--force" in gen
     apply = next(
         command["argv"]
         for command in plan["commands"]
@@ -1057,7 +1061,9 @@ def test_talos_bootstrap_retries_saved_identity_in_maintenance(
     assert resp.status_code == 201, resp.text
     job = resp.json()
     assert job["status"] == "success", job["error"]
-    assert not any(argv[1:3] == ["gen", "config"] for argv in captured)
+    gen = next(argv for argv in captured if argv[1:3] == ["gen", "config"])
+    assert gen[gen.index("--with-secrets") + 1] == "secrets.yaml"
+    assert "--force" in gen
     assert any(
         "apply-config" in argv and "--insecure" in argv and "controlplane.yaml" in argv
         for argv in captured

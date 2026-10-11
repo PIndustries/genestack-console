@@ -1086,15 +1086,16 @@ def build_talos_plan(
     )
 
     if existing_pki and allow_existing_pki:
-        missing_machine = not (workdir / "controlplane.yaml").is_file()
-        if "secrets.yaml" in existing_pki and missing_machine:
+        # Rewrite machine yaml from the saved secrets. --force only
+        # overwrites the generated files; --with-secrets keeps the identity.
+        # A failed apply used to leave the old controlplane.yaml in place.
+        if "secrets.yaml" in existing_pki:
             for command in commands:
                 if command["phase"] == "gen-config":
-                    command["argv"] = [
-                        *command["argv"],
-                        "--with-secrets",
-                        "secrets.yaml",
-                    ]
+                    extra = ["--with-secrets", "secrets.yaml"]
+                    if (workdir / "controlplane.yaml").is_file():
+                        extra.append("--force")
+                    command["argv"] = [*command["argv"], *extra]
                     break
         else:
             commands = [c for c in commands if c["phase"] != "gen-config"]
