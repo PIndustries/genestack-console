@@ -831,9 +831,9 @@ def build_talos_plan(
     ``talosconfig``) — hosts stage must not ``gen config --force`` over live
     cluster identity.
 
-    ``allow_existing_pki`` is the live resume path. It still never passes
-    ``--force``. Machine config is regenerated with ``--with-secrets`` only
-    when ``secrets.yaml`` is present and ``controlplane.yaml`` is missing.
+    ``allow_existing_pki`` is the live resume path. Machine config is
+    regenerated from ``secrets.yaml`` when that file exists. A maintenance
+    fleet with a stale machine file is regenerated before apply.
     """
     talos_cfg = doc.get("talos") if isinstance(doc, dict) else None
     if talos_cfg is None:
@@ -1097,8 +1097,6 @@ def build_talos_plan(
                         extra.append("--force")
                     command["argv"] = [*command["argv"], *extra]
                     break
-        else:
-            commands = [c for c in commands if c["phase"] != "gen-config"]
 
     return {
         "cluster_name": cluster_name,
@@ -1772,6 +1770,17 @@ def _prepare_live_nodes(
             out["user_step"] = step
         return out
     commands = _commands_for_modes(plan["commands"], nodes, modes)
+    # A maintenance fleet has not accepted a config. Rewrite the machine
+    # file before apply. --force is safe here because no node is installed.
+    # A configured node keeps the saved identity and does not reach this branch.
+    if modes and all(mode == "maintenance" for mode in modes.values()):
+        for command in commands:
+            if command["phase"] != "gen-config":
+                continue
+            if "--force" not in command["argv"]:
+                command["argv"] = [*command["argv"], "--force"]
+            log("[talos] regenerating machine config before apply")
+            break
     kept = [node["hostname"] for node in nodes if modes.get(node["hostname"]) == "configured"]
     if kept:
         log(

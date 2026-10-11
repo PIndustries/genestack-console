@@ -1071,6 +1071,30 @@ def test_talos_bootstrap_retries_saved_identity_in_maintenance(
     assert "already looks bootstrapped" not in (job.get("error") or "")
 
 
+def test_talos_bootstrap_rewrites_machine_yaml_without_secrets(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    """Maintenance nodes must not reuse a machine file when secrets are gone."""
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    _save_identity(config_dir)
+    (config_dir / "talos" / "secrets.yaml").unlink()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    _put_doc(client, admin_headers, env["id"], doc=DOC_ONE_CP)
+    captured = _install_probe(monkeypatch, insecure_state="maintenance", auth_ok=False)
+
+    resp = _talos_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "success", job["error"]
+    gen = next(argv for argv in captured if argv[1:3] == ["gen", "config"])
+    assert "--force" in gen
+    assert "--with-secrets" not in gen
+    assert "regenerating machine config" in _job_log(client, admin_headers, job["id"])
+
+
 def test_talos_bootstrap_matching_client_leaves_the_node_installed(
     client, admin_headers, tmp_path, monkeypatch
 ):
