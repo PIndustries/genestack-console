@@ -310,7 +310,8 @@ _GROUP_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENV_VAR_NAME_RE = re.compile(r"[a-z][a-z0-9_]*")
 
 # Overlay kustomization rendered next to patches.yaml. Superset of the stub
-# bootstrap.sh creates (resources: [../base] only), so overwriting is safe.
+# bootstrap.sh creates (resources: [../base] only). Used only when a patch
+# file is written with it.
 _OVERLAY_KUSTOMIZATION = """\
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -318,6 +319,16 @@ resources:
   - ../base
 patches:
   - path: patches.yaml
+"""
+
+# bootstrap.sh writes this when an overlay has no patches. Helm's
+# post-renderer runs kubectl kustomize on the overlay, so a patches entry
+# with no file fails the install.
+_BOOTSTRAP_OVERLAY_KUSTOMIZATION = """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
 """
 
 # Service-name keys become path segments — keep them strictly path-safe
@@ -2079,6 +2090,43 @@ def _delete_file_remote(
     _log(log, f"[prune] removed {relpath}")
 
 
+def _drop_missing_patch_file(kustomization_file: Path) -> bool:
+    """Drop a patches.yaml entry when that file was never written.
+
+    A patch file that exists stays. Other patch entries stay. Returns True
+    when the kustomization changed.
+    """
+    if (kustomization_file.parent / "patches.yaml").exists():
+        return False
+    try:
+        data = yaml.safe_load(kustomization_file.read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    patches = data.get("patches")
+    if not isinstance(patches, list):
+        return False
+    kept = []
+    dropped = False
+    for item in patches:
+        path = item.get("path") if isinstance(item, dict) else item
+        if str(path or "") == "patches.yaml":
+            dropped = True
+            continue
+        kept.append(item)
+    if not dropped:
+        return False
+    if kept:
+        data["patches"] = kept
+    else:
+        data.pop("patches", None)
+    kustomization_file.write_text(
+        yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+    )
+    return True
+
+
 def ensure_kustomize_layout(
     config_dir: str | Path,
     genestack_root: str | Path,
@@ -2090,7 +2138,10 @@ def ensure_kustomize_layout(
     service, but newly split plays may have no overlay. This reconciles missing ones
     by creating a stub kustomization.yaml (resources: [../base]).
 
-    Returns list of service names for which overlay directories were created.
+    An overlay that already points at patches.yaml, with no such file, drops
+    that entry. Helm's post-renderer fails the install when the file is missing.
+
+    Returns service names whose overlay was created or repaired.
     """
     config_dir = Path(config_dir)
     genestack_root = Path(genestack_root)
@@ -2119,11 +2170,19 @@ def ensure_kustomize_layout(
 
         if not kustomization_file.exists():
             overlay_dir.mkdir(parents=True, exist_ok=True)
-            kustomization_file.write_text(_OVERLAY_KUSTOMIZATION)
+            kustomization_file.write_text(
+                _BOOTSTRAP_OVERLAY_KUSTOMIZATION, encoding="utf-8"
+            )
             created.append(service)
             if log:
                 log(
                     f"[ensure_kustomize_layout] created {service}/overlay/kustomization.yaml"
+                )
+        elif _drop_missing_patch_file(kustomization_file):
+            created.append(service)
+            if log:
+                log(
+                    f"[ensure_kustomize_layout] dropped missing patches.yaml from {service}/overlay"
                 )
 
     return created

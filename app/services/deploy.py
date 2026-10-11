@@ -541,7 +541,7 @@ def run_deploy(
             ctx.config_dir, ctx.genestack_root, log
         )
         if created:
-            log(f"[deploy] kustomize layout: {created} missing overlay(s) created")
+            log(f"[deploy] kustomize layout updated: {', '.join(created)}")
         if (
             local_executor
             and ctx.config_dir is not None

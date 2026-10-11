@@ -353,6 +353,42 @@ def test_runtime_tree_copies_charts_and_links_bases(tmp_path):
     assert again == []
 
 
+def test_kustomize_overlay_stub_does_not_require_patches(tmp_path):
+    root = tmp_path / "genestack"
+    for service in ("kube-ovn", "mariadb-cluster", "openstack"):
+        (root / "base-kustomize" / service / "base").mkdir(parents=True)
+    cfg = tmp_path / "etc-genestack"
+    broken = cfg / "kustomize" / "kube-ovn" / "overlay"
+    broken.mkdir(parents=True)
+    (broken / "kustomization.yaml").write_text(
+        envconfig_service._OVERLAY_KUSTOMIZATION, encoding="utf-8"
+    )
+    kept = cfg / "kustomize" / "mariadb-cluster" / "overlay"
+    kept.mkdir(parents=True)
+    (kept / "kustomization.yaml").write_text(
+        envconfig_service._OVERLAY_KUSTOMIZATION, encoding="utf-8"
+    )
+    (kept / "patches.yaml").write_text("kind: ConfigMap\n", encoding="utf-8")
+
+    updated = envconfig_service.ensure_kustomize_layout(cfg, root)
+    assert updated == ["kube-ovn", "openstack"]
+    kube = yaml.safe_load((broken / "kustomization.yaml").read_text(encoding="utf-8"))
+    assert kube["resources"] == ["../base"]
+    assert "patches" not in kube
+    fresh = yaml.safe_load(
+        (cfg / "kustomize" / "openstack" / "overlay" / "kustomization.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert fresh["resources"] == ["../base"]
+    assert "patches" not in fresh
+    mariadb = yaml.safe_load((kept / "kustomization.yaml").read_text(encoding="utf-8"))
+    assert mariadb["patches"] == [{"path": "patches.yaml"}]
+
+    again = envconfig_service.ensure_kustomize_layout(cfg, root)
+    assert again == []
+
+
 def test_render_to_files_service_level_partial():
     """Absent sections produce no files (never wipe existing ones)."""
     env = Environment(id="env-x", name="env-x")
