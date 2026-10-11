@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.3
+
+Talos bootstrap uses VLAN 100 only on an OVH vRack, and writes the Talos 1.14 documents.
+
+- VLAN 100 and 10.10.0.0/24 apply when a vRack is selected. A saved copy of those values does not tag a flat network. Guided setup no longer writes them onto every environment.
+- A vRack still needs a private MAC or an interface name on each machine. The console does not pick one of several NICs.
+- Hostname, kubelet node IP, and kube-proxy node ports are written as Talos 1.14 documents.
+
 ## 2026.10.11.2
 
 Hosts can start a lab on the console computer.
