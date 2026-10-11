@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.5
+
+A Talos retry rewrites the machine config from the saved identity.
+
+- When secrets already exist, bootstrap regenerates the machine config from those secrets. A failed apply does not reuse the old file.
+- The cluster identity stays. The retry does not mint a new one.
+
 ## 2026.10.11.4
 
 Talos writes the management gateway on the NIC it pins.
