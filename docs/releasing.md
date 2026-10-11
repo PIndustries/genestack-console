@@ -20,7 +20,10 @@ and attaches those too. `version.json` names the disk in `appliance` and
 the ISO in `iso`. The binary field is unchanged. Before the tag, add a `CHANGELOG.md` section
 whose heading is that version. The workflow copies it onto the release. A
 tag with no matching section fails. The disk build runs after the binary
-is published. A failure there leaves the binary release in place.
+is published. A failure there leaves the binary release in place. The next
+tag publishes its program while an older disk or ISO is still building.
+The disk and the ISO still attach to that one release, and those uploads
+do not mark it latest.
 
 Installers and the update check read:
 

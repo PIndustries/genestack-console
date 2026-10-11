@@ -26,12 +26,16 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: genestack-console-release
-  cancel-in-progress: false
-
 jobs:
   binary:
+    # This job is the only one that takes the program lock. A disk or ISO
+    # from the previous tag keeps building on that same release and does not
+    # hold the next program publish. Those uploads do not mark latest.
+    # A disk-only or iso-only run takes its own lock so it stays out of line.
+    concurrency:
+      group: >-
+        ${{ (github.event_name == 'workflow_dispatch' && (inputs.parts == 'disk' || inputs.parts == 'iso')) && format('genestack-console-release-image-{0}', github.run_id) || 'genestack-console-release-program' }}
+      cancel-in-progress: false
     if: >-
       github.repository == 'PIndustries/genestack-console' &&
       github.event.repository.fork == false &&
