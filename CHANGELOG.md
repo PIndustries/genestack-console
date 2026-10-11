@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.6
+
+A Talos maintenance apply rewrites the machine config first.
+
+- Nodes that are still waiting for a config get a fresh machine file before apply. A file left by a failed run is not reused.
+- A node that already has this environment's config keeps that identity.
+
 ## 2026.10.11.5
 
 A Talos retry rewrites the machine config from the saved identity.
