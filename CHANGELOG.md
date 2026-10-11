@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.7
+
+A deploy keeps its kubeconfig, and infrastructure reads this environment's config directory.
+
+- Each job stages its own kubeconfig. A cluster check no longer removes the file a deploy is using.
+- A local live infrastructure run follows this environment's config directory. Chart versions, manifests, and kustomize bases are placed there when bootstrap did not run.
+- Kube-OVN uses the container interface saved on the environment.
+
 ## 2026.10.11.6
 
 A Talos maintenance apply rewrites the machine config first.
