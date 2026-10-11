@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.4
+
+Talos writes the management gateway on the NIC it pins.
+
+- network.gateway and network.cidr are the untagged management network. A saved private MAC gets that address and the default route.
+- A vRack VLAN does not take that default route.
+
 ## 2026.10.11.3
 
 Talos bootstrap uses VLAN 100 only on an OVH vRack, and writes the Talos 1.14 documents.
