@@ -83,6 +83,17 @@ def test_prepare_script_keeps_that_order_and_skips_workers(tmp_path):
     assert path.stat().st_mode & 0o777 == 0o700
 
 
+def test_prepare_script_uses_the_installed_binary_when_frozen(tmp_path, monkeypatch):
+    prefix = tmp_path / "opt" / "genestack-console"
+    monkeypatch.setattr("app.paths.frozen", lambda: True)
+    monkeypatch.setattr("app.paths.host_prefix", lambda: prefix)
+    text = talos_prepare.render_prepare_script(tmp_path, _doc())
+    assert text is not None
+    assert f"{prefix}/bin/genestack-console talos-prepare" in text
+    assert "-m app.services.talos_prepare" not in text
+    assert "/tmp/onefile_" not in text
+
+
 def test_prepare_script_is_absent_without_the_longhorn_schematic(tmp_path):
     doc = _doc()
     doc["talos"]["install_image"] = "factory.talos.dev/installer/deadbeef:v1.14.2"

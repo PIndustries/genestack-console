@@ -190,9 +190,15 @@ def longhorn_targets(doc: dict[str, Any]) -> list[dict[str, str]]:
 def _prepare_launch() -> list[str]:
     """Re-enter this step from the infrastructure script.
 
-    The published console is one binary. A source checkout uses the same
-    interpreter that is already running the worker.
+    A published console is one binary. Nuitka reports ``sys.executable`` as
+    the extract's ``python3`` under ``/tmp/onefile_*``. That path is gone
+    after a restart, and ``-m app`` is not a file on disk. The installed
+    binary accepts ``talos-prepare``. A source checkout uses its interpreter.
     """
+    from app.paths import frozen, host_prefix
+
+    if frozen():
+        return [str(host_prefix() / "bin" / "genestack-console"), "talos-prepare"]
     exe = Path(sys.executable)
     if exe.name.startswith("genestack-console"):
         return [str(exe), "talos-prepare"]
