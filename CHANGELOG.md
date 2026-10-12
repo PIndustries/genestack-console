@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.12.4
+
+The Longhorn prepare step runs the installed console binary.
+
+- A restart removes the temporary Python path a compiled console reports as its interpreter.
+- The infrastructure script calls that installed binary, which is still there after the restart.
+
 ## 2026.10.12.3
 
 An empty provider port stays empty when the infrastructure script starts.
