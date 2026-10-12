@@ -554,6 +554,8 @@ def install_facts(
             break
     talos_saved = bool(root is not None and _readable_talosconfig(root / "talos" / "talosconfig"))
     tag = talosctl_client_tag()
+    from app.services.deploy_needs import collect
+
     return {
         "client_pin": TALOSCTL_VERSION,
         "client_version": tag,
@@ -564,6 +566,7 @@ def install_facts(
         "extensions": ["iscsi-tools", "util-linux-tools"],
         "kubeconfig_readable": kube_ok,
         "talosconfig_saved": talos_saved,
+        "needs": collect(doc),
     }
 
 

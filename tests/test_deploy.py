@@ -31,6 +31,17 @@ DOC = """\
 provider: kubespray
 components:
   keystone: true
+network:
+  gateway_domain: cloud.example.org
+  acme_email: ops@cloud.example.org
+  container_interface: bond0
+  compute_interface: bond1
+  ovn:
+    external_interface: bond0.126
+servers:
+  node1:
+    ip: 10.0.0.21
+    roles: [control, compute, network, storage, worker]
 """
 
 
@@ -206,6 +217,60 @@ def test_infrastructure_command_prepares_talos_before_longhorn(tmp_path):
     assert failed.returncode != 0
     assert "MARK_PREPARE_FAIL" in failed.stdout
     assert "MARK_LONGHORN" not in failed.stdout
+
+
+def test_infrastructure_command_skips_an_empty_acme_prompt(tmp_path):
+    """An empty ACME email skips the read and does not swallow -d."""
+    import os
+    import subprocess
+
+    from app.services.deploy import _pipeline_command
+    from app.services.envcontext import EnvContext
+
+    root = tmp_path / "opt" / "genestack"
+    script = root / "bin" / "setup-infrastructure.sh"
+    script.parent.mkdir(parents=True)
+    envoy = root / "bin" / "setup-envoy-gateway.sh"
+    script.write_text(
+        "#!/bin/bash\n"
+        "set -e\n"
+        'if [ -z "${ACME_EMAIL}" ]; then\n'
+        '  read -rp "Enter a valid email address for use with ACME, '
+        'press enter to skip: " ACME_EMAIL\n'
+        '  export ACME_EMAIL="${ACME_EMAIL:-}"\n'
+        "fi\n"
+        f"{envoy} -e ${{ACME_EMAIL}} -d ${{GATEWAY_DOMAIN}}\n",
+        encoding="utf-8",
+    )
+    envoy.write_text(
+        "#!/bin/bash\n"
+        'echo "ENVOY:$*"\n',
+        encoding="utf-8",
+    )
+    envoy.chmod(0o755)
+    cfg = tmp_path / "env" / "etc-genestack"
+    cfg.mkdir(parents=True)
+    ctx = EnvContext(
+        environment=None,
+        genestack_root=root,
+        config_dir=cfg,
+        dry_run=False,
+        kubeconfig=None,
+    )
+    argv = _pipeline_command(
+        "bin/setup-infrastructure.sh", ctx, dry_run=False, local=True
+    )
+    env = dict(os.environ)
+    env.pop("ACME_EMAIL", None)
+    env["GATEWAY_DOMAIN"] = "cloud.example.org"
+    result = subprocess.run(
+        argv, cwd=root, capture_output=True, text=True, check=False, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    compact = result.stdout.replace(" ", "")
+    assert "ENVOY:-dcloud.example.org" in compact
+    assert "-e-d" not in compact
+    assert "-e -d" not in result.stdout
 
 
 def test_deploy_op_in_catalog():
@@ -535,10 +600,17 @@ DOC_WITH_CONTROL_PLANE = """\
 provider: kubespray
 components:
   keystone: true
+network:
+  gateway_domain: cloud.example.org
+  acme_email: ops@cloud.example.org
+  container_interface: bond0
+  compute_interface: bond1
+  ovn:
+    external_interface: bond0.126
 servers:
   cp1:
     ip: 10.0.0.11
-    roles: [k8s_control_plane]
+    roles: [k8s_control_plane, control, compute, network, storage, worker]
 """
 
 ADMIN_CONF = """\
@@ -560,6 +632,40 @@ def _deploy_audit_details(client, headers, env_id) -> dict:
     entries = [e for e in audit.json() if e["action"] == "env.deploy"]
     assert entries, "expected an env.deploy audit entry"
     return entries[0]["details"]
+
+
+def test_deploy_stops_before_the_pipeline_when_the_gateway_domain_is_missing(
+    client, admin_headers, tmp_path
+):
+    """A live job names the missing fact and does not start phase 1."""
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False
+    )
+    missing = DOC.replace("  gateway_domain: cloud.example.org\n", "")
+    _put_doc(client, admin_headers, env["id"], doc=missing)
+
+    resp = _deploy_job(client, admin_headers, env["id"])
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "failed"
+    assert "Gateway domain is not saved" in (job.get("error") or "")
+    log_text = _job_log(client, admin_headers, job["id"])
+    assert "[deploy] phase 1" not in log_text
+    assert "stopped before the pipeline" in log_text
+
+    dry = _create_env(
+        client, admin_headers, genestack_config_dir=str(config_dir), dry_run=True
+    )
+    _put_doc(client, admin_headers, dry["id"], doc=missing)
+    rehearsed = _deploy_job(client, admin_headers, dry["id"])
+    assert rehearsed.status_code == 201, rehearsed.text
+    dry_job = rehearsed.json()
+    assert dry_job["status"] == "success", dry_job.get("error")
+    dry_log = _job_log(client, admin_headers, dry_job["id"])
+    assert "Gateway domain is not saved" in dry_log
+    assert "[deploy] phase 1" in dry_log
 
 
 def test_deploy_from_stage_invalid_fails(client, admin_headers, tmp_path):
@@ -796,6 +902,13 @@ def test_deploy_fetches_kubeconfig_after_hosts_stage(
 
     kubeconfig = config_dir / "inventory" / "artifacts" / "admin.conf"
     assert ["cat", "/etc/kubernetes/admin.conf"] in calls
+    assert any(
+        argv[0] == "kubectl"
+        and "label" in argv
+        and "cp1" in argv
+        and "openstack-control-plane=enabled" in argv
+        for argv in calls
+    )
     # The job created the file, then removed it when it finished.
     assert not kubeconfig.exists()
     assert seen["text"]
@@ -887,13 +1000,20 @@ DOC_TALOS_PROVIDER = """\
 provider: talos
 components:
   keystone: true
+network:
+  gateway_domain: cloud.example.org
+  acme_email: ops@cloud.example.org
+  container_interface: bond0
+  compute_interface: bond1
+  ovn:
+    external_interface: bond0.126
 servers:
   cp1:
     ip: 10.0.0.11
-    roles: [k8s_control_plane]
+    roles: [k8s_control_plane, control]
   worker1:
     ip: 10.0.0.21
-    roles: [compute]
+    roles: [compute, network, storage, worker]
 """
 
 

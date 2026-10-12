@@ -686,10 +686,18 @@ def _deploy_step(db: Session, env: Environment, settings: Settings) -> dict[str,
     if job is None:
         if pipe.get("cluster_reachable"):
             nxt = pipe.get("next_stage") or "infrastructure"
+            summary = f"Kubernetes is up; continue from {nxt}"
+            current = envconfig_service.get_current(db, env)
+            saved = current[0] if current and isinstance(current[0], dict) else {}
+            from app.services.deploy_needs import blocking
+
+            blockers = blocking(saved, stages={str(nxt)})
+            if blockers:
+                summary = str(blockers[0]["detail"])
             return _step(
                 "deploy",
                 "attention",
-                f"Kubernetes is up; continue from {nxt}",
+                summary,
                 details,
             )
         return _step("deploy", "pending", "not deployed yet", details)

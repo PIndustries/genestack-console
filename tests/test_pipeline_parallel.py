@@ -28,6 +28,17 @@ components:
   keystone: true
   placement: true
   glance: true
+network:
+  gateway_domain: cloud.example.org
+  acme_email: ops@cloud.example.org
+  container_interface: bond0
+  compute_interface: bond1
+  ovn:
+    external_interface: bond0.126
+servers:
+  node1:
+    ip: 10.0.0.21
+    roles: [control, compute, network, storage, worker]
 """
 
 
@@ -66,6 +77,22 @@ def _scripts_index(captured: list[list[str]]) -> dict[str, int]:
     return {argv[1]: i for i, argv in enumerate(captured) if len(argv) > 1}
 
 
+def _as_scripts(captured: list[list[str]]) -> list[list[str]]:
+    """A local infrastructure run is bash -c around that same script."""
+    scripts: list[list[str]] = []
+    for argv in captured:
+        if (
+            len(argv) >= 3
+            and argv[0] == "bash"
+            and argv[1] == "-c"
+            and "setup-infrastructure.sh" in argv[2]
+        ):
+            scripts.append(["bash", "bin/setup-infrastructure.sh"])
+        else:
+            scripts.append(argv)
+    return scripts
+
+
 def test_effective_parallelism_clamps():
     assert deploy_service._effective_parallelism(None) == 1
     assert deploy_service._effective_parallelism(1) == 1
@@ -93,7 +120,7 @@ def test_default_deploy_is_sequential(client, admin_headers, tmp_path, monkeypat
     job = resp.json()
     assert job["status"] == "success", job.get("error")
 
-    assert captured == _full_expected()
+    assert _as_scripts(captured) == _full_expected()
     log_text = _job_log(client, admin_headers, job["id"])
     assert "parallelism=" not in log_text
     assert "keystone first" not in log_text
@@ -114,7 +141,7 @@ def test_parallelism_one_is_sequential(client, admin_headers, tmp_path, monkeypa
     job = resp.json()
     assert job["status"] == "success", job.get("error")
 
-    assert captured == _full_expected()
+    assert _as_scripts(captured) == _full_expected()
     log_text = _job_log(client, admin_headers, job["id"])
     assert "keystone first" not in log_text
 
@@ -137,13 +164,14 @@ def test_parallel_keystone_first_then_services(
     job = resp.json()
     assert job["status"] == "success", job.get("error")
 
-    idx = _scripts_index(captured)
+    scripts = _as_scripts(captured)
+    idx = _scripts_index(scripts)
     assert idx["bin/install-keystone.sh"] < idx["bin/install-placement.sh"]
     assert idx["bin/install-keystone.sh"] < idx["bin/install-glance.sh"]
     # Every item ran exactly once.
-    assert sorted(captured) == sorted(_full_expected())
+    assert sorted(scripts) == sorted(_full_expected())
     # Stages outside the services stage kept their exact order.
-    pre = [a for a in captured if a not in CORE_SCRIPTS]
+    pre = [a for a in scripts if a not in CORE_SCRIPTS]
     expected_pre = [c for c in _full_expected() if c not in CORE_SCRIPTS]
     assert pre == expected_pre
 

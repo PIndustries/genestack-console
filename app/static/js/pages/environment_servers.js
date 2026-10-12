@@ -11,7 +11,7 @@ import { openShell } from "./environment_terminal.js?v=ls48";
 import { ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
 import { clearOvhPoll } from "../ovh.js";
 import { fetchMetalPath, osNameHtml } from "../metal_path.js";
-import { nextStripHtml, loadNextStrip } from "./environment_next.js?v=ls66";
+import { nextStripHtml, loadNextStrip } from "./environment_next.js?v=ls69";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
@@ -2575,6 +2575,28 @@ function deployBlockReason() {
   return "";
 }
 
+const NEED_PIPE = ["hosts"].concat(OPENSTACK_STAGES.map(([id]) => id));
+
+function needsForStage(stage) {
+  const needs = installFacts && Array.isArray(installFacts.needs) ? installFacts.needs : [];
+  const start = NEED_PIPE.indexOf(stage);
+  if (start < 0) return [];
+  const open = new Set(NEED_PIPE.slice(start));
+  return needs.filter((item) => item && open.has(String(item.stage || "infrastructure")));
+}
+
+function needBlock(stage) {
+  const hit = needsForStage(stage).find((item) => item && item.blocks);
+  return hit ? String(hit.detail || hit.missing || "") : "";
+}
+
+function needNotes(stage) {
+  return needsForStage(stage)
+    .filter((item) => item && !item.blocks && item.detail)
+    .map((item) => String(item.detail))
+    .join(" ");
+}
+
 function preflightText(facts) {
   if (!facts || facts.unavailable) return "";
   const pin = facts.client_pin || "v1.14.2";
@@ -2585,7 +2607,9 @@ function preflightText(facts) {
   const ext = facts.extensions_present
     ? "This install image includes iscsi-tools and util-linux-tools."
     : "This install image does not include iscsi-tools and util-linux-tools. Longhorn needs them.";
-  return `Boot image default is Talos ${boot}. Client pin is ${pin}. ${have} An older client cannot patch a newer node. ${ext}`;
+  const needs = Array.isArray(facts.needs) ? facts.needs : [];
+  const extra = needs.map((item) => item && item.detail).filter(Boolean).join(" ");
+  return `Boot image default is Talos ${boot}. Client pin is ${pin}. ${have} An older client cannot patch a newer node. ${ext}${extra ? ` ${extra}` : ""}`;
 }
 
 function identityMismatch() {
@@ -2716,8 +2740,9 @@ function stageBoardHtml() {
   const admin = canAdmin();
   const rows = OPENSTACK_STAGES.map(([id, label]) => {
     const state = states[id] || "not-started";
-    const disabled = !admin || !!block || live;
-    const title = !admin ? "Requires admin role" : (block || (live ? "A job is already running." : `Continue from ${label}`));
+    const reason = block || needBlock(id);
+    const disabled = !admin || !!reason || live;
+    const title = !admin ? "Requires admin role" : (reason || (live ? "A job is already running." : `Continue from ${label}`));
     return `<div class="row" style="margin:.2rem 0">
       <span style="min-width:10rem">${esc(label)}</span>
       <span class="pill ${stageKind(state)}">${esc(stageWord(state))}</span>
@@ -2771,14 +2796,16 @@ async function replaceNamedMachine(envId) {
 async function continueFromStage(envId, stage) {
   const known = OPENSTACK_STAGES.find(([id]) => id === stage);
   if (!envId || !known || !canAdmin()) return;
-  const block = deployBlockReason();
+  const block = deployBlockReason() || needBlock(stage);
   if (block) {
     toast(block, "bad");
     return;
   }
   const label = known[1];
+  const notes = needNotes(stage);
+  const extra = notes ? `\n\n${notes}` : "";
   if (!window.confirm(
-    `Continue from ${label}?\n\nThis starts Deploy at ${label}. The job log is the detail.\n\nKubernetes stays as it is. Talos bootstrap does not run again.`
+    `Continue from ${label}?\n\nThis starts Deploy at ${label}. The job log is the detail.\n\nKubernetes stays as it is. Talos bootstrap does not run again.${extra}`
   )) return;
   await startDeploy(envId, stage, label);
 }
@@ -2793,7 +2820,7 @@ function paintTalosFlow(bootstrap, deploy) {
   const dep = deploy && deploy.status ? deploy.status : "";
   const depLive = dep === "queued" || dep === "running";
   const bootLive = boot === "queued" || boot === "running";
-  const block = deployBlockReason();
+  const block = deployBlockReason() || needBlock("infrastructure");
   const admin = canAdmin();
   let note = "";
   if (bootLive) note = "Talos bootstrap is in Activity.";
@@ -2873,13 +2900,15 @@ async function startDeploy(envId, stage, label) {
 
 async function deployFromInfrastructure(envId) {
   if (!envId || !canAdmin()) return;
-  const block = deployBlockReason();
+  const block = deployBlockReason() || needBlock("infrastructure");
   if (block) {
     toast(block, "bad");
     return;
   }
+  const notes = needNotes("infrastructure");
+  const extra = notes ? `\n\n${notes}` : "";
   if (!window.confirm(
-    "Deploy from infrastructure?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nOpenStack is the work from here: infrastructure, operators, kube-ovn, core, then compute-network.\n\nIf this environment is only logging, the job logs and does not change the machines."
+    `Deploy from infrastructure?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nOpenStack is the work from here: infrastructure, operators, kube-ovn, core, then compute-network.\n\nIf this environment is only logging, the job logs and does not change the machines.${extra}`
   )) return;
   await startDeploy(envId, "infrastructure", "infrastructure");
 }

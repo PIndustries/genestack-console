@@ -442,6 +442,29 @@ def test_workflow_push_and_deploy_job_states(client, admin_headers, viewer_heade
     assert other_steps["deploy"]["summary"] == "not deployed yet"
 
 
+def test_workflow_names_a_missing_fact_when_kubernetes_is_up(
+    client, admin_headers, viewer_headers, monkeypatch
+):
+    from app.services import workflow as workflow_service
+
+    env = _create_env(client, admin_headers)
+
+    def progress(_db, _row, _settings=None, stage="infrastructure"):
+        return {"cluster_reachable": True, "next_stage": stage}
+
+    monkeypatch.setattr(workflow_service, "pipeline_progress", progress)
+    steps = _steps(_workflow(client, viewer_headers, env["id"]))
+    assert steps["deploy"]["state"] == "attention"
+    assert steps["deploy"]["summary"].startswith("Gateway domain is not saved")
+
+    def later(_db, _row, _settings=None):
+        return {"cluster_reachable": True, "next_stage": "core"}
+
+    monkeypatch.setattr(workflow_service, "pipeline_progress", later)
+    steps = _steps(_workflow(client, viewer_headers, env["id"]))
+    assert steps["deploy"]["summary"] == "Kubernetes is up; continue from core"
+
+
 # ---------------------------------------------------------------------------
 # Operate states (probes monkeypatched — no real cluster in the sandbox)
 # ---------------------------------------------------------------------------

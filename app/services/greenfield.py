@@ -136,6 +136,24 @@ def run_greenfield(
         log(f"[greenfield] {msg}")
         return {"ok": False, "error": msg, "returncode": 2, "dry_run": dry_run}
 
+    # Commission wipes disks. Do not start that when Deploy would stop
+    # before infrastructure on a fact the operator still has to save.
+    if not dry_run and stop == "":
+        from app.services.deploy_needs import blocking
+
+        blockers = blocking(doc, stages={"hosts", "infrastructure"})
+        if blockers:
+            detail = " ".join(str(item["detail"]) for item in blockers)
+            log("[greenfield] stopped before commission")
+            for item in blockers:
+                log(f"[greenfield] {item['detail']}")
+            return {
+                "ok": False,
+                "error": detail,
+                "returncode": 2,
+                "dry_run": False,
+            }
+
     t0 = deploy_timing.now()
     metal_hosts: list[dict[str, Any]] = []
     phases: list[dict[str, Any]] = []

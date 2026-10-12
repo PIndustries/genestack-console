@@ -51,6 +51,7 @@ from app.services import envconfig as envconfig_service
 from app.services import genestack_bridge as bridge
 from app.services import secret_lease
 from app.services import service_registry
+from app.services import deploy_needs as deploy_needs_service
 from app.services import talos as talos_service
 from app.services import talos_prepare as talos_prepare_service
 from app.services.crypto import decrypt_secret
@@ -403,10 +404,21 @@ def _pipeline_command(
         return ["bash", script]
     envoy = f"{root}/bin/setup-envoy-gateway.sh"
     longhorn = f"{root}/bin/install-longhorn.sh"
+    # An empty ACME_EMAIL makes the unquoted -e swallow -d, and the read
+    # prompt exits under set -e. Skip the prompt and pass -e only when an
+    # email is saved. Pressing enter on that prompt is the documented skip.
+    acme_read = (
+        'read -rp "Enter a valid email address for use with ACME, '
+        'press enter to skip: " ACME_EMAIL'
+    )
     sed_expr = (
         f"s|{_UPSTREAM_CONFIG}|{cfg}|g; "
         f"s|{envoy}|HYPERCONVERGED=true rewrite {envoy}|g; "
-        f"s|{longhorn}|talos_prepare; {longhorn}|g"
+        f"s|rewrite {envoy} -e \\${{ACME_EMAIL}} -d \\${{GATEWAY_DOMAIN}}"
+        f"|rewrite {envoy} ${{ACME_EMAIL:+-e \"$ACME_EMAIL\"}} "
+        f"-d \"${{GATEWAY_DOMAIN}}\"|g; "
+        f"s|{longhorn}|talos_prepare; {longhorn}|g; "
+        f"s|{acme_read}|ACME_EMAIL=\"${{ACME_EMAIL:-}}\"|g"
     )
     program = (
         "{\n"
@@ -473,6 +485,52 @@ def _arm_talos_longhorn_prepare(
         "when ext-iscsid is not running"
     )
     return updated
+
+
+def _apply_saved_role_labels(
+    doc: dict[str, Any] | None,
+    ctx: EnvContext,
+    log: LogFn,
+) -> None:
+    """Label nodes from inventory before setup-infrastructure.sh checks them.
+
+    A failed kubectl does not stop the deploy. The script's own check is
+    the backstop, and a cluster that is already labeled can continue when
+    kubectl is not on this host.
+    """
+    planned = deploy_needs_service.node_label_args(doc)
+    if not planned:
+        return
+    kubeconfig = str(ctx.kubeconfig or "").strip()
+    if not kubeconfig and ctx.config_dir is not None:
+        fallback = ctx.config_dir / KUBECONFIG_FALLBACK_RELPATH
+        if fallback.is_file():
+            kubeconfig = str(fallback)
+    if not kubeconfig:
+        log(
+            "[deploy] node labels were not applied; this run has no kubeconfig. "
+            "setup-infrastructure.sh exits if those labels are missing."
+        )
+        return
+    for name, pairs in planned:
+        result = bridge.run_command(
+            [
+                "kubectl",
+                "--kubeconfig",
+                kubeconfig,
+                "label",
+                "node",
+                name,
+                *pairs,
+                "--overwrite",
+            ],
+            timeout=60,
+            dry_run=False,
+            log=log,
+        )
+        if result.get("returncode") not in (0, None):
+            message = str(result.get("stderr") or result.get("message") or "").strip()
+            log(f"[deploy] could not label {name}: {message[:200]}")
 
 
 def run_deploy(
@@ -575,6 +633,25 @@ def run_deploy(
     run_tests = (
         bool(include_testing) or from_stage == "testing" or until_id == "testing"
     )
+    end = stage_ids.index(until_id) + 1 if until_id else len(stage_ids)
+    run_ids = set(stage_ids[start_index:end])
+    needs = deploy_needs_service.collect(doc, stages=run_ids)
+    for item in needs:
+        log(f"[deploy] {item['detail']}")
+    blockers = [item for item in needs if item["blocks"]]
+    if blockers and not dry_run:
+        detail = " ".join(str(item["detail"]) for item in blockers)
+        log("[deploy] stopped before the pipeline")
+        return {
+            "ok": False,
+            "error": detail,
+            "returncode": 2,
+            "dry_run": False,
+            "version": version,
+            "from_stage": from_stage,
+            "until_stage": until_id,
+            "failed_at": "preflight",
+        }
 
     if not skip_push:
         if current is None:
@@ -846,6 +923,8 @@ def run_deploy(
                 log(f"[deploy] until_stage={until_id} — stopped at this control point")
                 break
             continue
+        if stage["id"] == "infrastructure" and not dry_run:
+            _apply_saved_role_labels(doc, ctx, log)
         if not dry_run and _is_services_stage(stage) and _parallelism > _PARALLEL_MIN:
             failure = _run_services_parallel(
                 stage,

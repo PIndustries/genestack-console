@@ -274,6 +274,28 @@ function deployBlock(model) {
   return "";
 }
 
+const NEED_PIPE = ["hosts"].concat(STAGES.map(([id]) => id));
+
+function needsForStage(model, stage) {
+  const facts = model && model.facts;
+  const needs = facts && Array.isArray(facts.needs) ? facts.needs : [];
+  const start = NEED_PIPE.indexOf(stage);
+  if (start < 0) return [];
+  const open = new Set(NEED_PIPE.slice(start));
+  return needs.filter((item) => item && open.has(String(item.stage || "infrastructure")));
+}
+
+function blockingNeed(model, stage) {
+  return needsForStage(model, stage).find((item) => item && item.blocks) || null;
+}
+
+function noticeText(model, stage) {
+  return needsForStage(model, stage)
+    .filter((item) => item && !item.blocks && item.detail)
+    .map((item) => String(item.detail))
+    .join(" ");
+}
+
 function logLine(model) {
   return model.logsOnly
     ? " This environment only logs. This run writes a log and does not change the machines."
@@ -312,6 +334,7 @@ function cloudStagesOpen(model) {
 // A management port can wipe disks. Offer it only before the cloud is up.
 function managementAction(model) {
   if (!model.hasBmc || readyControlPlane(model) || !cloudStagesOpen(model)) return [];
+  if (blockingNeed(model, "hosts")) return [];
   return [{
     act: "greenfield",
     label: "Install from the management port",
@@ -405,9 +428,32 @@ export function describe(model) {
         live: false,
       };
     }
+    const sshBlock = blockingNeed(model, "hosts");
+    const sshNotes = noticeText(model, "hosts");
+    const sshNote = sshNotes ? ` ${sshNotes}` : "";
+    if (sshBlock) {
+      return {
+        title: String(sshBlock.missing || sshBlock.detail),
+        detail: `${fleet} ${sshBlock.detail}${sshNote}${cacheLine(model)}${logging}`,
+        actions: [
+          { act: "config", label: "Open config", primary: true },
+          {
+            act: "deploy",
+            label: "Deploy over SSH",
+            primary: false,
+            disabled: true,
+            title: String(sshBlock.detail || ""),
+          },
+          rackAction(),
+          ...cacheAction(model),
+          ...applyAction(model),
+        ],
+        live: false,
+      };
+    }
     return {
       title: "Deploy over SSH.",
-      detail: `${fleet} Already have an OS recorded these machines. Deploy installs Kubernetes and OpenStack over SSH. It does not reboot them.${cacheLine(model)}${logging}`,
+      detail: `${fleet} Already have an OS recorded these machines. Deploy installs Kubernetes and OpenStack over SSH. It does not reboot them.${sshNote}${cacheLine(model)}${logging}`,
       actions: [
         {
           act: "deploy",
@@ -428,9 +474,12 @@ export function describe(model) {
   if (model.provider !== "kubespray" && block && (!model.deploy || !pending || states[pending[0]] === "not-started")) {
     const boot = model.bootstrap && model.bootstrap.status === "success";
     const installing = `Boot the Talos ISO on each machine yourself. This button does not boot it. The boot image default is ${bootImage(model)}. The install disk defaults to /dev/sda. When the machine is waiting for a config, use Talos is already installed. A machine already running Talos is replaced only after that machine is named.`;
+    const ahead = blockingNeed(model, "infrastructure");
+    const aheadNotes = noticeText(model, "infrastructure");
+    const aheadText = `${ahead ? ` ${ahead.detail}` : ""}${aheadNotes ? ` ${aheadNotes}` : ""}`;
     return {
       title: boot ? block : "Install Talos on the machines you added.",
-      detail: `${fleet} ${boot ? "Talos bootstrap already finished." : installing}${cacheLine(model)}${logging}`,
+      detail: `${fleet} ${boot ? "Talos bootstrap already finished." : installing}${aheadText}${cacheLine(model)}${logging}`,
       actions: [
         {
           act: "talos",
@@ -455,14 +504,40 @@ export function describe(model) {
     ? `Stopped at ${next[1]}.`
     : (started ? `Continue from ${next[1]}.` : "Install the cloud from infrastructure.");
   const label = failed || started ? `Continue from ${next[1]}` : "Deploy from infrastructure";
+  const offered = next[0];
+  const fact = blockingNeed(model, offered);
+  const notes = noticeText(model, offered);
+  const noteBit = notes ? ` ${notes}` : "";
+  if (fact) {
+    return {
+      title: String(fact.missing || fact.detail),
+      detail: `${fleet} ${fact.detail}${noteBit}${cacheLine(model)}${logging}`,
+      actions: [
+        { act: "config", label: "Open config", primary: true },
+        {
+          act: "deploy",
+          label,
+          stage: offered,
+          primary: false,
+          disabled: true,
+          title: String(fact.detail || ""),
+        },
+        rackAction(),
+        ...cacheAction(model),
+        ...applyAction(model),
+      ],
+      log: jobLog(model.deploy, "Job log"),
+      live: false,
+    };
+  }
   return {
     title,
-    detail: `${fleet} ${block || "Kubernetes stays as it is. Talos bootstrap does not run again."} A disk wipe is separate. It is Greenfield metal wipe under Maintenance on Overview.${cacheLine(model)}${logging}`,
+    detail: `${fleet} ${block || "Kubernetes stays as it is. Talos bootstrap does not run again."}${noteBit} A disk wipe is separate. It is Greenfield metal wipe under Maintenance on Overview.${cacheLine(model)}${logging}`,
     actions: [
       {
         act: "deploy",
         label,
-        stage: next[0],
+        stage: offered,
         primary: true,
         disabled: !canAdmin() || !!block,
         title: !canAdmin() ? "Requires admin role" : (block || `Start at ${next[1]}`),
@@ -603,15 +678,19 @@ async function runAction(btn) {
   if (act === "deploy") {
     const stage = btn.dataset.nextStage || "";
     if (!stage || stage === "hosts") {
+      const notes = noticeText(currentModel, "hosts");
+      const extra = notes ? `\n\n${notes}` : "";
       if (!window.confirm(
-        "Deploy over SSH?\n\nDeploy installs Kubernetes and OpenStack over SSH. It does not reboot the machines.\n\nIf this environment only logs, the job writes a log and does not change the machines."
+        `Deploy over SSH?\n\nDeploy installs Kubernetes and OpenStack over SSH. It does not reboot the machines.\n\nIf this environment only logs, the job writes a log and does not change the machines.${extra}`
       )) return;
       await enqueue(envId, "genestack.deploy", { parallelism: 2 }, "Deploy over SSH");
       return;
     }
     const label = (STAGES.find(([id]) => id === stage) || ["", stage])[1];
+    const notes = noticeText(currentModel, stage);
+    const extra = notes ? `\n\n${notes}` : "";
     if (!window.confirm(
-      `Continue from ${label}?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nIf this environment only logs, the job writes a log and does not change the machines.`
+      `Continue from ${label}?\n\nKubernetes stays as it is. This does not run Talos bootstrap again.\n\nIf this environment only logs, the job writes a log and does not change the machines.${extra}`
     )) return;
     await enqueue(envId, "genestack.deploy", { from_stage: stage, parallelism: 2 }, `Deploy from ${label}`);
     return;
