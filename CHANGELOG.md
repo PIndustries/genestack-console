@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.12.1
+
+A Talos deploy installs the iSCSI tools Longhorn checks for, and kube-ovn follows the NIC that owns the node address.
+
+- Writing the factory image into the machine config does not install those tools. The deploy upgrades a control plane or storage node that is missing ext-iscsid, one node at a time, and skips a node that already has it.
+- An ethN provider port is not plugged into br-ex. A bond or PCI name is still pinned.
+- A tunnel-interface annotation is removed only after kube-ovn's iface is empty, and the CNI then restarts.
+
 ## 2026.10.11.10
 
 Kube-OVN no longer requires the NIC to be named eth0.
