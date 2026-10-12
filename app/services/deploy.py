@@ -374,7 +374,10 @@ def _pipeline_command(
     A local live run of setup-infrastructure.sh rewrites the upstream
     ``/etc/genestack`` prefix to this environment's config dir. Install
     scripts already honor GENESTACK_OVERRIDES_DIR. The infrastructure script
-    does not, and neither does the envoy setup it calls. A dry run, a remote
+    does not, and neither does the envoy setup it calls. Envoy is run with
+    HYPERCONVERGED=true so each listener is added on its own. The bulk patch
+    adds ``*.<domain>`` on port 80 beside the listener the chart already
+    created, and the gateway rejects that pair. A dry run, a remote
     executor, and every other script stay ``bash <script>``.
     """
     config = ctx.config_dir
@@ -395,7 +398,7 @@ def _pipeline_command(
         f"printf '%s\\n' {shlex.quote('cfg=' + shlex.quote(cfg))}\n"
         "printf '%s\\n' 'rewrite() { local file=\"$1\"; shift; "
         f"sed \"s|{_UPSTREAM_CONFIG}|${{cfg}}|g\" \"$file\" | bash -s -- \"$@\"; }}'\n"
-        f"sed {shlex.quote(f's|{_UPSTREAM_CONFIG}|{cfg}|g; s|{root}/bin/setup-envoy-gateway.sh|rewrite {root}/bin/setup-envoy-gateway.sh|g')} "
+        f"sed {shlex.quote(f's|{_UPSTREAM_CONFIG}|{cfg}|g; s|{root}/bin/setup-envoy-gateway.sh|HYPERCONVERGED=true rewrite {root}/bin/setup-envoy-gateway.sh|g')} "
         f"{shlex.quote(root + '/' + script)}\n"
         "} | bash\n"
     )

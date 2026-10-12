@@ -90,13 +90,14 @@ def test_infrastructure_command_follows_the_environment_config_dir(tmp_path):
         "#!/bin/bash\n"
         "set -e\n"
         "echo INFRA:/etc/genestack/provider\n"
+        "echo INFRA_HYPER:${HYPERCONVERGED-unset}\n"
         f"{root}/bin/setup-envoy-gateway.sh -e a@b -d cluster.local\n",
         encoding="utf-8",
     )
     envoy.write_text(
         "#!/bin/bash\n"
         "set -e\n"
-        'echo "ENVOY:/etc/genestack/kustomize $*"\n',
+        'echo "ENVOY:/etc/genestack/kustomize $* HYPER:${HYPERCONVERGED-unset}"\n',
         encoding="utf-8",
     )
     cfg = tmp_path / "env" / "etc-genestack"
@@ -129,7 +130,10 @@ def test_infrastructure_command_follows_the_environment_config_dir(tmp_path):
     result = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert f"INFRA:{cfg}/provider" in result.stdout
-    assert f"ENVOY:{cfg}/kustomize -e a@b -d cluster.local" in result.stdout
+    assert (
+        f"ENVOY:{cfg}/kustomize -e a@b -d cluster.local HYPER:true" in result.stdout
+    )
+    assert "INFRA_HYPER:unset" in result.stdout
     assert "/etc/genestack" not in result.stdout
 
 
