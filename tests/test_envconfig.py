@@ -306,7 +306,7 @@ def test_talos_provider_renders_kube_ovn_writable_hostpaths():
     assert body["cni_conf"]["MOUNT_LOCAL_BIN_DIR"] is False
 
 
-def test_talos_kube_ovn_uses_the_saved_container_interface():
+def test_talos_kube_ovn_does_not_pin_a_legacy_eth_name():
     env = Environment(id="env-talos", name="env-talos")
     files = envconfig_service.render_to_files(
         {
@@ -316,8 +316,34 @@ def test_talos_kube_ovn_uses_the_saved_container_interface():
         env,
     )
     body = yaml.safe_load(files["helm-configs/kube-ovn/console-rendered.yaml"])
-    assert body["networking"]["IFACE"] == "eth0"
-    assert body["networking"]["vlan"]["VLAN_INTERFACE_NAME"] == "eth0"
+    assert "IFACE" not in (body.get("networking") or {})
+    override = yaml.safe_load(files["helm-configs/kube-ovn/zz-talos-iface.yaml"])
+    assert override["networking"]["IFACE"] == ""
+    assert override["networking"]["vlan"]["VLAN_INTERFACE_NAME"] == ""
+    # This file must sort after the script-written kube-ovn-helm-overrides.yaml.
+    names = [
+        "console-rendered.yaml",
+        "kube-ovn-helm-overrides.yaml",
+        "zz-talos-iface.yaml",
+    ]
+    assert max(names) == "zz-talos-iface.yaml"
+
+
+def test_talos_kube_ovn_pins_a_named_container_interface():
+    env = Environment(id="env-talos", name="env-talos")
+    files = envconfig_service.render_to_files(
+        {
+            "provider": "talos",
+            "network": {"container_interface": "enp3934127.100"},
+        },
+        env,
+    )
+    body = yaml.safe_load(files["helm-configs/kube-ovn/console-rendered.yaml"])
+    assert body["networking"]["IFACE"] == "enp3934127.100"
+    assert body["networking"]["vlan"]["VLAN_INTERFACE_NAME"] == "enp3934127.100"
+    override = yaml.safe_load(files["helm-configs/kube-ovn/zz-talos-iface.yaml"])
+    assert override["networking"]["IFACE"] == "enp3934127.100"
+    assert "vlan" not in override["networking"]
 
 
 def test_runtime_tree_copies_charts_and_links_bases(tmp_path):

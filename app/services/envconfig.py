@@ -167,7 +167,9 @@ KNOWN_TOP_LEVEL_KEYS = frozenset(
 # network: keys doc_env() maps onto env vars for genestack's
 # bin/setup-infrastructure.sh; anything else warns (loose validation).
 # container_interface is kube-ovn IFACE (Talos: the VLAN iface that holds
-# the private IP, e.g. enp3934127.100, not the untagged parent).
+# the private IP, e.g. enp3934127.100, not the untagged parent). A legacy
+# ethN name is not pinned: Talos factory images rename eth0 to ens160, and
+# kube-ovn then exits. An empty IFACE selects the NIC that owns the node IP.
 # compute_interface and ovn.external_interface must never be the public /
 # default-route NIC — empty OVN_EXTERNAL_INTERFACE leaves br-ex unported
 # rather than falling back to COMPUTE_INTERFACE (that enslaved public
@@ -272,6 +274,14 @@ TALOS_KUBE_OVN_HELM = {
     # kube-ovn base chart uses kubespray 10.233.0.0/18; mismatch breaks DNS.
     "ipv4": {"SVC_CIDR": "10.96.0.0/12"},
 }
+
+# eth0 is the name on the first Talos boot. A factory image with extensions
+# uses predictable names (ens160), so a pin of ethN crash-loops kube-ovn-cni.
+_LEGACY_KERNEL_IFACE = re.compile(r"^eth\d+$")
+# setup-infrastructure.sh writes kube-ovn-helm-overrides.yaml once. Helm
+# applies every yaml in that directory in name order, and that file then
+# wins over console-rendered.yaml. This name sorts last.
+_TALOS_IFACE_OVERRIDE = "helm-configs/kube-ovn/zz-talos-iface.yaml"
 
 # pxe: console-owned DHCP/PXE provisioning (app/services/pxe.py and
 # pxe_runtime.py, in-process). interface/range_start/range_end are required
@@ -1541,17 +1551,36 @@ def render_to_files(
                 merged[nested] = base
         network = doc.get("network")
         if isinstance(network, dict) and network.get("container_interface"):
-            iface = str(network["container_interface"])
+            iface = str(network["container_interface"]).strip()
+            pinned = "" if _LEGACY_KERNEL_IFACE.fullmatch(iface) else iface
             networking = merged.get("networking")
             if not isinstance(networking, dict):
                 networking = {}
-            networking["IFACE"] = iface
-            vlan = networking.get("vlan")
-            if not isinstance(vlan, dict):
-                vlan = {}
-            vlan.setdefault("VLAN_INTERFACE_NAME", iface)
-            networking["vlan"] = vlan
-            merged["networking"] = networking
+            override_net: dict[str, Any] = {"IFACE": pinned}
+            if pinned:
+                networking["IFACE"] = pinned
+                vlan = networking.get("vlan")
+                if not isinstance(vlan, dict):
+                    vlan = {}
+                vlan.setdefault("VLAN_INTERFACE_NAME", pinned)
+                networking["vlan"] = vlan
+                merged["networking"] = networking
+            else:
+                # The script-written overrides file still says eth0. Clear
+                # both flags or the next helm install puts --iface=eth0 back.
+                if isinstance(networking, dict):
+                    networking.pop("IFACE", None)
+                    vlan = networking.get("vlan")
+                    if isinstance(vlan, dict):
+                        vlan.pop("VLAN_INTERFACE_NAME", None)
+                        if not vlan:
+                            networking.pop("vlan", None)
+                    if networking:
+                        merged["networking"] = networking
+                    else:
+                        merged.pop("networking", None)
+                override_net["vlan"] = {"VLAN_INTERFACE_NAME": ""}
+            files[_TALOS_IFACE_OVERRIDE] = _dump({"networking": override_net})
         files[kube_ovn_path] = _dump(merged)
 
     kustomize_patches = doc.get("kustomize_patches")

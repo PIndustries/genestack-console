@@ -33,7 +33,9 @@ from app.services.talos import (
 TALOS_TIMEOUT = 12
 DMESG_LINES = 80
 LOG_LINES = 200
-UPGRADE_TIMEOUT = 60
+# A cold factory-image pull exceeds 60s and talosctl is killed before the
+# node reboots. The upgrade job itself allows 600s.
+UPGRADE_TIMEOUT = 300
 APPLY_TIMEOUT = 60
 EVENTS_TIMEOUT = 15
 APPLY_MODES = frozenset({"auto", "staged", "no-reboot", "reboot"})
