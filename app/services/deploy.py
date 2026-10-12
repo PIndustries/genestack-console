@@ -52,6 +52,7 @@ from app.services import genestack_bridge as bridge
 from app.services import secret_lease
 from app.services import service_registry
 from app.services import talos as talos_service
+from app.services import talos_prepare as talos_prepare_service
 from app.services.crypto import decrypt_secret
 from app.services.envcontext import EnvContext
 from app.services.executors import pick_executor
@@ -379,6 +380,13 @@ def _pipeline_command(
     adds ``*.<domain>`` on port 80 beside the listener the chart already
     created, and the gateway rejects that pair. A dry run, a remote
     executor, and every other script stay ``bash <script>``.
+
+    ``talos_prepare`` runs where upstream calls install-longhorn.sh, which is
+    after kube-ovn's helm install and its controller wait. The function
+    no-ops unless ``GENESTACK_TALOS_PREPARE`` names a script. That script
+    installs iSCSI on nodes that lack it and drops a tunnel-interface
+    annotation only after kube-ovn's iface is empty. HYPERCONVERGED stays
+    off this script; it is only the envoy command prefix.
     """
     config = ctx.config_dir
     if (
@@ -393,16 +401,78 @@ def _pipeline_command(
     root = str(ctx.genestack_root)
     if any(char in cfg or char in root for char in "|&\\\n'\"`$"):
         return ["bash", script]
+    envoy = f"{root}/bin/setup-envoy-gateway.sh"
+    longhorn = f"{root}/bin/install-longhorn.sh"
+    sed_expr = (
+        f"s|{_UPSTREAM_CONFIG}|{cfg}|g; "
+        f"s|{envoy}|HYPERCONVERGED=true rewrite {envoy}|g; "
+        f"s|{longhorn}|talos_prepare; {longhorn}|g"
+    )
     program = (
         "{\n"
         f"printf '%s\\n' {shlex.quote('cfg=' + shlex.quote(cfg))}\n"
         "printf '%s\\n' 'rewrite() { local file=\"$1\"; shift; "
         f"sed \"s|{_UPSTREAM_CONFIG}|${{cfg}}|g\" \"$file\" | bash -s -- \"$@\"; }}'\n"
-        f"sed {shlex.quote(f's|{_UPSTREAM_CONFIG}|{cfg}|g; s|{root}/bin/setup-envoy-gateway.sh|HYPERCONVERGED=true rewrite {root}/bin/setup-envoy-gateway.sh|g')} "
-        f"{shlex.quote(root + '/' + script)}\n"
+        "printf '%s\\n' 'talos_prepare() { "
+        "if [ -n \"${GENESTACK_TALOS_PREPARE:-}\" ]; then "
+        "bash \"${GENESTACK_TALOS_PREPARE}\"; fi; }'\n"
+        f"sed {shlex.quote(sed_expr)} {shlex.quote(root + '/' + script)}\n"
         "} | bash\n"
     )
     return ["bash", "-c", program]
+
+
+def _arm_talos_longhorn_prepare(
+    doc: dict[str, Any],
+    ctx: EnvContext,
+    extra_env: dict[str, str],
+    log: LogFn,
+    *,
+    dry_run: bool,
+    local: bool,
+    start_index: int,
+    until_id: str | None,
+    stage_ids: list[str],
+) -> dict[str, str]:
+    """Point a local infrastructure run at the Talos iSCSI step.
+
+    The rewritten script calls that step after kube-ovn and before Longhorn.
+    A remote executor keeps the upstream script, so this step is not armed.
+    """
+    if dry_run or ctx.config_dir is None:
+        return extra_env
+    try:
+        infra_index = stage_ids.index("infrastructure")
+    except ValueError:
+        return extra_env
+    runs_infra = start_index <= infra_index and (
+        until_id is None or stage_ids.index(until_id) >= infra_index
+    )
+    if not runs_infra:
+        return extra_env
+    if not local:
+        log(
+            "[deploy] Talos iSCSI prepare runs on the console host; "
+            "this executor is remote"
+        )
+        return extra_env
+    image = talos_service.install_image_from_doc(doc)
+    if not talos_service.image_has_longhorn_extensions(image):
+        log(
+            "[deploy] Talos image has no Longhorn iSCSI extensions; "
+            "nodes are not upgraded"
+        )
+        return extra_env
+    path = talos_prepare_service.install_prepare_script(Path(ctx.config_dir), doc)
+    if path is None:
+        return extra_env
+    updated = dict(extra_env)
+    updated["GENESTACK_TALOS_PREPARE"] = str(path)
+    log(
+        "[deploy] Talos installs iSCSI before Longhorn "
+        "when ext-iscsid is not running"
+    )
+    return updated
 
 
 def run_deploy(
@@ -564,6 +634,17 @@ def run_deploy(
     talos_mode = isinstance(provider, str) and provider.strip().lower() == "talos"
     if talos_mode:
         log("[deploy] provider=talos — hosts stage will use the talosctl flow")
+        extra_env = _arm_talos_longhorn_prepare(
+            doc or {},
+            ctx,
+            extra_env,
+            log,
+            dry_run=dry_run,
+            local=local_executor,
+            start_index=start_index,
+            until_id=until_id,
+            stage_ids=stage_ids,
+        )
 
     # OVH + Talos: the metal is not Talos until BYOI finishes. If the hosts
     # stage will run, provision (or confirm :50000) before talosctl.

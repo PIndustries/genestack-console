@@ -137,6 +137,77 @@ def test_infrastructure_command_follows_the_environment_config_dir(tmp_path):
     assert "/etc/genestack" not in result.stdout
 
 
+def test_infrastructure_command_prepares_talos_before_longhorn(tmp_path):
+    """iSCSI prepare runs after kube-ovn and before Longhorn. Envoy stays prefixed."""
+    import os
+    import subprocess
+
+    from app.services.deploy import _pipeline_command
+    from app.services.envcontext import EnvContext
+
+    root = tmp_path / "opt" / "genestack"
+    script = root / "bin" / "setup-infrastructure.sh"
+    script.parent.mkdir(parents=True)
+    envoy = root / "bin" / "setup-envoy-gateway.sh"
+    longhorn = root / "bin" / "install-longhorn.sh"
+    script.write_text(
+        "#!/bin/bash\n"
+        "set -e\n"
+        "echo INFRA:/etc/genestack/provider\n"
+        "echo INFRA_HYPER:${HYPERCONVERGED-unset}\n"
+        "echo MARK_BEFORE\n"
+        f"{longhorn}\n"
+        "echo MARK_AFTER\n"
+        f"{envoy} -e a@b -d cluster.local\n",
+        encoding="utf-8",
+    )
+    envoy.write_text(
+        "#!/bin/bash\n"
+        "set -e\n"
+        'echo "ENVOY:/etc/genestack/kustomize $* HYPER:${HYPERCONVERGED-unset}"\n',
+        encoding="utf-8",
+    )
+    longhorn.write_text("#!/bin/bash\necho MARK_LONGHORN\n", encoding="utf-8")
+    longhorn.chmod(0o755)
+    prepare = tmp_path / "prepare.sh"
+    prepare.write_text("#!/bin/bash\necho MARK_PREPARE\n", encoding="utf-8")
+    cfg = tmp_path / "env" / "etc-genestack"
+    cfg.mkdir(parents=True)
+    ctx = EnvContext(
+        environment=None,
+        genestack_root=root,
+        config_dir=cfg,
+        dry_run=False,
+        kubeconfig=None,
+    )
+    argv = _pipeline_command(
+        "bin/setup-infrastructure.sh", ctx, dry_run=False, local=True
+    )
+    env = dict(os.environ)
+    env["GENESTACK_TALOS_PREPARE"] = str(prepare)
+    result = subprocess.run(
+        argv, cwd=root, capture_output=True, text=True, check=False, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    stdout = result.stdout
+    assert stdout.index("MARK_BEFORE") < stdout.index("MARK_PREPARE")
+    assert stdout.index("MARK_PREPARE") < stdout.index("MARK_LONGHORN")
+    assert stdout.index("MARK_LONGHORN") < stdout.index("MARK_AFTER")
+    assert f"INFRA:{cfg}/provider" in stdout
+    assert "INFRA_HYPER:unset" in stdout
+    assert (
+        f"ENVOY:{cfg}/kustomize -e a@b -d cluster.local HYPER:true" in stdout
+    )
+
+    prepare.write_text("#!/bin/bash\necho MARK_PREPARE_FAIL\nexit 1\n", encoding="utf-8")
+    failed = subprocess.run(
+        argv, cwd=root, capture_output=True, text=True, check=False, env=env
+    )
+    assert failed.returncode != 0
+    assert "MARK_PREPARE_FAIL" in failed.stdout
+    assert "MARK_LONGHORN" not in failed.stdout
+
+
 def test_deploy_op_in_catalog():
     op = get_operation("genestack.deploy")
     assert op is not None

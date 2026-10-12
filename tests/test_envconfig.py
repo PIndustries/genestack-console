@@ -949,6 +949,86 @@ def test_doc_env_empty_ovn_external_does_not_become_compute_interface():
     assert "OVN_EXTERNAL_INTERFACE" not in env
 
 
+def test_doc_env_talos_drops_a_legacy_eth_provider_port():
+    """A factory image renames eth3. Do not annotate br-ex with that name.
+
+    eth0 and eth1 stay exported. An empty value makes setup-infrastructure.sh
+    guess a NIC on the console host.
+    """
+    env = envconfig_service.doc_env(
+        {
+            "provider": "talos",
+            "network": {
+                "container_interface": "eth0",
+                "compute_interface": "eth1",
+                "ovn": {"external_interface": "eth3"},
+            },
+        }
+    )
+    assert env["CONTAINER_INTERFACE"] == "eth0"
+    assert env["COMPUTE_INTERFACE"] == "eth1"
+    assert "OVN_EXTERNAL_INTERFACE" not in env
+
+
+def test_doc_env_talos_keeps_a_named_provider_port():
+    env = envconfig_service.doc_env(
+        {
+            "provider": "talos",
+            "network": {
+                "container_interface": "bond0",
+                "ovn": {"external_interface": "bond0.126"},
+            },
+        }
+    )
+    assert env["OVN_EXTERNAL_INTERFACE"] == "bond0.126"
+    assert env["CONTAINER_INTERFACE"] == "bond0"
+
+
+def test_doc_env_talos_drops_a_legacy_vlan_interface_set():
+    env = envconfig_service.doc_env(
+        {
+            "provider": "talos",
+            "network": {
+                "ovn": {
+                    "external_vlan_interface": "eth3",
+                    "external_vlan_parent": "eth3",
+                    "external_vlan_id": 100,
+                    "external_vlan_mtu": 1500,
+                }
+            },
+        }
+    )
+    assert "OVN_EXTERNAL_VLAN_INTERFACE" not in env
+    assert "OVN_EXTERNAL_VLAN_ID" not in env
+    assert "OVN_EXTERNAL_INTERFACE" not in env
+    kept = envconfig_service.doc_env(
+        {
+            "provider": "talos",
+            "network": {
+                "ovn": {
+                    "external_interface": "bond0.126",
+                    "external_vlan_interface": "eth3",
+                    "external_vlan_parent": "eth3",
+                    "external_vlan_id": 100,
+                    "external_vlan_mtu": 1500,
+                }
+            },
+        }
+    )
+    assert kept["OVN_EXTERNAL_INTERFACE"] == "bond0.126"
+    assert "OVN_EXTERNAL_VLAN_INTERFACE" not in kept
+
+
+def test_doc_env_kubespray_keeps_an_eth_provider_port():
+    env = envconfig_service.doc_env(
+        {
+            "provider": "kubespray",
+            "network": {"ovn": {"external_interface": "eth3"}},
+        }
+    )
+    assert env["OVN_EXTERNAL_INTERFACE"] == "eth3"
+
+
 def test_setup_infrastructure_empty_ovn_external_does_not_become_compute_interface():
     """setup-infrastructure.sh must not plug COMPUTE_INTERFACE into br-ex.
 

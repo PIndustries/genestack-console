@@ -174,6 +174,10 @@ KNOWN_TOP_LEVEL_KEYS = frozenset(
 # default-route NIC — empty OVN_EXTERNAL_INTERFACE leaves br-ex unported
 # rather than falling back to COMPUTE_INTERFACE (that enslaved public
 # eno1np0 into br-ex and killed Talos :50000 / kube-apiserver :6443).
+# On Talos, an ethN provider port is not exported. A factory image renames
+# eth3, and the infrastructure script would annotate br-ex with that name.
+# ethN container and compute names stay exported so the script does not
+# guess a NIC on the console host.
 # metallb_pools / ovn_bridge_mappings are known but rendered elsewhere.
 KNOWN_NETWORK_KEYS = frozenset(
     {
@@ -1701,6 +1705,10 @@ def doc_env(doc: dict[str, Any]) -> dict[str, str]:
     COMPUTE_INTERFACE — setup-infrastructure.sh will skip the
     ovn.openstack.org/ports annotation (kubectl annotate ... ports-) so
     br-ex is not plugged into the management NIC.
+    On Talos, an ethN provider port is dropped for the same reason a factory
+    image rename makes ``--iface=eth0`` wrong. Container and compute ethN
+    names stay exported: an empty value makes the script guess the console
+    host's NICs and exit when those two guesses match.
     Absent keys are simply not exported.
     """
     env: dict[str, str] = {}
@@ -1735,7 +1743,32 @@ def doc_env(doc: dict[str, Any]) -> dict[str, str]:
             if isinstance(value, list):
                 value = ",".join(str(item) for item in value)
             env[f"OVN_{str(key).upper()}"] = str(value)
+    if str(doc.get("provider") or "").strip().lower() == "talos":
+        _drop_legacy_talos_provider_port(env)
     return env
+
+
+def _drop_legacy_talos_provider_port(env: dict[str, str]) -> None:
+    """Do not annotate br-ex with ethN on Talos.
+
+    The infrastructure script copies OVN_EXTERNAL_VLAN_INTERFACE over
+    OVN_EXTERNAL_INTERFACE when the VLAN set is present, and it exits if
+    only some of those VLAN variables are set. Drop the whole set when the
+    VLAN interface is ethN, then drop an external port that is still ethN.
+    A real name such as bond0.126 stays.
+    """
+    vlan_iface = env.get("OVN_EXTERNAL_VLAN_INTERFACE", "")
+    if _LEGACY_KERNEL_IFACE.fullmatch(vlan_iface):
+        for key in (
+            "OVN_EXTERNAL_VLAN_INTERFACE",
+            "OVN_EXTERNAL_VLAN_PARENT",
+            "OVN_EXTERNAL_VLAN_ID",
+            "OVN_EXTERNAL_VLAN_MTU",
+        ):
+            env.pop(key, None)
+    external = env.get("OVN_EXTERNAL_INTERFACE", "")
+    if _LEGACY_KERNEL_IFACE.fullmatch(external):
+        env.pop("OVN_EXTERNAL_INTERFACE", None)
 
 
 # ---------------------------------------------------------------------------

@@ -466,7 +466,11 @@ def install_image_from_doc(doc: dict[str, Any]) -> str:
 
 
 def image_has_longhorn_extensions(image: str) -> bool:
-    """True when the install image names the factory schematic Longhorn needs."""
+    """True when the image name includes the factory schematic Longhorn needs.
+
+    This does not look at the running node. Writing the image into the
+    machine config leaves the installed system unchanged until upgrade.
+    """
     text = str(image or "")
     if DEFAULT_FACTORY_SCHEMATIC in text:
         return True

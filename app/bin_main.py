@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
         "make-config",
         "seed-demo",
     }
+    if argv and argv[0] == "talos-prepare":
+        from app.services.talos_prepare import main as prepare_main
+
+        return prepare_main(argv[1:])
     if argv and argv[0] in cli_cmds:
         from app.cli import main as cli_main
 
