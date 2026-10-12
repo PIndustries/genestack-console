@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.11.10
+
+Kube-OVN no longer requires the NIC to be named eth0.
+
+- A Talos factory image renames eth0. Pinning that name makes the CNI exit on the upgraded node.
+- An ethN container interface is left unset, so each node uses the NIC that owns its address. A bond or PCI name is still pinned.
+- A Talos image upgrade waits up to five minutes for the installer to accept the request.
+
 ## 2026.10.11.9
 
 Envoy listeners are added one at a time.
