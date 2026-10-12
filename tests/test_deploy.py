@@ -273,6 +273,69 @@ def test_infrastructure_command_skips_an_empty_acme_prompt(tmp_path):
     assert "-e -d" not in result.stdout
 
 
+def test_infrastructure_command_does_not_guess_a_provider_port(tmp_path):
+    """An empty provider port is removed. It is not filled from the compute NIC."""
+    import os
+    import subprocess
+
+    from app.services.deploy import _pipeline_command
+    from app.services.envcontext import EnvContext
+
+    root = tmp_path / "opt" / "genestack"
+    script = root / "bin" / "setup-infrastructure.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "#!/bin/bash\n"
+        "set -e\n"
+        'kubectl() { echo "KUBECTL:$*"; }\n'
+        'if [ -z "${OVN_EXTERNAL_INTERFACE}" ]; then\n'
+        "  if ip link show bond0.126 >/dev/null 2>&1; then\n"
+        "    export OVN_EXTERNAL_INTERFACE=bond0.126\n"
+        "  else\n"
+        "    export OVN_EXTERNAL_INTERFACE=${COMPUTE_INTERFACE}\n"
+        "  fi\n"
+        "fi\n"
+        "kubectl annotate \\\n"
+        "        nodes \\\n"
+        "        -l openstack-compute-node=enabled "
+        "-l openstack-network-node=enabled \\\n"
+        '        ovn.openstack.org/ports="br-ex:${OVN_EXTERNAL_INTERFACE}"\n',
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "env" / "etc-genestack"
+    cfg.mkdir(parents=True)
+    ctx = EnvContext(
+        environment=None,
+        genestack_root=root,
+        config_dir=cfg,
+        dry_run=False,
+        kubeconfig=None,
+    )
+    argv = _pipeline_command(
+        "bin/setup-infrastructure.sh", ctx, dry_run=False, local=True
+    )
+    env = dict(os.environ)
+    env.pop("OVN_EXTERNAL_INTERFACE", None)
+    env["COMPUTE_INTERFACE"] = "eth1"
+    result = subprocess.run(
+        argv, cwd=root, capture_output=True, text=True, check=False, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ovn.openstack.org/ports-" in result.stdout
+    assert "br-ex:eth1" not in result.stdout
+    assert "br-ex:bond0.126" not in result.stdout
+    assert "--overwrite" not in result.stdout
+
+    env["OVN_EXTERNAL_INTERFACE"] = "bond0.126"
+    saved = subprocess.run(
+        argv, cwd=root, capture_output=True, text=True, check=False, env=env
+    )
+    assert saved.returncode == 0, saved.stderr
+    assert "ovn.openstack.org/ports-" in saved.stdout
+    assert "br-ex:bond0.126" in saved.stdout
+    assert "--overwrite" in saved.stdout
+
+
 def test_deploy_op_in_catalog():
     op = get_operation("genestack.deploy")
     assert op is not None

@@ -388,6 +388,12 @@ def _pipeline_command(
     installs iSCSI on nodes that lack it and drops a tunnel-interface
     annotation only after kube-ovn's iface is empty. HYPERCONVERGED stays
     off this script; it is only the envoy command prefix.
+
+    An empty provider port stays empty. The upstream script fills
+    ``OVN_EXTERNAL_INTERFACE`` from ``bond0.126`` on the deploy host or from
+    ``COMPUTE_INTERFACE``, then ``kubectl annotate`` exits when
+    ``ovn.openstack.org/ports`` already names a different NIC. A saved port
+    is applied with ``--overwrite``. An empty port removes that annotation.
     """
     config = ctx.config_dir
     if (
@@ -411,6 +417,18 @@ def _pipeline_command(
         'read -rp "Enter a valid email address for use with ACME, '
         'press enter to skip: " ACME_EMAIL'
     )
+    # BSD and GNU sed both treat \$ as a literal dollar. A backslash-newline
+    # in the replacement is a newline in the rewritten script.
+    ports_line = 'ovn.openstack.org/ports="br-ex:\\${OVN_EXTERNAL_INTERFACE}"'
+    ports_fix = (
+        "ovn.openstack.org/ports-\\\n"
+        'if [ -n "${OVN_EXTERNAL_INTERFACE}" ]; then\\\n'
+        "kubectl annotate --overwrite nodes "
+        "-l openstack-compute-node=enabled "
+        "-l openstack-network-node=enabled "
+        'ovn.openstack.org/ports="br-ex:${OVN_EXTERNAL_INTERFACE}"\\\n'
+        "fi"
+    )
     sed_expr = (
         f"s|{_UPSTREAM_CONFIG}|{cfg}|g; "
         f"s|{envoy}|HYPERCONVERGED=true rewrite {envoy}|g; "
@@ -418,7 +436,10 @@ def _pipeline_command(
         f"|rewrite {envoy} ${{ACME_EMAIL:+-e \"$ACME_EMAIL\"}} "
         f"-d \"${{GATEWAY_DOMAIN}}\"|g; "
         f"s|{longhorn}|talos_prepare; {longhorn}|g; "
-        f"s|{acme_read}|ACME_EMAIL=\"${{ACME_EMAIL:-}}\"|g"
+        f"s|{acme_read}|ACME_EMAIL=\"${{ACME_EMAIL:-}}\"|g; "
+        "s|export OVN_EXTERNAL_INTERFACE=bond0.126|:|g; "
+        "s|export OVN_EXTERNAL_INTERFACE=\\${COMPUTE_INTERFACE}|:|g; "
+        f"s|{ports_line}|{ports_fix}|g"
     )
     program = (
         "{\n"
