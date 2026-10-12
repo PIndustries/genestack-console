@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.12.3
+
+An empty provider port stays empty when the infrastructure script starts.
+
+- The script no longer fills that port from bond0.126 on the deploy host or from the compute NIC.
+- A saved port replaces an existing bridge annotation. An empty port removes the stale annotation instead of stopping the deploy.
+
 ## 2026.10.12.2
 
 A deploy names the missing fact that would stop the infrastructure script, before that script starts.
