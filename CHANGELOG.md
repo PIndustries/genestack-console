@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.12.2
+
+A deploy names the missing fact that would stop the infrastructure script, before that script starts.
+
+- An empty gateway domain, a missing container or compute interface, a partial provider VLAN, a missing node role, or a Talos image without iSCSI tools stops a live job before the pipeline. A rehearsal still runs.
+- When the inventory already names those roles, the deploy labels the nodes before the script checks them.
+- An empty ACME email skips the certificate prompt. A saved name such as cluster.local is reported as a certificate that will stay pending.
+- A provider port that is empty, or an ethN name on Talos, is reported as a bridge with no physical port. Deploy still runs.
+- Install from the management port does not wipe disks when one of those facts would stop the deploy that follows.
+
 ## 2026.10.12.1
 
 A Talos deploy installs the iSCSI tools Longhorn checks for, and kube-ovn follows the NIC that owns the node address.
