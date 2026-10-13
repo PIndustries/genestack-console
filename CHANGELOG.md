@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.8
+
+Open Horizon from inside the console.
+
+- The OpenStack page opens the dashboard here. The console signs in with the cloud admin account. The password stays on the console.
+- Kubernetes has the same Open Horizon button. A public horizon address is still listed when the cluster has one.
+
 ## 2026.10.13.7
 
 The environment descriptor stays on Settings.
