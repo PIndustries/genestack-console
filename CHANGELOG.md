@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.3
+
+A compiled console can deploy. The admin client pod is created next to its secret.
+
+- The Helm guard no longer asks the compiled binary for Python source, so a deploy gets past the first step.
+- The admin client is applied in the openstack namespace, where the Keystone admin secret already is.
+- Horizon's startup hook no longer reloads Apache. That reload was stopping the dashboard.
+
 ## 2026.10.13.2
 
 The Machines reach column checks a Talos node on its API.
