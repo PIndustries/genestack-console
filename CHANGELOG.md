@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.1
+
+A Talos deploy stops when a pod cannot schedule, instead of waiting two hours.
+
+- Control planes stay schedulable. Genestack places its control services on those nodes, and the machine config keeps the NoSchedule taint off.
+- A cluster that already has a machine config is patched in place before the next chart. That patch does not resend the etcd subnet block.
+- Helm stops after a pod has been unschedulable for about a minute. Gateway API CRDs are applied before cert-manager.
+
 ## 2026.10.12.4
 
 The Longhorn prepare step runs the installed console binary.
