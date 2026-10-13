@@ -54,7 +54,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     shell = client.get("/static/js/app.js")
     assert "healthMisses" in shell.text
     assert "health: slow" in shell.text
-    assert "environment_detail.js?v=ls72" in shell.text
+    assert "environment_detail.js?v=ls73" in shell.text
     assert "env_wizard.js?v=ls67" in shell.text
 
     nxt = client.get("/static/js/pages/environment_next.js")

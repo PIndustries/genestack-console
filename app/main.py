@@ -48,6 +48,7 @@ from app.routers import (
     genestack_services,
     hardware_accounts,
     health,
+    horizon,
     hostvms,
     ilo_console,
     jobs,
@@ -326,6 +327,7 @@ def create_app() -> FastAPI:
     # Register them first so /cloud/images/{id} is not taken as a dashboard session.
     app.include_router(observe.router)
     app.include_router(cloud.router)
+    app.include_router(horizon.router)
     app.include_router(obs_proxy.router)
     app.include_router(jobs.router)
 

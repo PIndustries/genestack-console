@@ -32,6 +32,7 @@ const TAINT_EFFECTS = ["NoSchedule", "PreferNoSchedule", "NoExecute"];
 let activeEnvId = ""; // guards against stale DOM after navigation/env switch
 let envIdGetter = null;
 let onProblemsClick = null;
+let onHorizon = null;
 let refreshTimer = null;
 let inflight = null;
 let inflightFor = "";
@@ -1626,11 +1627,9 @@ function healthStripHtml(data, envId) {
       '<button type="button" class="secondary btn-sm" data-dl-talosconfig title="Download the copy in this environment\'s vault">Talosconfig</button>'
     );
   }
-  if (access && access.horizon) {
-    actions.push(
-      `<a class="secondary btn-sm" href="${esc(access.horizon)}" target="_blank" rel="noopener noreferrer">Open Horizon</a>`
-    );
-  }
+  actions.push(
+    `<button type="button" class="secondary btn-sm" data-open-horizon title="Open the OpenStack dashboard in this console" ${gate(canRun(), "operator")}>Open Horizon</button>`
+  );
   const stats = bits.length
     ? bits.join('<span class="env-health-sep" aria-hidden="true">·</span>')
     : '<span class="muted">Cluster status loaded.</span>';
@@ -1798,6 +1797,7 @@ export function clusterCardHtml() {
 export function wireClusterCard(getEnvId, opts = {}) {
   envIdGetter = typeof getEnvId === "function" ? getEnvId : null;
   if (opts && typeof opts.onProblemsClick === "function") onProblemsClick = opts.onProblemsClick;
+  if (opts && typeof opts.onHorizon === "function") onHorizon = opts.onHorizon;
 
   const refreshBtn = document.getElementById("kc-refresh");
   if (refreshBtn && !refreshBtn.dataset.wired) {
@@ -1827,6 +1827,11 @@ export function wireClusterCard(getEnvId, opts = {}) {
       }
       if (e.target.closest("[data-dl-talosconfig]")) {
         downloadConfig("talosconfig");
+        return;
+      }
+      if (e.target.closest("[data-open-horizon]")) {
+        const id = (envIdGetter && envIdGetter()) || activeEnvId;
+        if (onHorizon && id) onHorizon(id);
       }
     });
   }
@@ -2104,6 +2109,7 @@ export function destroyClusterCard() {
   workloadsInflightKey = "";
   envIdGetter = null;
   onProblemsClick = null;
+  onHorizon = null;
   downloadMissing.clear();
   activeEnvId = "";
   clusterCache = null;

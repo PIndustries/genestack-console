@@ -10,9 +10,9 @@ import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscove
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
 import { destroyWorkflowCard } from "./environment_workflow.js?v=ls61";
 import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard, openTalosMachine, closeTalosMachine } from "./environment_platform.js?v=ls72";
-import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls60";
+import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls61";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
-import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
+import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard, openHorizon } from "./environment_cloud.js?v=ls73";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
 import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap, pauseMapPoll, refreshFleetLine } from "./environment_deploy_map.js?v=ls64";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
@@ -698,7 +698,10 @@ export async function render(root, { param, query } = {}) {
 
   // Wire all cards (event listeners, etc.)
   wirePlatformCard(() => envId);
-  wireClusterCard(() => envId, { onProblemsClick: () => switchTab("platform", "kubernetes") });
+  wireClusterCard(() => envId, {
+    onProblemsClick: () => switchTab("platform", "kubernetes"),
+    onHorizon: (id) => openHorizon(id),
+  });
   wireOpenstackCard(() => envId);
   wireCloudCard(() => envId);
   wireProgressCard(() => envId);

@@ -1,6 +1,6 @@
 // pages/environment_cloud.js — first-class OpenStack control plane (Horizon in-console).
 import { api, esc, toast } from "../api.js";
-import { canAdmin, canRun } from "../store.js";
+import { canAdmin, canRun, gate } from "../store.js";
 
 const PANELS = [
   ["instances", "Instances"],
@@ -1254,6 +1254,7 @@ export function cloudCardHtml() {
       <span id="os-cloud-pill"></span>
       <span id="os-cloud-msg" class="muted"></span>
       <input id="os-cloud-filter" class="os-filter" type="search" placeholder="Filter…" autocomplete="off">
+      <button class="secondary btn-sm" id="os-cloud-horizon" type="button" title="Open the OpenStack dashboard in this console" ${gate(canRun(), "operator")}>Open Horizon</button>
       <button class="secondary btn-sm" id="os-cloud-refresh" type="button">Refresh</button>
     </div>
     <div id="os-cloud-stats">${statsHtml({}, { skeleton: true })}</div>
@@ -1274,6 +1275,14 @@ export function wireCloudCard(getEnvId) {
   if (refresh && !refresh.dataset.wired) {
     refresh.dataset.wired = "1";
     refresh.addEventListener("click", () => retryCloud());
+  }
+  const horizon = document.getElementById("os-cloud-horizon");
+  if (horizon && !horizon.dataset.wired) {
+    horizon.dataset.wired = "1";
+    horizon.addEventListener("click", () => {
+      const id = (envIdGetter && envIdGetter()) || activeEnvId;
+      if (id) openHorizon(id);
+    });
   }
   const filt = document.getElementById("os-cloud-filter");
   if (filt && !filt.dataset.wired) {
@@ -1798,6 +1807,88 @@ function onConsoleKey(e) {
   }
 }
 
+function ensureHorizonModal() {
+  let el = document.getElementById("os-horizon-modal");
+  if (el) return el;
+  el = document.createElement("div");
+  el.id = "os-horizon-modal";
+  el.className = "os-console-modal";
+  el.hidden = true;
+  el.innerHTML = `<div class="os-console-panel" role="dialog" aria-modal="true" aria-labelledby="os-horizon-title">
+      <div class="os-console-head">
+        <h2 id="os-horizon-title">Horizon</h2>
+        <span class="os-console-actions">
+          <button type="button" class="secondary btn-sm" data-os-horizon-tab>New tab</button>
+          <button type="button" class="secondary btn-sm" data-os-horizon-close>Close</button>
+        </span>
+      </div>
+      <iframe id="os-horizon-frame" class="os-horizon-frame" title="Horizon" sandbox="allow-scripts allow-forms allow-same-origin allow-popups" referrerpolicy="same-origin"></iframe>
+      <p class="muted os-console-help" id="os-horizon-help">Horizon in this console. The login uses the cloud admin account.</p>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener("click", (e) => {
+    if (e.target === el || e.target.closest("[data-os-horizon-close]")) closeHorizonModal();
+    const tab = e.target.closest("[data-os-horizon-tab]");
+    if (tab && el.dataset.embed) window.open(el.dataset.embed, "_blank");
+  });
+  return el;
+}
+
+function onHorizonKey(e) {
+  if (e.key !== "Escape") return;
+  const modal = document.getElementById("os-horizon-modal");
+  if (!modal || modal.hidden) return;
+  e.preventDefault();
+  closeHorizonModal();
+}
+
+function closeHorizonModal() {
+  const frame = document.getElementById("os-horizon-frame");
+  if (frame) frame.src = "about:blank";
+  const modal = document.getElementById("os-horizon-modal");
+  if (modal) {
+    modal.hidden = true;
+    delete modal.dataset.embed;
+  }
+  document.removeEventListener("keydown", onHorizonKey);
+}
+
+export async function openHorizon(envId) {
+  if (!envId || !canRun()) return;
+  const modal = ensureHorizonModal();
+  const frame = document.getElementById("os-horizon-frame");
+  const help = document.getElementById("os-horizon-help");
+  if (frame) frame.src = "about:blank";
+  delete modal.dataset.embed;
+  if (help) help.textContent = "Opening Horizon…";
+  modal.hidden = false;
+  document.addEventListener("keydown", onHorizonKey);
+  try {
+    const d = await api(
+      `/api/v1/environments/${encodeURIComponent(envId)}/cloud/horizon/session`,
+      { method: "POST", timeout: 45000 }
+    );
+    if (!d || !d.ok || !d.embed_url) {
+      if (help) help.textContent = (d && d.error) || "Horizon is not available yet.";
+      toast((d && d.error) || "Horizon is not available yet.", "error");
+      return;
+    }
+    const embed = String(d.embed_url);
+    if (!embed.startsWith("/") || embed.startsWith("//")) {
+      if (help) help.textContent = "Horizon is not available yet.";
+      toast("Horizon is not available yet.", "error");
+      return;
+    }
+    modal.dataset.embed = embed;
+    if (frame) frame.src = embed;
+    if (help) help.textContent = "Horizon in this console. The login uses the cloud admin account.";
+  } catch (err) {
+    const message = err && err.message ? err.message : "Horizon is not available yet.";
+    if (help) help.textContent = message;
+    toast(message, "error");
+  }
+}
+
 function closeConsoleModal() {
   const frame = document.getElementById("os-console-frame");
   if (frame) frame.src = "about:blank";
@@ -1937,6 +2028,7 @@ export async function loadCloudCard(envId, { silent = false, refresh = false } =
 }
 
 export function destroyCloudCard() {
+  closeHorizonModal();
   closeConsoleModal();
   stopRefresh();
   envIdGetter = null;
