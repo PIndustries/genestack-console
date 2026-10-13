@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.10
+
+An API restart no longer drops a running deploy off the cluster.
+
+- Startup leaves a staged kubeconfig alone while it is younger than the max job timeout.
+- An install script whose kubeconfig file is gone stages a new one before it runs.
+
 ## 2026.10.13.9
 
 The overview map fills the window.
