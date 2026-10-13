@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.7
+
+The environment descriptor stays on Settings.
+
+- Expert is part of the Settings tab. Opening it and leaving no longer paints the descriptor, components, and Helm overrides on every other tab.
+- Clicking a Talos machine opens its health, logs, and config.
+
 ## 2026.10.13.6
 
 The Machines page shows a resumed deploy on the stage that is running.
