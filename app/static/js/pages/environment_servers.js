@@ -752,8 +752,19 @@ function checkingHtml() {
 }
 
 function reachCellHtml(row, os) {
+  // Talos has no SSH daemon. Reach for that row is the API on port 50000.
+  // An answer is Talos. A closed API names that failure. An SSH refusal on
+  // this row is not a down node.
+  const talos = os === "talos" || (row && row.check === "talos");
+  if (talos) {
+    if (!row) return `<span class="pill">Talos</span> <span class="muted">No answer</span>`;
+    if (row.up) return statusPill("ok", "Talos");
+    if (row.check !== "talos" && row.detail === "connection refused") {
+      return `<span class="pill">Talos</span>`;
+    }
+    return `${statusPill("bad", "Down")} <span class="muted">${esc(row.detail || "No answer")}</span>`;
+  }
   if (!row) {
-    if (os === "talos") return `<span class="pill">Talos</span> <span class="muted">No answer</span>`;
     return `<span class="pill bad">Down</span> <span class="muted">No answer</span>`;
   }
   if (row.authenticated && row.running) {
@@ -770,9 +781,6 @@ function reachCellHtml(row, os) {
       ? ` <span class="muted">${esc(row.detail)}</span>`
       : "";
     return `${statusPill("ok", "Up")} ${statusPill("ok", "Connect")} ${auth}${extra}`;
-  }
-  if (os === "talos") {
-    return `<span class="pill">Talos</span> <span class="muted">${esc(row.detail || "no SSH")}</span>`;
   }
   return `<span class="pill bad">Down</span> <span class="muted">${esc(row.detail || "no route")}</span>`;
 }

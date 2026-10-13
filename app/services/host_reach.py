@@ -1,8 +1,14 @@
 """Read-only check for a saved inventory address.
 
-Machines asks four questions: is it up, is it running, can we connect, and
-can we authenticate. A closed port or a refused login is a status, not a job.
-Nothing here installs, reboots, or writes to the host.
+Ubuntu is asked four questions: is it up, is it running, can we connect, and
+can we authenticate. Those use SSH on port 22.
+
+Talos has no SSH daemon. Its reach check is the API on port 50000, the same
+port ``baremetal.TALOS_API_PORT`` uses. An accepted connection means the API
+is listening. A refusal is that API, not an SSH login.
+
+A closed port or a refused login is a status, not a job. Nothing here
+installs, reboots, or writes to the host.
 """
 
 from __future__ import annotations
@@ -26,6 +32,8 @@ from app.services.ssh_keys import get_decrypted_private_key
 _MAX_HOSTS = 40
 _TCP_TIMEOUT = 2.0
 _SSH_TIMEOUT = 6
+# Talos apid. Kept equal to baremetal.TALOS_API_PORT.
+_TALOS_API_PORT = 50000
 
 
 def _blank(hostname: str, ip: str | None, detail: str) -> dict[str, Any]:
@@ -163,6 +171,55 @@ def _ssh_with_password(
     return _run_ssh(argv, env)
 
 
+def inventory_os(
+    entry: dict[str, Any] | None,
+    *,
+    boot_stage: str,
+    next_boot: str,
+    provider: str,
+) -> str:
+    """Talos or Ubuntu, matching ``hostMachineOs`` on the Machines page.
+
+    An explicit Ubuntu boot, or a Kubespray adopt, is Ubuntu. An explicit
+    Talos boot is Talos. Otherwise the environment provider decides, and an
+    unset provider is Talos.
+    """
+    adopt = str((entry or {}).get("adopt") or "").strip().lower()
+    stage = str(boot_stage or "").strip().lower()
+    nxt = str(next_boot or "").strip().lower()
+    if adopt == "kubespray" or nxt == "ubuntu" or stage == "ubuntu":
+        return "ubuntu"
+    if nxt == "talos" or stage == "talos":
+        return "talos"
+    if str(provider or "").strip().lower() == "kubespray":
+        return "ubuntu"
+    return "talos"
+
+
+def probe_talos(ip: str) -> dict[str, Any]:
+    """One Talos address, on the API port. The result never mentions SSH."""
+    try:
+        host = refuse_dangerous_ssh_host(ip)
+    except ValueError:
+        row = _blank("", ip or None, "address refused")
+        row["check"] = "talos"
+        return row
+    if not host:
+        row = _blank("", None, "no address")
+        row["check"] = "talos"
+        return row
+    closed = _tcp_closed(host, _TALOS_API_PORT, _TCP_TIMEOUT)
+    row = _blank("", host, "")
+    row["check"] = "talos"
+    if closed:
+        row["detail"] = "Talos API refused" if closed == "connection refused" else closed
+        return row
+    row["up"] = True
+    row["connect"] = True
+    row["running"] = True
+    return row
+
+
 def probe_address(
     ip: str,
     user: str,
@@ -241,39 +298,49 @@ def probe_environment(db: Any, env: Environment) -> dict[str, Any]:
 
     current = envconfig.get_current(db, env)
     servers: dict[str, Any] = {}
+    provider = ""
     if current and isinstance(current[0], dict):
         raw = current[0].get("servers")
         if isinstance(raw, dict):
             servers = raw
+        provider = str(current[0].get("provider") or "")
     key_text = None
     try:
         key_text = get_decrypted_private_key(env)
     except Exception:
         key_text = None
-    stages: dict[str, str] = {}
+    boots: dict[str, tuple[str, str]] = {}
     try:
         for node in db.scalars(
             select(BaremetalNode).where(BaremetalNode.environment_id == env.id)
         ).all():
-            stages[str(node.name)] = str(node.boot_stage or "")
+            boots[str(node.name)] = (
+                str(node.boot_stage or ""),
+                str(node.next_boot or ""),
+            )
     except Exception:
-        stages = {}
-    work: list[tuple[str, str, str, str | None]] = []
+        boots = {}
+    work: list[tuple[str, str, str, str | None, str]] = []
     for hostname, entry in servers.items():
         if not isinstance(entry, dict):
             continue
         ip = str(entry.get("private_ip") or entry.get("ip") or "").strip()
-        user = login_for_server(entry, env, stages.get(str(hostname), ""))
-        work.append((str(hostname), ip, user, _saved_password(entry)))
+        stage, nxt = boots.get(str(hostname), ("", ""))
+        user = login_for_server(entry, env, stage)
+        kind = inventory_os(entry, boot_stage=stage, next_boot=nxt, provider=provider)
+        work.append((str(hostname), ip, user, _saved_password(entry), kind))
         if len(work) >= _MAX_HOSTS:
             break
 
-    def one(item: tuple[str, str, str, str | None]) -> dict[str, Any]:
-        hostname, ip, user, password = item
+    def one(item: tuple[str, str, str, str | None, str]) -> dict[str, Any]:
+        hostname, ip, user, password, kind = item
         if not ip:
             return _blank(hostname, None, "no address")
         try:
-            row = probe_address(ip, user, key_text=key_text, password=password)
+            if kind == "talos":
+                row = probe_talos(ip)
+            else:
+                row = probe_address(ip, user, key_text=key_text, password=password)
         except Exception:
             row = _blank(hostname, ip, "check failed")
         row["hostname"] = hostname

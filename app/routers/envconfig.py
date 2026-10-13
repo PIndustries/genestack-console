@@ -316,9 +316,11 @@ def server_reach(
     db: Session = Depends(get_db),
     env: Environment = Depends(get_env_scoped("viewer")),
 ) -> dict[str, Any]:
-    """Whether each saved address is up, reachable, and authenticated.
+    """Whether each saved address answers.
 
-    Read-only. It does not install, reboot, or change the inventory.
+    Ubuntu is checked over SSH. Talos is checked on its API port, because
+    Talos has no SSH daemon. Read-only. It does not install, reboot, or
+    change the inventory.
     """
     from app.services import host_reach
 

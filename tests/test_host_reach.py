@@ -1,5 +1,6 @@
 """Inventory reach checks stay read-only and never echo a secret."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.services import host_reach
@@ -95,3 +96,116 @@ def test_ssh_option_in_the_user_is_refused(monkeypatch):
     row = host_reach.probe_address("192.0.2.14", "-oProxyCommand=x", key_text="k", password=None)
     assert row["authenticated"] is False
     assert row["detail"] == "address refused"
+
+
+def test_talos_port_matches_the_api():
+    from app.services.baremetal import TALOS_API_PORT
+
+    assert host_reach._TALOS_API_PORT == TALOS_API_PORT == 50000
+
+
+def test_inventory_os_matches_the_machines_page():
+    assert host_reach.inventory_os({}, boot_stage="", next_boot="", provider="") == "talos"
+    assert host_reach.inventory_os({}, boot_stage="", next_boot="", provider="talos") == "talos"
+    assert (
+        host_reach.inventory_os({}, boot_stage="installed", next_boot="disk", provider="talos")
+        == "talos"
+    )
+    assert host_reach.inventory_os({}, boot_stage="", next_boot="", provider="kubespray") == "ubuntu"
+    assert host_reach.inventory_os({}, boot_stage="ubuntu", next_boot="", provider="talos") == "ubuntu"
+    assert host_reach.inventory_os({}, boot_stage="", next_boot="ubuntu", provider="talos") == "ubuntu"
+    assert (
+        host_reach.inventory_os(
+            {"adopt": "kubespray"}, boot_stage="talos", next_boot="talos", provider="talos"
+        )
+        == "ubuntu"
+    )
+    assert host_reach.inventory_os({}, boot_stage="talos", next_boot="disk", provider="kubespray") == "talos"
+
+
+def test_open_talos_api_is_up_without_ssh(monkeypatch):
+    ports = []
+
+    def connect(addr, *_a, **_k):
+        ports.append(addr[1])
+        return _Sock()
+
+    def boom(*_a, **_k):
+        raise AssertionError("ssh must not run")
+
+    monkeypatch.setattr(host_reach.socket, "create_connection", connect)
+    monkeypatch.setattr(host_reach.subprocess, "run", boom)
+    row = host_reach.probe_talos("192.0.2.20")
+    assert ports == [50000]
+    assert row["up"] is True
+    assert row["connect"] is True
+    assert row["running"] is True
+    assert row["authenticated"] is False
+    assert row["detail"] == ""
+    assert row["check"] == "talos"
+    assert "connection refused" not in str(row)
+
+
+def test_closed_talos_api_names_the_api(monkeypatch):
+    def refused(addr, *_a, **_k):
+        assert addr[1] == 50000
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(host_reach.socket, "create_connection", refused)
+    row = host_reach.probe_talos("192.0.2.21")
+    assert row["up"] is False
+    assert row["connect"] is False
+    assert row["detail"] == "Talos API refused"
+    assert row["check"] == "talos"
+
+
+def test_talos_environment_does_not_probe_ssh(monkeypatch):
+    ports = []
+
+    def closed(host, port, _timeout):
+        ports.append((host, port))
+        if port == 50000:
+            return ""
+        return "connection refused"
+
+    monkeypatch.setattr(host_reach, "_tcp_closed", closed)
+    monkeypatch.setattr(host_reach, "get_decrypted_private_key", lambda _env: None)
+    monkeypatch.setattr(
+        "app.services.envconfig.get_current",
+        lambda _db, _env: (
+            {
+                "provider": "talos",
+                "servers": {
+                    "cp": {"private_ip": "192.0.2.31"},
+                    "adopted": {"private_ip": "192.0.2.32", "adopt": "kubespray"},
+                },
+            },
+            1,
+        ),
+    )
+
+    class _Scalars:
+        def all(self):
+            return [SimpleNamespace(name="cp", boot_stage="talos", next_boot="disk")]
+
+    class _Db:
+        def scalars(self, _stmt):
+            return _Scalars()
+
+    env = SimpleNamespace(id="env-1", deployer_ssh_user="root")
+    result = host_reach.probe_environment(_Db(), env)
+    by = {row["hostname"]: row for row in result["hosts"]}
+    assert ("192.0.2.31", 50000) in ports
+    assert ("192.0.2.31", 22) not in ports
+    assert by["cp"]["up"] is True
+    assert by["cp"]["check"] == "talos"
+    assert by["cp"]["detail"] == ""
+    assert ("192.0.2.32", 22) in ports
+    assert by["adopted"].get("check") != "talos"
+    assert by["adopted"]["detail"] == "connection refused"
+
+
+def test_machines_page_does_not_print_an_ssh_refusal_on_talos():
+    text = Path("app/static/js/pages/environment_servers.js").read_text(encoding="utf-8")
+    assert 'row.detail || "no SSH"' not in text
+    assert 'statusPill("ok", "Talos")' in text
