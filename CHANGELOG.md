@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.2
+
+The Machines reach column checks a Talos node on its API.
+
+- Talos has no SSH daemon. An open API stays marked Talos.
+- A closed API says the API refused. Ubuntu stays on SSH.
+
 ## 2026.10.13.1
 
 A Talos deploy stops when a pod cannot schedule, instead of waiting two hours.
