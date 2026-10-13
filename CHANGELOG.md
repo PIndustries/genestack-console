@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.6
+
+The Machines page shows a resumed deploy on the stage that is running.
+
+- A deploy that starts at platform-extras no longer paints infrastructure as running and the earlier stages as not started.
+- A storage node recorded as storage-ceph or storage-cinder counts toward storage.
+
 ## 2026.10.13.5
 
 A deploy uses mikefarah yq, so Neutron can read the OVN TLS flag.
