@@ -18,6 +18,8 @@ from app.services.talos import (
     DEFAULT_TALOS_INSTALL_IMAGE,
     DEFAULT_VLAN_ID,
     build_talos_plan,
+    control_plane_schedule_patch_argv,
+    control_plane_schedule_targets,
     etcd_patch_yaml,
     firewall_yaml,
     fleet_has_private_nic,
@@ -306,6 +308,7 @@ def test_dual_nic_uses_private_cluster_ip_and_public_apply(tmp_path):
     etcd = etcd_patch_yaml(doc)
     assert "advertisedSubnets" in etcd
     assert "10.0.0.0/8" in etcd
+    assert "allowSchedulingOnControlPlanes: true" in etcd
     fw = firewall_yaml(doc)
     assert fw.lstrip().startswith("---")
     assert "NetworkDefaultActionConfig" in fw
@@ -313,6 +316,17 @@ def test_dual_nic_uses_private_cluster_ip_and_public_apply(tmp_path):
     # Dual-NIC does not punch 6443/50000 to the world. Management CIDRs required.
     assert "0.0.0.0/0" not in fw
     assert "public-ingress-tcp" not in fw
+
+
+def test_control_plane_schedule_patch_targets_control_planes_only():
+    doc = yaml.safe_load(DOC_TALOS)
+    assert control_plane_schedule_targets(doc) == [("cp1", "10.0.0.11")]
+    argv = control_plane_schedule_patch_argv("/etc/genestack/talos/talosconfig", "10.0.0.11")
+    assert argv[1:3] == ["patch", "machineconfig"]
+    assert "10.0.0.11" in argv
+    patch = argv[-1]
+    assert "allowSchedulingOnControlPlanes: true" in patch
+    assert "etcd" not in patch
 
 
 def test_firewall_public_management_cidrs_not_world():

@@ -673,17 +673,57 @@ def network_patch_yaml(doc: dict[str, Any]) -> str:
 
 
 def etcd_patch_yaml(doc: dict[str, Any]) -> str:
-    """Control-plane-only patch: etcd is invalid on worker machine configs."""
+    """Control-plane-only patch: etcd is invalid on worker machine configs.
+
+    ``allowSchedulingOnControlPlanes`` keeps the control-plane NoSchedule
+    taint off. Genestack pins its control services to those nodes and then
+    removes the kubeadm taint. Talos puts the taint back, and Helm waits
+    up to 120 minutes for pods that cannot schedule.
+    """
     cidrs = cluster_cidrs_from_doc(doc)
     patch = {
         "cluster": {
+            "allowSchedulingOnControlPlanes": True,
             "etcd": {
                 "advertisedSubnets": cidrs,
                 "listenSubnets": cidrs,
-            }
+            },
         },
     }
     return yaml.safe_dump(patch, sort_keys=False)
+
+
+def control_plane_schedule_targets(doc: dict[str, Any]) -> list[tuple[str, str]]:
+    """Control-plane hostname and the address Talos answers on."""
+    found: list[tuple[str, str]] = []
+    for hostname, entry in _doc_servers(doc).items():
+        if not isinstance(entry, dict):
+            continue
+        roles = [str(role).lower() for role in entry.get("roles") or []]
+        if "k8s_control_plane" not in roles:
+            continue
+        ip = node_cluster_ip(entry, str(hostname))
+        if not valid_node_endpoint(ip):
+            continue
+        found.append((str(hostname), ip))
+    found.sort()
+    return found
+
+
+def control_plane_schedule_patch_argv(talosconfig: str, node_ip: str) -> list[str]:
+    """Live patch. It does not resend the etcd subnet block."""
+    patch = "cluster:\n  allowSchedulingOnControlPlanes: true\n"
+    return [
+        talosctl_command(),
+        "patch",
+        "machineconfig",
+        "--talosconfig",
+        talosconfig,
+        "--nodes",
+        node_ip,
+        "--patch",
+        patch,
+    ]
 
 
 def _named_private_nic(entry: dict[str, Any]) -> tuple[str, str]:

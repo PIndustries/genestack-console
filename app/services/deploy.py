@@ -52,6 +52,7 @@ from app.services import genestack_bridge as bridge
 from app.services import secret_lease
 from app.services import service_registry
 from app.services import deploy_needs as deploy_needs_service
+from app.services import helm_guard
 from app.services import talos as talos_service
 from app.services import talos_prepare as talos_prepare_service
 from app.services.crypto import decrypt_secret
@@ -554,6 +555,82 @@ def _apply_saved_role_labels(
             log(f"[deploy] could not label {name}: {message[:200]}")
 
 
+def _kubeconfig_for(ctx: EnvContext) -> str:
+    kubeconfig = str(ctx.kubeconfig or "").strip()
+    if not kubeconfig and ctx.config_dir is not None:
+        fallback = ctx.config_dir / KUBECONFIG_FALLBACK_RELPATH
+        if fallback.is_file():
+            kubeconfig = str(fallback)
+    return kubeconfig
+
+
+def _ensure_control_planes_schedulable(
+    doc: dict[str, Any],
+    ctx: EnvContext,
+    log: LogFn,
+) -> None:
+    """Tell Talos to leave the control-plane NoSchedule taint off.
+
+    A cluster that already accepted its machine config does not re-apply
+    the hosts patch. This updates the running control planes in place.
+    The etcd subnet block is not part of this patch.
+    """
+    if ctx.config_dir is None:
+        return
+    targets = talos_service.control_plane_schedule_targets(doc)
+    talosconfig = ctx.config_dir / "talos" / "talosconfig"
+    if not targets or not talosconfig.is_file():
+        log(
+            "[deploy] control-plane taint left in place; "
+            "this run has no talosconfig or control-plane address"
+        )
+        return
+    log(
+        "[deploy] Talos control planes stay schedulable so "
+        "openstack-control-plane pods are not held by the NoSchedule taint"
+    )
+    for name, ip in targets:
+        result = bridge.run_command(
+            talos_service.control_plane_schedule_patch_argv(str(talosconfig), ip),
+            timeout=90,
+            dry_run=False,
+            log=log,
+        )
+        if result.get("returncode") not in (0, None):
+            log(
+                f"[deploy] could not patch {name}; "
+                "helm stops if those pods stay unschedulable"
+            )
+    kubeconfig = _kubeconfig_for(ctx)
+    if not kubeconfig:
+        return
+    time.sleep(8)
+    listed = bridge.run_command(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "get",
+            "nodes",
+            "-l",
+            "node-role.kubernetes.io/control-plane",
+            "-o",
+            (
+                "jsonpath={range .items[*]}{.metadata.name}{':'}{range .spec.taints[*]}"
+                "{.key}{':'}{.effect}{','}{end}{'\\n'}{end}"
+            ),
+        ],
+        timeout=30,
+        dry_run=False,
+        log=log,
+    )
+    text = str(listed.get("stdout") or "")
+    if "node-role.kubernetes.io/control-plane:NoSchedule" in text:
+        log("[deploy] control-plane NoSchedule taint is still present")
+        return
+    log("[deploy] control-plane NoSchedule taint is off")
+
+
 def run_deploy(
     db: Session,
     env: Environment,
@@ -743,6 +820,13 @@ def run_deploy(
             until_id=until_id,
             stage_ids=stage_ids,
         )
+    if local_executor and not dry_run and ctx.config_dir is not None:
+        guarded = helm_guard.arm_helm_guard(
+            extra_env, ctx.config_dir / ".console-helm"
+        )
+        if guarded.get("GENESTACK_HELM_REAL"):
+            extra_env = guarded
+            log("[deploy] helm stops when a pod stays unschedulable")
 
     # OVH + Talos: the metal is not Talos until BYOI finishes. If the hosts
     # stage will run, provision (or confirm :50000) before talosctl.
@@ -807,6 +891,7 @@ def run_deploy(
     if not run_tests:
         log("[deploy] testing skipped — Tempest is its own control point")
     log(f"[deploy] phase 2: pipeline stages={stages_total} dry_run={dry_run}")
+    control_planes_patched = False
     for index, stage in enumerate(PIPELINE_STAGES, start=1):
         if index <= start_index:
             continue
@@ -944,6 +1029,15 @@ def run_deploy(
                 log(f"[deploy] until_stage={until_id} — stopped at this control point")
                 break
             continue
+        if (
+            talos_mode
+            and local_executor
+            and not dry_run
+            and stage["id"] != "hosts"
+            and not control_planes_patched
+        ):
+            _ensure_control_planes_schedulable(doc or {}, ctx, log)
+            control_planes_patched = True
         if stage["id"] == "infrastructure" and not dry_run:
             _apply_saved_role_labels(doc, ctx, log)
         if not dry_run and _is_services_stage(stage) and _parallelism > _PARALLEL_MIN:
