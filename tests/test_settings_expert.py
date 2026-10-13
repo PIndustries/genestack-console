@@ -20,6 +20,29 @@ def test_expert_panel_is_inside_settings():
     assert "closeTalosMachine()" in text
 
 
+def test_ready_node_stays_ready_while_work_runs():
+    text = Path("app/static/js/pages/environment_deploy_map.js").read_text(encoding="utf-8")
+    chip = text.split('} else if (n.kind === "k8s") {', 1)[1].split("} else if", 1)[0]
+    assert 'st.k8sReady ? "Ready" : "not Ready"' in chip
+    assert 'n.state === "ok" ? "Ready"' not in chip
+
+
+def test_overview_map_fills_the_viewport():
+    css = Path("app/static/css/portal.css").read_text(encoding="utf-8")
+    rule = css.split(
+        "#page-root:has(#panel-workflow.tab-panel.active) .sf-shell {", 1
+    )[1].split("}", 1)[0]
+    assert "height: auto" not in rule
+    assert "min-height: 12rem" not in rule
+    assert "flex: 1 1 0" in rule
+    assert "height: 100%" in rule
+    assert "min-height: 0" in rule
+    page = css.split("#page-root:has(#panel-workflow.tab-panel.active) {", 1)[1].split(
+        "}", 1
+    )[0]
+    assert "overflow: hidden" in page
+
+
 def test_talos_row_opens_the_inspector():
     servers = Path("app/static/js/pages/environment_servers.js").read_text(encoding="utf-8")
     hook = servers.split("export function wireServersCard", 1)[1].split("document.getElementById(\"srv-refresh\")", 1)[0]

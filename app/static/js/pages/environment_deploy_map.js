@@ -983,7 +983,8 @@ function isMetalRebuild() {
     if (/greenfield|iso_boot|pxe_boot/i.test(op)) return true;
     if (/genestack\.deploy/i.test(op)) {
       const act = parseActivity((job && job.id === j.id && job.log_text) || "");
-      if (!act.stage || /^(hosts|talos|infrastructure)$/i.test(act.stage)) return true;
+      // No stage yet means the log has not loaded. That is not a metal rebuild.
+      if (/^(hosts|talos|infrastructure)$/i.test(act.stage)) return true;
     }
   }
   return false;
@@ -2811,12 +2812,12 @@ function healthMetrics(n) {
     if (n.memGi != null && n.memGi !== "") chips.push(sfChip(`${n.memGi} Gi`, "ok"));
     if (n.podCount) chips.push(sfChip(`${n.podCount} pods`, n.state === "bad" ? "bad" : ""));
   } else if (n.kind === "k8s") {
-    chips.push(sfChip(n.state === "ok" ? "Ready" : "not Ready", n.state === "ok" ? "ok" : n.state));
+    const m = findMachine(n.machineName);
+    const st = m ? machineState(m) : {};
+    chips.push(sfChip(st.k8sReady ? "Ready" : "not Ready", st.k8sReady ? "ok" : n.state));
     if (n.podCount != null) chips.push(sfChip(`${n.podCount} pods`, n.state === "bad" ? "bad" : ""));
     if (n.cpu) chips.push(sfChip(`${n.cpu} CPU`, "ok"));
     if (n.memGi != null && n.memGi !== "") chips.push(sfChip(`${n.memGi} Gi`, "ok"));
-    const m = findMachine(n.machineName);
-    const st = m ? machineState(m) : {};
     if (st.k8sVer) chips.push(sfChip(st.k8sVer, ""));
   } else if (n.kind === "ns") {
     const c = n.counts || {};
@@ -4260,7 +4261,7 @@ async function fetchState() {
     });
     if (job && job.id && ACTIVE.has(String(job.status || ""))) {
       try {
-        const detail = await api(`/api/v1/ops/jobs/${encodeURIComponent(job.id)}`, { timeout: 5000 });
+        const detail = await api(`/api/v1/jobs/${encodeURIComponent(job.id)}`, { timeout: 5000 });
         if (detail && detail.log_text) job.log_text = detail.log_text;
         if (detail && detail.status) job.status = detail.status;
       } catch {

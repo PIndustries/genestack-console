@@ -49,10 +49,35 @@ _FERNET_RE = re.compile(r"\bfernet:[A-Za-z0-9._=-]+")
 
 
 class RedactCredentialsFilter(logging.Filter):
-    """Redact token=/ticket= query values from log messages."""
+    """Redact token=/ticket= query values from log messages.
+
+    Uvicorn's access formatter unpacks a 5-tuple from ``record.args``
+    (client, method, path, http version, status). Replacing that tuple with
+    ``()`` makes the formatter raise ``ValueError: not enough values to
+    unpack (expected 5, got 0)`` and the logging module prints
+    ``--- Logging error ---`` on every ticketed request. Redact the path
+    in place and leave the tuple intact.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5:
+            updated = list(args)
+            changed = False
+            for index, value in enumerate(updated):
+                if not isinstance(value, str):
+                    continue
+                redacted = _PARAM_RE.sub(r"\1<redacted>", value)
+                if redacted != value:
+                    updated[index] = redacted
+                    changed = True
+            if changed:
+                record.args = tuple(updated)
+            return True
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
         redacted = _PARAM_RE.sub(r"\1<redacted>", message)
         if redacted != message:
             record.msg = redacted

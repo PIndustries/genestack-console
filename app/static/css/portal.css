@@ -2701,16 +2701,16 @@ button.ob-stat:hover { border-color: var(--accent); }
 
 /* ---------- Overview flow canvas (xyflow / Svelte Flow look) ---------- */
 #panel-workflow.tab-panel { padding: 0; }
-/* Overview: the map fills leftover space and pans inside itself.
-   A short window scrolls so the tab actions and the terminal stay reachable. */
+/* Overview: the map fills the leftover viewport and pans inside itself.
+   The shell is a fixed console, so the page does not scroll the map short. */
 #page-root:has(#panel-workflow.tab-panel.active) {
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   padding-bottom: 0.65rem;
 }
 #page-root:has(#panel-workflow.tab-panel.active) .detail-page {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2724,8 +2724,8 @@ button.ob-stat:hover { border-color: var(--accent); }
   margin-bottom: 0.5rem;
 }
 #page-root:has(#panel-workflow.tab-panel.active) #panel-workflow.tab-panel.active {
-  flex: 1;
-  min-height: 18rem;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -2735,8 +2735,9 @@ button.ob-stat:hover { border-color: var(--accent); }
   flex: none;
 }
 #page-root:has(#panel-workflow.tab-panel.active) .sf-shell {
-  height: auto;
-  min-height: 12rem;
+  flex: 1 1 0;
+  height: 100%;
+  min-height: 0;
 }
 .sf-shell {
   position: relative;

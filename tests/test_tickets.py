@@ -133,3 +133,50 @@ def test_redaction_filter_passes_clean_messages_through():
     assert RedactCredentialsFilter().filter(record) is True
     assert record.getMessage() == '127.0.0.1:5000 - "GET /api/v1/health HTTP/1.1" 200'
     assert record.msg is msg_before  # untouched when nothing to redact
+
+
+def test_redaction_filter_keeps_uvicorn_access_tuple():
+    """Uvicorn unpacks five access args. Clearing them raises ValueError."""
+    secret = "gst_do_not_log_this"
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=(
+            "172.16.10.9:39212",
+            "GET",
+            f"/api/v1/environments/abc/stream?ticket={secret}",
+            "1.1",
+            200,
+        ),
+        exc_info=None,
+    )
+    assert RedactCredentialsFilter().filter(record) is True
+    assert isinstance(record.args, tuple)
+    client_addr, method, full_path, http_version, status_code = record.args
+    assert client_addr == "172.16.10.9:39212"
+    assert method == "GET"
+    assert http_version == "1.1"
+    assert status_code == 200
+    assert secret not in full_path
+    assert "ticket=<redacted>" in full_path
+    formatted = record.msg % record.args
+    assert secret not in formatted
+    assert "ticket=<redacted>" in formatted
+
+
+def test_redaction_filter_leaves_a_clean_access_tuple_alone():
+    args = ("10.0.0.1:1", "GET", "/api/v1/health", "1.1", 200)
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=args,
+        exc_info=None,
+    )
+    assert RedactCredentialsFilter().filter(record) is True
+    assert record.args == args
