@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.9
+
+The overview map fills the window.
+
+- The map uses the leftover viewport and pans inside it.
+- A running deploy loads its job log. A deploy past infrastructure is no longer drawn as a metal rebuild.
+- A Ready Kubernetes node stays Ready while work is running on it.
+- The access log redacts a ticket or token in the path and still records the client, method, and status.
+
 ## 2026.10.13.8
 
 Open Horizon from inside the console.
