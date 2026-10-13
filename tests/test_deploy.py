@@ -1416,3 +1416,23 @@ def test_ovh_byoi_reinstall_service_unbound_env(client, admin_headers, monkeypat
     assert result["count"] == 0
     assert result["servers"] == []
     assert "not bound" in result["error"]
+
+
+def test_horizon_post_start_drops_the_apache_reload(tmp_path):
+    hook = tmp_path / "base-kustomize" / "horizon" / "base"
+    hook.mkdir(parents=True)
+    target = hook / "enable-apache-site.yaml"
+    target.write_text(
+        "set -e\n"
+        "cp /tmp/000-default.conf \"$dst\"\n"
+        "apache2ctl graceful >/dev/null 2>&1 || true\n",
+        encoding="utf-8",
+    )
+    notes: list[str] = []
+    deploy_service._quiet_horizon_reload(tmp_path, notes.append)
+    text = target.read_text(encoding="utf-8")
+    assert "apache2ctl" not in text
+    assert "cp /tmp/000-default.conf" in text
+    assert notes
+    deploy_service._quiet_horizon_reload(tmp_path, notes.append)
+    assert len(notes) == 1

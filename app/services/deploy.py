@@ -456,6 +456,26 @@ def _pipeline_command(
     return ["bash", "-c", program]
 
 
+_HORIZON_APACHE_HOOK = "base-kustomize/horizon/base/enable-apache-site.yaml"
+# apache2ctl graceful from the postStart hook starts a second Apache and
+# never returns. The kubelet then kills the real Apache (exit 137) and
+# Horizon stays in CrashLoopBackOff. The sed above it is the useful part.
+_HORIZON_GRACEFUL = "apache2ctl graceful >/dev/null 2>&1 || true\n"
+
+
+def _quiet_horizon_reload(root: Path, log: LogFn) -> None:
+    """Drop the Horizon postStart Apache reload from this checkout."""
+    path = root / _HORIZON_APACHE_HOOK
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    if _HORIZON_GRACEFUL not in text:
+        return
+    path.write_text(text.replace(_HORIZON_GRACEFUL, ""), encoding="utf-8")
+    log("[deploy] horizon postStart no longer reloads apache")
+
+
 def _arm_talos_longhorn_prepare(
     doc: dict[str, Any],
     ctx: EnvContext,
@@ -820,6 +840,8 @@ def run_deploy(
             until_id=until_id,
             stage_ids=stage_ids,
         )
+    if local_executor and not dry_run and ctx.genestack_root is not None:
+        _quiet_horizon_reload(Path(ctx.genestack_root), log)
     if local_executor and not dry_run and ctx.config_dir is not None:
         guarded = helm_guard.arm_helm_guard(
             extra_env, ctx.config_dir / ".console-helm"

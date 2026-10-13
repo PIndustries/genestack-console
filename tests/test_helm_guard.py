@@ -72,6 +72,33 @@ def test_envoy_version_comes_from_the_chart_file():
     assert envoy_gateway_version("kube-ovn: v1.14.10\n") == "v1.7.0"
 
 
+def test_frozen_helpers_match_the_checkout():
+    import inspect
+
+    from app.services import helm_guard
+
+    for name, fn in (
+        ("envoy_gateway_version", helm_guard.envoy_gateway_version),
+        ("_parse_rfc3339", helm_guard._parse_rfc3339),
+        ("unschedulable_messages", helm_guard.unschedulable_messages),
+    ):
+        assert helm_guard._FROZEN_HELPERS[name] == textwrap.dedent(inspect.getsource(fn))
+
+
+def test_compiled_binary_still_renders_the_wrapper(monkeypatch):
+    from app.services import helm_guard
+
+    def missing(_fn):
+        raise OSError("could not get source code")
+
+    monkeypatch.setattr(helm_guard.inspect, "getsource", missing)
+    script = render_helm_guard()
+    compile(script, "<helm-guard>", "exec")
+    assert "def unschedulable_messages" in script
+    assert "def envoy_gateway_version" in script
+    assert "could not get source code" not in script
+
+
 def test_wrapper_stops_a_held_upgrade(tmp_path):
     real = tmp_path / "real-helm"
     real.write_text(

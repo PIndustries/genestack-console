@@ -446,11 +446,38 @@ def test_openstack_happy_path(client, admin_headers, monkeypatch):
     assert timeouts and all(t == livestate.EXEC_TIMEOUT for t in timeouts)
 
 
+def test_admin_client_is_applied_in_the_openstack_namespace(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services import livestate
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        seen.append([str(part) for part in argv])
+        return "", "unable to read manifest"
+
+    monkeypatch.setattr(livestate, "_run", fake_run)
+    manifest_dir = tmp_path / "manifests" / "utils"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "utils-openstack-client-admin.yaml").write_text(
+        "kind: Pod\n", encoding="utf-8"
+    )
+    err = livestate._ensure_admin_client(
+        "kubectl", {}, SimpleNamespace(config_dir=tmp_path)
+    )
+    assert err and "failed to create admin client pod" in err
+    assert seen[0][:4] == ["kubectl", "apply", "-n", "openstack"]
+
+
 def test_openstack_pod_missing_apply_fails(
     client, admin_headers, monkeypatch, tmp_path
 ):
+    applied: list[list[str]] = []
+
     def handler(argv, **kwargs):
         if "apply" in argv:
+            applied.append(list(argv))
             return _Proc(stderr="error: unable to read manifest", returncode=1)
         if "get" in argv and "pod" in argv:
             return _Proc(
@@ -480,6 +507,7 @@ def test_openstack_pod_missing_apply_fails(
     body = resp.json()
     assert body["available"] is False
     assert "failed to create admin client pod" in body["error"]
+    assert applied and applied[0][applied[0].index("-n") + 1] == "openstack"
     assert body["users"] == []
     assert body["compute_services"] == []
     assert body["network_agents"] == []

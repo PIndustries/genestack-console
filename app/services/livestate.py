@@ -580,7 +580,13 @@ def _ensure_admin_client(
             f"admin client pod '{ADMIN_CLIENT_POD}' not ready in namespace "
             f"'{OPENSTACK_NAMESPACE}' and no {ADMIN_CLIENT_MANIFEST} manifest available"
         )
-    _, err = _run([kubectl, "apply", "-f", str(manifest)], env=env)
+    # The manifest has no namespace. Applied from the console's cwd it lands
+    # in default, where keystone-keystone-admin does not exist. The secret
+    # and this wait both use the openstack namespace.
+    _, err = _run(
+        [kubectl, "apply", "-n", OPENSTACK_NAMESPACE, "-f", str(manifest)],
+        env=env,
+    )
     if err:
         return f"failed to create admin client pod: {err}"
     _, err = _run(

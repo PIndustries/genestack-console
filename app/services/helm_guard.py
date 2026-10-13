@@ -92,10 +92,93 @@ def unschedulable_messages(
     return found
 
 
+# A compiled console has no .py files, so inspect.getsource raises OSError
+# ("could not get source code") and the deploy dies before the first stage.
+# These copies are what the wrapper uses then. tests/test_helm_guard.py
+# checks them against the live functions whenever source is available.
+_FROZEN_HELPERS = {
+    "envoy_gateway_version": '''\
+def envoy_gateway_version(versions_text: str) -> str:
+    """Chart version the infrastructure script will install for Envoy."""
+    for line in versions_text.splitlines():
+        if not line.startswith("envoyproxy-gateway:"):
+            continue
+        _key, _sep, value = line.partition(":")
+        version = value.strip().strip("'\\"")
+        if version:
+            return version
+    return "v1.7.0"
+''',
+    "_parse_rfc3339": '''\
+def _parse_rfc3339(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)  # noqa: UP017
+    return parsed
+''',
+    "unschedulable_messages": '''\
+def unschedulable_messages(
+    pod_list: dict, *, now: datetime, grace_s: float
+) -> list[str]:
+    """Pods Pending because the scheduler has no place for them.
+
+    A pod that is still pulling an image, or that only just became
+    unschedulable, is left alone. ``grace_s`` is how long that condition
+    has to have been true.
+    """
+    found: list[str] = []
+    items = pod_list.get("items") if isinstance(pod_list, dict) else None
+    if not isinstance(items, list):
+        return found
+    for pod in items:
+        if not isinstance(pod, dict):
+            continue
+        meta = pod.get("metadata") if isinstance(pod.get("metadata"), dict) else {}
+        status = pod.get("status") if isinstance(pod.get("status"), dict) else {}
+        conditions = status.get("conditions") if isinstance(status, dict) else None
+        if not isinstance(conditions, list):
+            continue
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            if cond.get("type") != "PodScheduled" or cond.get("status") != "False":
+                continue
+            if cond.get("reason") != "Unschedulable":
+                continue
+            changed = _parse_rfc3339(cond.get("lastTransitionTime"))
+            if changed is None:
+                continue
+            if (now - changed).total_seconds() < grace_s:
+                continue
+            name = str(meta.get("name") or "")
+            namespace = str(meta.get("namespace") or "")
+            message = str(cond.get("message") or "unschedulable").strip()
+            found.append(f"{namespace}/{name}: {message}")
+    return found
+''',
+}
+
+
+def _helper_source(fn) -> str:
+    """Function text for the wrapper. The frozen copy is the compiled-binary path."""
+    try:
+        return textwrap.dedent(inspect.getsource(fn))
+    except OSError:
+        return _FROZEN_HELPERS[fn.__name__]
+
+
 def _guard_main_source() -> str:
-    detect = textwrap.dedent(inspect.getsource(unschedulable_messages))
-    parse = textwrap.dedent(inspect.getsource(_parse_rfc3339))
-    version = textwrap.dedent(inspect.getsource(envoy_gateway_version))
+    detect = _helper_source(unschedulable_messages)
+    parse = _helper_source(_parse_rfc3339)
+    version = _helper_source(envoy_gateway_version)
     # Function bodies contain braces. Replace markers instead of formatting.
     template = textwrap.dedent(
         '''\
