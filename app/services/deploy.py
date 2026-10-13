@@ -457,22 +457,28 @@ def _pipeline_command(
 
 
 _HORIZON_APACHE_HOOK = "base-kustomize/horizon/base/enable-apache-site.yaml"
-# apache2ctl graceful from the postStart hook starts a second Apache and
-# never returns. The kubelet then kills the real Apache (exit 137) and
-# Horizon stays in CrashLoopBackOff. The sed above it is the useful part.
-_HORIZON_GRACEFUL = "apache2ctl graceful >/dev/null 2>&1 || true\n"
+# The postStart hook rewrites Apache's python path and then reloads Apache.
+# The reload never returns, and the sed/cp alone also fails under set -e.
+# Either way the kubelet kills Horizon (exit 137). This image already serves
+# HTTP 200 with no hook, so the hook becomes an immediate success.
 
 
 def _quiet_horizon_reload(root: Path, log: LogFn) -> None:
-    """Drop the Horizon postStart Apache reload from this checkout."""
+    """Make Horizon's postStart hook exit before it touches Apache."""
     path = root / _HORIZON_APACHE_HOOK
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return
-    if _HORIZON_GRACEFUL not in text:
+    if "python-path=/var/lib/kolla" not in text and "apache2ctl graceful" not in text:
         return
-    path.write_text(text.replace(_HORIZON_GRACEFUL, ""), encoding="utf-8")
+    marker = "set -e"
+    idx = text.find(marker)
+    if idx < 0:
+        return
+    line_start = text.rfind("\n", 0, idx) + 1
+    indent = text[line_start:idx]
+    path.write_text(text[:line_start] + f"{indent}exit 0\n", encoding="utf-8")
     log("[deploy] horizon postStart no longer reloads apache")
 
 

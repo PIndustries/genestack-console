@@ -1423,16 +1423,19 @@ def test_horizon_post_start_drops_the_apache_reload(tmp_path):
     hook.mkdir(parents=True)
     target = hook / "enable-apache-site.yaml"
     target.write_text(
-        "set -e\n"
-        "cp /tmp/000-default.conf \"$dst\"\n"
-        "apache2ctl graceful >/dev/null 2>&1 || true\n",
+        "command:\n"
+        "  - |\n"
+        "    set -e\n"
+        "    cp /tmp/000-default.conf \"$dst\"\n"
+        "    apache2ctl graceful >/dev/null 2>&1 || true\n",
         encoding="utf-8",
     )
     notes: list[str] = []
     deploy_service._quiet_horizon_reload(tmp_path, notes.append)
     text = target.read_text(encoding="utf-8")
     assert "apache2ctl" not in text
-    assert "cp /tmp/000-default.conf" in text
+    assert "python-path" not in text
+    assert text.endswith("    exit 0\n")
     assert notes
     deploy_service._quiet_horizon_reload(tmp_path, notes.append)
     assert len(notes) == 1
