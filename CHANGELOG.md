@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.13.5
+
+A deploy uses mikefarah yq, so Neutron can read the OVN TLS flag.
+
+- Install scripts call `yq eval`. A Python yq earlier on PATH accepts `--version` and then treats the expression as a filename. Neutron stopped with an empty TLS flag. The deploy now runs mikefarah yq.
+
 ## 2026.10.13.4
 
 Horizon's startup hook exits before it rewrites Apache.
