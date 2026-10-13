@@ -114,6 +114,22 @@ def _is_services_stage(stage: dict[str, Any]) -> bool:
     return any(item.get("name") == "keystone" for item in stage["items"])
 
 
+def _bind_kubeconfig(ctx: EnvContext, extra_env: dict[str, str], log: LogFn) -> None:
+    """Point this command at a kubeconfig file that is still on disk.
+
+    The path captured at job start is stale after an API restart sweeps the
+    staged file. Staging a new one here keeps later install scripts on the
+    cluster instead of localhost:8080.
+    """
+    previous = extra_env.get("KUBECONFIG") or ""
+    fresh = ctx.ensure_kubeconfig()
+    if not fresh:
+        return
+    extra_env["KUBECONFIG"] = fresh
+    if previous and previous != fresh:
+        log("[deploy] kubeconfig file was gone; staged a new one")
+
+
 def _run_services_parallel(
     stage: dict[str, Any],
     items: list[dict[str, str]],
@@ -150,6 +166,8 @@ def _run_services_parallel(
 
     def run_item(item: dict[str, str], *, mode: str) -> Any:
         item_t0 = deploy_timing.now()
+        with log_lock:
+            _bind_kubeconfig(ctx, extra_env, log)
         if agent_env_id is not None:
             # The DB-backed agent relay drives the shared session, which is
             # not safe to use concurrently from pool workers: serialize the
@@ -1100,6 +1118,7 @@ def run_deploy(
                 if check_cancel is not None:
                     check_cancel()
                 item_t0 = deploy_timing.now()
+                _bind_kubeconfig(ctx, extra_env, log)
                 result = bridge.run_command(
                     _pipeline_command(
                         item["script"],

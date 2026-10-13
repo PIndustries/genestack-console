@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
     events.init(asyncio.get_running_loop())
     from app.db import SessionLocal
     from app.services.envcontext import sweep_staged_kubeconfigs
-    from app.services.job_runner import recover_stale_jobs
+    from app.services.job_runner import MAX_JOB_TIMEOUT_SECONDS, recover_stale_jobs
 
     db = SessionLocal()
     try:
@@ -144,9 +144,13 @@ async def lifespan(app: FastAPI):
             log.warning(
                 "recovered %d stale job(s) left by a previous process", recovered
             )
-        # Remove decrypted kubeconfig blobs leaked by a previous process
-        # (per-job cleanup only covers jobs that reached their finally).
-        swept_kube = sweep_staged_kubeconfigs(get_settings().data_dir)
+        # Remove decrypted kubeconfig blobs leaked by a previous process.
+        # Keep a file younger than the max job timeout: the worker is a
+        # separate process and may still be using it.
+        swept_kube = sweep_staged_kubeconfigs(
+            get_settings().data_dir,
+            older_than_seconds=MAX_JOB_TIMEOUT_SECONDS,
+        )
         if swept_kube:
             log.warning(
                 "swept %d staged kubeconfig file(s) left by a previous process",

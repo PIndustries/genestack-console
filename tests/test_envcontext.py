@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import time
 from pathlib import Path
 
 from app.config import get_settings
@@ -119,6 +120,61 @@ def test_sweep_staged_kubeconfigs_removes_leftovers(tmp_path):
 
 def test_sweep_staged_kubeconfigs_missing_dir_is_noop(tmp_path):
     assert sweep_staged_kubeconfigs(tmp_path) == 0
+
+
+def test_sweep_keeps_a_kubeconfig_a_running_job_still_needs(tmp_path):
+    kube_dir = tmp_path / "kubeconfigs"
+    kube_dir.mkdir()
+    live = kube_dir / "live.yaml"
+    leaked = kube_dir / "leaked.yaml"
+    live.write_text("live")
+    leaked.write_text("old")
+    old = time.time() - (6 * 3600 + 60)
+    os.utime(leaked, (old, old))
+
+    removed = sweep_staged_kubeconfigs(tmp_path, older_than_seconds=6 * 3600)
+    assert removed == 1
+    assert live.read_text() == "live"
+    assert not leaked.exists()
+
+
+def test_ensure_kubeconfig_restages_when_the_file_was_swept(tmp_path, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    payload = "apiVersion: v1\nclusters: []\ncurrent-context: live\n"
+    ctx = build_context(
+        _env(kubeconfig_data=encrypt_secret(payload, settings)), settings
+    )
+    gone = Path(ctx.kubeconfig)
+    gone.unlink()
+
+    fresh = ctx.ensure_kubeconfig()
+    assert fresh is not None
+    assert fresh != str(gone)
+    assert Path(fresh).read_text(encoding="utf-8") == payload
+    assert ctx.kubeconfig == fresh
+    ctx.cleanup()
+    assert not Path(fresh).exists()
+
+
+def test_bind_kubeconfig_replaces_a_missing_path(tmp_path, monkeypatch):
+    from app.services.deploy import _bind_kubeconfig
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    payload = "apiVersion: v1\nclusters: []\ncurrent-context: live\n"
+    ctx = build_context(
+        _env(kubeconfig_data=encrypt_secret(payload, settings)), settings
+    )
+    gone = ctx.kubeconfig
+    Path(gone).unlink()
+    notes: list[str] = []
+    extra = {"KUBECONFIG": gone}
+    _bind_kubeconfig(ctx, extra, notes.append)
+    assert extra["KUBECONFIG"] != gone
+    assert Path(extra["KUBECONFIG"]).read_text(encoding="utf-8") == payload
+    assert notes == ["[deploy] kubeconfig file was gone; staged a new one"]
+    ctx.cleanup()
 
 
 def test_kubeconfig_contexts_do_not_share_a_file(tmp_path, monkeypatch):

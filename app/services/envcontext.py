@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,6 +91,25 @@ class EnvContext:
                 )
             self._staged_kubeconfig = None
 
+    def ensure_kubeconfig(self) -> str | None:
+        """Return a kubeconfig path, staging a new file when the old one is gone.
+
+        An API restart sweeps decrypted kubeconfig files. A deploy that is
+        still running keeps the old path in its environment, and the next
+        kubectl then falls through to http://localhost:8080. Write a new
+        file from the stored blob when that path is missing.
+        """
+        path = (self.kubeconfig or "").strip()
+        if path and Path(path).is_file():
+            return path
+        env = self.environment
+        if env is None or not (env.kubeconfig_data or "").strip():
+            return path or None
+        fresh = _stage_kubeconfig(env, get_settings())
+        self.kubeconfig = fresh
+        self._staged_kubeconfig = fresh
+        return fresh
+
 
 def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
     """Decrypt env.kubeconfig_data to a private file under kubeconfigs/ (0600).
@@ -115,7 +135,9 @@ def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
     return str(target)
 
 
-def sweep_staged_kubeconfigs(data_dir: Path | str) -> int:
+def sweep_staged_kubeconfigs(
+    data_dir: Path | str, *, older_than_seconds: float | None = None
+) -> int:
     """Delete leftover staged kubeconfig files under <data_dir>/kubeconfigs.
 
     Per-job cleanup (EnvContext.cleanup) removes the file it staged, but a
@@ -123,18 +145,29 @@ def sweep_staged_kubeconfigs(data_dir: Path | str) -> int:
     Called at console startup so a restart never boots with stale kubeconfigs
     present. Best-effort: returns the number of files removed; a missing dir
     is a no-op.
+
+    ``older_than_seconds`` keeps a file a running deploy still has open.
+    Startup passes the max job timeout. A file newer than that belongs to a
+    job that may still be running in the worker, which is a separate process.
+    Deleting it makes the next kubectl fall through to http://localhost:8080.
     """
     kube_dir = Path(data_dir) / "kubeconfigs"
     if not kube_dir.is_dir():
         return 0
+    cutoff = None
+    if older_than_seconds is not None and older_than_seconds > 0:
+        cutoff = time.time() - older_than_seconds
     removed = 0
     for entry in kube_dir.iterdir():
-        if entry.is_file():
-            try:
-                entry.unlink()
-                removed += 1
-            except OSError as exc:
-                log.warning("failed to sweep staged kubeconfig %s: %s", entry, exc)
+        if not entry.is_file():
+            continue
+        try:
+            if cutoff is not None and entry.stat().st_mtime >= cutoff:
+                continue
+            entry.unlink()
+            removed += 1
+        except OSError as exc:
+            log.warning("failed to sweep staged kubeconfig %s: %s", entry, exc)
     return removed
 
 
