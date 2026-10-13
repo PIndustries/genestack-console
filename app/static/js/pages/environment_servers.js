@@ -11,7 +11,8 @@ import { openShell } from "./environment_terminal.js?v=ls48";
 import { ROLES, ROLE_LABELS } from "../roles.js?v=ls55";
 import { clearOvhPoll } from "../ovh.js";
 import { fetchMetalPath, osNameHtml } from "../metal_path.js";
-import { nextStripHtml, loadNextStrip } from "./environment_next.js?v=ls69";
+import { nextStripHtml, loadNextStrip } from "./environment_next.js?v=ls71";
+import { DEPLOY_STAGES as OPENSTACK_STAGES, stageStates, hasRequiredRole } from "../deploy_stages.js?v=ls71";
 
 // Topology presets — replace raw role checkboxes for the add-host form.
 // Each preset maps to a set of roles.  The UI shows human-readable labels.
@@ -2241,10 +2242,7 @@ export async function loadServersCard(envId) {
   // Always render the Add host form at top of discovered section.
   // Compute current cluster status across all assigned hosts.
   const clusterStatus = REQUIRED_ROLE_SETS.map((req) => {
-    const count = invRows.filter((s) => {
-      const roles = Array.isArray(s.roles) ? s.roles : [];
-      return roles.includes(req.role);
-    }).length;
+    const count = invRows.filter((server) => hasRequiredRole(server, req.role)).length;
     return { ...req, count };
   });
 
@@ -2529,14 +2527,6 @@ function renderTopologySelector() {
   });
 }
 
-const OPENSTACK_STAGES = [
-  ["infrastructure", "infrastructure"],
-  ["operators", "operators"],
-  ["cni", "kube-ovn"],
-  ["core", "core"],
-  ["compute-network", "compute-network"],
-];
-
 let talosFlowTimer = null;
 let talosFlowGen = 0;
 let installBootstrap = null;
@@ -2547,12 +2537,6 @@ function clearTalosFlowTimer() {
     clearTimeout(talosFlowTimer);
     talosFlowTimer = null;
   }
-}
-
-function jobStage(job) {
-  const params = job && job.params;
-  const stage = params && typeof params.from_stage === "string" ? params.from_stage : "";
-  return stage;
 }
 
 function serverIp(server) {
@@ -2650,34 +2634,6 @@ function machineChoices() {
       readyCp: !!(control && ip && lastClusterIps.has(ip)),
     };
   }).filter((row) => row.hostname);
-}
-
-function stageStates(job) {
-  const order = OPENSTACK_STAGES.map(([id]) => id);
-  const state = {};
-  order.forEach((id) => { state[id] = "not-started"; });
-  if (!job) return state;
-  const text = `${job.log_text || ""}\n${job.error || ""}`;
-  order.forEach((id) => {
-    if (text.includes(`[deploy] stage ${id} complete`)) state[id] = "done";
-  });
-  const status = String(job.status || "");
-  const failed = text.match(/FAILED at ([a-z0-9_-]+)/i);
-  if ((status === "failed") && failed && order.includes(failed[1])) state[failed[1]] = "failed";
-  if (status === "queued" || status === "running") {
-    const starts = [...text.matchAll(/=== stage \d+\/\d+: ([a-z0-9_-]+)/g)];
-    let live = starts.length ? starts[starts.length - 1][1] : jobStage(job);
-    if (!order.includes(live)) live = order.includes(jobStage(job)) ? jobStage(job) : "infrastructure";
-    if (state[live] !== "done") state[live] = "running";
-  }
-  if (status === "success") {
-    const start = order.indexOf(jobStage(job));
-    const begin = start >= 0 ? start : 0;
-    for (let i = begin; i < order.length; i += 1) {
-      if (state[order[i]] === "not-started") state[order[i]] = "done";
-    }
-  }
-  return state;
 }
 
 function stageWord(state) {

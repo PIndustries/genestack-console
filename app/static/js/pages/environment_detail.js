@@ -3,8 +3,8 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls70";
-import { nextStripHtml, wireNextStrip, loadNextStrip, destroyNextStrip } from "./environment_next.js?v=ls69";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls71";
+import { nextStripHtml, wireNextStrip, loadNextStrip, destroyNextStrip } from "./environment_next.js?v=ls71";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";

@@ -3,14 +3,7 @@
 import { api, esc, toast } from "../api.js";
 import { canAdmin, canRun, store } from "../store.js";
 import { fetchMetalPath } from "../metal_path.js";
-
-const STAGES = [
-  ["infrastructure", "infrastructure"],
-  ["operators", "operators"],
-  ["cni", "kube-ovn"],
-  ["core", "core"],
-  ["compute-network", "compute-network"],
-];
+import { DEPLOY_STAGES as STAGES, stageStates } from "../deploy_stages.js?v=ls71";
 
 let gen = 0;
 let timer = null;
@@ -201,35 +194,6 @@ function live(job) {
 function jobLog(job, label) {
   const id = job && job.id != null ? String(job.id) : "";
   return id ? { id, label } : null;
-}
-
-function stageStates(job) {
-  const order = STAGES.map(([id]) => id);
-  const state = {};
-  order.forEach((id) => { state[id] = "not-started"; });
-  if (!job) return state;
-  const text = `${job.log_text || ""}\n${job.error || ""}`;
-  order.forEach((id) => {
-    if (text.includes(`[deploy] stage ${id} complete`)) state[id] = "done";
-  });
-  const status = String(job.status || "");
-  const failed = text.match(/FAILED at ([a-z0-9_-]+)/i);
-  if (status === "failed" && failed && order.includes(failed[1])) state[failed[1]] = "failed";
-  const from = job.params && typeof job.params.from_stage === "string" ? job.params.from_stage : "";
-  if (status === "queued" || status === "running") {
-    const starts = [...text.matchAll(/=== stage \d+\/\d+: ([a-z0-9_-]+)/g)];
-    let current = starts.length ? starts[starts.length - 1][1] : from;
-    if (!order.includes(current)) current = order.includes(from) ? from : "infrastructure";
-    if (state[current] !== "done") state[current] = "running";
-  }
-  if (status === "success") {
-    const start = order.indexOf(from);
-    const begin = start >= 0 ? start : 0;
-    for (let i = begin; i < order.length; i += 1) {
-      if (state[order[i]] === "not-started") state[order[i]] = "done";
-    }
-  }
-  return state;
 }
 
 function identityMismatch(model) {
