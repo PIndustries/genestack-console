@@ -326,8 +326,14 @@ async function downloadClientConfig(envId, kind, renew) {
   }
 }
 
-export function wireServersCard(getEnvId) {
+export function wireServersCard(getEnvId, hooks) {
   const card = document.getElementById("srv-card");
+  const onTalos = hooks && typeof hooks.onTalos === "function" ? hooks.onTalos : null;
+  const openRow = (index) => {
+    const row = lastMachineRows[index];
+    if (row && row.os === "talos" && onTalos && onTalos(row.hostname)) return;
+    openMachineDetail(index);
+  };
 
   document.getElementById("srv-refresh").addEventListener("click", () => loadServersCard(getEnvId()));
 
@@ -366,12 +372,12 @@ export function wireServersCard(getEnvId) {
     }
     const named = e.target.closest("[data-machine-open]");
     if (named) {
-      openMachineDetail(Number(named.dataset.machineOpen));
+      openRow(Number(named.dataset.machineOpen));
       return;
     }
     const rowEl = e.target.closest("#srv-tbody tr[data-row]");
     if (rowEl && !e.target.closest("button, input, a, select, label, .om-menu")) {
-      openMachineDetail(Number(rowEl.dataset.row));
+      openRow(Number(rowEl.dataset.row));
       return;
     }
     const renew = e.target.closest("[data-srv-renew]");

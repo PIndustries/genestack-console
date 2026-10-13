@@ -10,7 +10,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert "refreshFleetLine(envId)" in text
     assert "loadDeployMap(envId)" not in text
     assert 'activePtab === "kubernetes"' in text
-    assert "environment_servers.js?v=ls71" in text
+    assert "environment_servers.js?v=ls72" in text
     assert "environment_next.js?v=ls71" in text
     assert "environment_deploy_map.js?v=ls64" in text
     assert 'nextStripHtml("overview")' in text
@@ -54,7 +54,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     shell = client.get("/static/js/app.js")
     assert "healthMisses" in shell.text
     assert "health: slow" in shell.text
-    assert "environment_detail.js?v=ls71" in shell.text
+    assert "environment_detail.js?v=ls72" in shell.text
     assert "env_wizard.js?v=ls67" in shell.text
 
     nxt = client.get("/static/js/pages/environment_next.js")

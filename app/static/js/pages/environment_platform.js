@@ -534,7 +534,8 @@ function inspResources() {
 }
 
 function inspectorHtml(nodes) {
-  const info = (nodes || []).find((n) => n && n.name === selected);
+  const found = (nodes || []).find((n) => n && n.name === selected);
+  const info = found || (selected ? { name: selected, talos: {}, kubernetes: null } : null);
   if (!info) {
     return `<div class="om-inspector om-inspector-empty muted">Select a machine for health, logs, config, and day-2 actions.</div>`;
   }
@@ -598,8 +599,50 @@ export function platformCardHtml() {
   </div>`;
 }
 
+function parkInspectorModal() {
+  const modal = document.getElementById("pf-host-modal");
+  if (!modal) return null;
+  // The Talos card sits in a panel the All list hides. A fixed dialog
+  // inside that panel stays invisible. Park it on the body.
+  if (modal.parentElement !== document.body) document.body.appendChild(modal);
+  if (!modal.dataset.clickWired) {
+    modal.dataset.clickWired = "1";
+    modal.addEventListener("click", onClick);
+  }
+  return modal;
+}
+
+export function openTalosMachine(name) {
+  const wanted = String(name || "").trim();
+  if (!wanted) return false;
+  const modal = parkInspectorModal();
+  if (!modal) return false;
+  selected = wanted;
+  inspTab = "overview";
+  menuOpen = "";
+  if (cache) {
+    render();
+  } else {
+    const inspector = document.getElementById("pf-inspector");
+    const title = document.getElementById("pf-host-title");
+    if (title) title.textContent = wanted;
+    if (inspector) inspector.innerHTML = `<div class="muted">Loading ${esc(wanted)}…</div>`;
+    modal.hidden = false;
+    if (activeEnvId) loadPlatformCard(activeEnvId, { silent: true });
+  }
+  return true;
+}
+
+export function closeTalosMachine() {
+  if (!selected) return;
+  selected = "";
+  const modal = document.getElementById("pf-host-modal");
+  if (modal) modal.hidden = true;
+}
+
 export function wirePlatformCard(getEnvId) {
   envIdGetter = typeof getEnvId === "function" ? getEnvId : null;
+  parkInspectorModal();
   const btn = document.getElementById("pf-refresh");
   if (btn && !btn.dataset.wired) {
     btn.dataset.wired = "1";
@@ -1197,6 +1240,8 @@ export async function loadPlatformCard(envId, { silent = false } = {}) {
 
 export function destroyPlatformCard() {
   stopRefresh();
+  const parked = document.getElementById("pf-host-modal");
+  if (parked && parked.parentElement === document.body) parked.remove();
   envIdGetter = null;
   activeEnvId = "";
   cache = null;

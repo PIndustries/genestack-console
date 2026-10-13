@@ -3,13 +3,13 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls71";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls72";
 import { nextStripHtml, wireNextStrip, loadNextStrip, destroyNextStrip } from "./environment_next.js?v=ls71";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
 import { destroyWorkflowCard } from "./environment_workflow.js?v=ls61";
-import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard } from "./environment_platform.js?v=ls60";
+import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard, openTalosMachine, closeTalosMachine } from "./environment_platform.js?v=ls72";
 import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls60";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard } from "./environment_cloud.js";
@@ -254,8 +254,10 @@ function envTabHash(tabName, ptab) {
 
 function switchSettingsSubtab(name) {
   const id = name || "config";
-  document.querySelectorAll("#stab-bar [data-stab]").forEach((t) => t.classList.toggle("active", t.dataset.stab === id));
-  document.querySelectorAll("[data-spanel]").forEach((p) => p.classList.toggle("active", p.dataset.spanel === id));
+  const root = document.getElementById("panel-settings") || document;
+  root.querySelectorAll("#stab-bar [data-stab]").forEach((t) => t.classList.toggle("active", t.dataset.stab === id));
+  // An active spanel outside this tab stays visible on every other tab.
+  root.querySelectorAll("[data-spanel]").forEach((p) => p.classList.toggle("active", p.dataset.spanel === id));
 }
 
 function switchTab(tabName, ptab, opts = {}) {
@@ -275,6 +277,7 @@ function switchTab(tabName, ptab, opts = {}) {
   if (panel) panel.classList.add("active");
   if (resolved === "platform") switchPlatformSubtab(platformPtab);
   else if (resolved === "settings") switchSettingsSubtab(stab[tabName] || ptab || "config");
+  if (!(resolved === "platform" && platformPtab === "machines")) closeTalosMachine();
   if (resolved !== "workflow") pauseMapPoll();
   loadTab(resolved);
   if (resolved === "settings") loadDescriptor().catch(() => {});
@@ -539,6 +542,51 @@ export async function render(root, { param, query } = {}) {
         ${appsCardHtml()}
       </div>
     </div>
+
+    <div class="ptab-panel" data-spanel="expert" id="panel-expert">
+      <div class="env-grid full">
+        <div class="card">
+          <div class="toolbar">
+            <h2>Environment descriptor</h2>
+          </div>
+          <div id="desc-err"></div>
+          <div id="desc-identity" class="muted">${envId ? "Loading…" : "Select an environment."}</div>
+        </div>
+      </div>
+      ${componentsCardHtml()}
+      <div class="env-grid" style="margin-top:.75rem">
+        <div class="card">
+          <div class="toolbar"><h2>Helm overrides</h2></div>
+          <div id="desc-helm" class="muted">—</div>
+        </div>
+        <div class="card">
+          <div class="toolbar"><h2>Kustomize overlays</h2></div>
+          <div id="desc-kustomize" class="muted">—</div>
+        </div>
+        <div class="card">
+          <div class="toolbar"><h2>Gateway</h2></div>
+          <div id="desc-gateway" class="muted">—</div>
+        </div>
+      </div>
+      <div class="card" id="desc-overlay-card" hidden style="margin-top:.75rem">
+        <div class="toolbar">
+          <h2 id="desc-overlay-title">Override</h2>
+          <span id="desc-overlay-msg" class="muted"></span>
+          <button type="button" class="secondary btn-sm" id="desc-overlay-chart" hidden>Show chart</button>
+          <button type="button" class="secondary btn-sm" id="desc-overlay-base" hidden>Show base</button>
+          <button type="button" class="secondary btn-sm" id="desc-overlay-local" hidden>Show local</button>
+          <button type="button" class="btn-sm" id="desc-overlay-save" hidden>Save</button>
+          <button type="button" class="secondary btn-sm" id="desc-overlay-close">Close</button>
+        </div>
+        <div id="desc-overlay-note" class="muted" style="font-size:.78rem;margin-bottom:.4rem"></div>
+        <textarea id="desc-overlay-text" class="overlay-editor" spellcheck="false" wrap="off"></textarea>
+        <pre id="desc-overlay-base-pre" class="overlay-base" hidden></pre>
+      </div>
+      <details class="card" style="margin-top:.75rem">
+        <summary>Raw descriptor JSON</summary>
+        <pre class="log-inline" id="desc-raw"></pre>
+      </details>
+    </div>
     </div>
 
     <!-- ═══ OBSERVE TAB ═══ -->
@@ -591,51 +639,6 @@ export async function render(root, { param, query } = {}) {
       <div class="env-grid full">
         ${rackCardHtml()}
       </div>
-    </div>
-
-    <div class="ptab-panel" data-spanel="expert" id="panel-expert">
-      <div class="env-grid full">
-        <div class="card">
-          <div class="toolbar">
-            <h2>Environment descriptor</h2>
-          </div>
-          <div id="desc-err"></div>
-          <div id="desc-identity" class="muted">${envId ? "Loading…" : "Select an environment."}</div>
-        </div>
-      </div>
-      ${componentsCardHtml()}
-      <div class="env-grid" style="margin-top:.75rem">
-        <div class="card">
-          <div class="toolbar"><h2>Helm overrides</h2></div>
-          <div id="desc-helm" class="muted">—</div>
-        </div>
-        <div class="card">
-          <div class="toolbar"><h2>Kustomize overlays</h2></div>
-          <div id="desc-kustomize" class="muted">—</div>
-        </div>
-        <div class="card">
-          <div class="toolbar"><h2>Gateway</h2></div>
-          <div id="desc-gateway" class="muted">—</div>
-        </div>
-      </div>
-      <div class="card" id="desc-overlay-card" hidden style="margin-top:.75rem">
-        <div class="toolbar">
-          <h2 id="desc-overlay-title">Override</h2>
-          <span id="desc-overlay-msg" class="muted"></span>
-          <button type="button" class="secondary btn-sm" id="desc-overlay-chart" hidden>Show chart</button>
-          <button type="button" class="secondary btn-sm" id="desc-overlay-base" hidden>Show base</button>
-          <button type="button" class="secondary btn-sm" id="desc-overlay-local" hidden>Show local</button>
-          <button type="button" class="btn-sm" id="desc-overlay-save" hidden>Save</button>
-          <button type="button" class="secondary btn-sm" id="desc-overlay-close">Close</button>
-        </div>
-        <div id="desc-overlay-note" class="muted" style="font-size:.78rem;margin-bottom:.4rem"></div>
-        <textarea id="desc-overlay-text" class="overlay-editor" spellcheck="false" wrap="off"></textarea>
-        <pre id="desc-overlay-base-pre" class="overlay-base" hidden></pre>
-      </div>
-      <details class="card" style="margin-top:.75rem">
-        <summary>Raw descriptor JSON</summary>
-        <pre class="log-inline" id="desc-raw"></pre>
-      </details>
     </div>
 
     <div id="wf-mod-park" hidden></div>
@@ -701,7 +704,7 @@ export async function render(root, { param, query } = {}) {
   wireProgressCard(() => envId);
   wireDeployMap();
   wireConfigCard(() => envId);
-  wireServersCard(() => envId);
+  wireServersCard(() => envId, { onTalos: (name) => openTalosMachine(name) });
   wireNextStrip(() => envId);
   wireBaremetalCard(() => envId);
   wireDiscoveryCard(() => envId);
