@@ -359,6 +359,96 @@ def install_helm_guard(dest: Path) -> Path:
     return path
 
 
+# Genestack install scripts call `yq eval`. Python yq accepts --version and
+# then treats the expression as a filename, so Neutron sees an empty TLS flag.
+_YQ_SHIM = """\
+#!/bin/sh
+# Use mikefarah yq. A Python yq earlier on PATH breaks `yq eval`.
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bin="$here/yq.bin"
+if [ -x "$bin" ]; then
+  exec "$bin" "$@"
+fi
+found=
+oldifs=$IFS
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] || continue
+  cand="$dir/yq"
+  if [ "$cand" = "$here/yq" ] || [ ! -x "$cand" ] || [ -d "$cand" ]; then
+    continue
+  fi
+  ver=$("$cand" --version 2>&1 || true)
+  case "$ver" in
+    *mikefarah*|*github.com/mikefarah/yq*)
+      found=$cand
+      break
+      ;;
+  esac
+done
+IFS=$oldifs
+if [ -n "$found" ]; then
+  exec "$found" "$@"
+fi
+osname=$(uname -s)
+case "$osname" in
+  Linux) osname=linux ;;
+  Darwin) osname=darwin ;;
+  *)
+    echo "yq: unsupported OS $(uname -s)" >&2
+    exit 1
+    ;;
+esac
+arch=$(uname -m)
+case "$arch" in
+  x86_64|amd64) arch=amd64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  *)
+    echo "yq: unsupported architecture $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+url="${YQ_DOWNLOAD_URL:-https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_${osname}_${arch}}"
+tmp="$bin.part"
+rm -f "$tmp"
+if command -v curl >/dev/null 2>&1; then
+  curl -fsSL "$url" -o "$tmp" || {
+    echo "yq: could not download mikefarah yq" >&2
+    exit 1
+  }
+elif command -v wget >/dev/null 2>&1; then
+  wget -q -O "$tmp" "$url" || {
+    echo "yq: could not download mikefarah yq" >&2
+    exit 1
+  }
+else
+  echo "yq: curl or wget is required to install mikefarah yq" >&2
+  exit 1
+fi
+chmod 755 "$tmp"
+ver=$("$tmp" --version 2>&1 || true)
+case "$ver" in
+  *mikefarah*|*github.com/mikefarah/yq*) ;;
+  *)
+    rm -f "$tmp"
+    echo "yq: downloaded binary is not mikefarah" >&2
+    exit 1
+    ;;
+esac
+mv "$tmp" "$bin"
+exec "$bin" "$@"
+"""
+
+
+def install_yq_shim(dest: Path) -> Path:
+    """Write ``dest/yq`` so install scripts find mikefarah yq first."""
+    dest.mkdir(parents=True, exist_ok=True)
+    path = dest / "yq"
+    path.write_text(_YQ_SHIM, encoding="utf-8")
+    os.chmod(path, 0o755)
+    return path
+
+
 def arm_helm_guard(extra_env: dict[str, str], dest: Path) -> dict[str, str]:
     """Return env that runs the wrapper instead of Helm.
 
@@ -372,6 +462,7 @@ def arm_helm_guard(extra_env: dict[str, str], dest: Path) -> dict[str, str]:
     if not real:
         return extra_env
     directory = install_helm_guard(dest).parent
+    install_yq_shim(directory)
     updated = dict(extra_env)
     current = updated.get("PATH") or os.environ.get("PATH") or ""
     updated["PATH"] = f"{directory}{os.pathsep}{current}" if current else str(directory)

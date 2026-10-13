@@ -13,6 +13,7 @@ from app.services.helm_guard import (
     arm_helm_guard,
     envoy_gateway_version,
     install_helm_guard,
+    install_yq_shim,
     render_helm_guard,
     unschedulable_messages,
 )
@@ -167,6 +168,77 @@ def test_wrapper_leaves_helm_show_alone(tmp_path):
     assert "show:show crds chart" in result.stdout
 
 
+def _yq(path, body: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def test_yq_shim_skips_python_yq(tmp_path):
+    _yq(
+        tmp_path / "python-yq" / "yq",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then echo 'yq 3.4.3'; exit 0; fi\n"
+        "echo python-yq >&2\n"
+        "exit 1\n",
+    )
+    _yq(
+        tmp_path / "mike" / "yq",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  echo 'yq (https://github.com/mikefarah/yq/) version v4.47.2'\n"
+        "  exit 0\n"
+        "fi\n"
+        "echo mike \"$*\"\n",
+    )
+    shim = install_yq_shim(tmp_path / "guard")
+    env = dict(os.environ)
+    env["PATH"] = (
+        f"{tmp_path / 'python-yq'}{os.pathsep}{tmp_path / 'mike'}"
+        f"{os.pathsep}/bin{os.pathsep}/usr/bin"
+    )
+    result = subprocess.run(
+        [str(shim), "eval", ".networking.ENABLE_SSL // false"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("mike ")
+    assert "python-yq" not in result.stderr
+
+
+def test_yq_shim_downloads_mikefarah_when_python_yq_is_first(tmp_path):
+    _yq(tmp_path / "python-yq" / "yq", "#!/bin/sh\necho 'yq 3.4.3'\n")
+    payload = tmp_path / "payload"
+    _yq(
+        payload,
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  echo 'yq (https://github.com/mikefarah/yq/) version v4.47.2'\n"
+        "  exit 0\n"
+        "fi\n"
+        "echo downloaded \"$*\"\n",
+    )
+    shim = install_yq_shim(tmp_path / "guard")
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp_path / 'python-yq'}{os.pathsep}/bin{os.pathsep}/usr/bin"
+    env["YQ_DOWNLOAD_URL"] = payload.as_uri()
+    result = subprocess.run(
+        [str(shim), "eval", ".networking.ENABLE_SSL // false"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("downloaded ")
+    assert (tmp_path / "guard" / "yq.bin").is_file()
+
+
 def test_arm_puts_the_wrapper_first_on_path(tmp_path):
     helm = tmp_path / "bin"
     helm.mkdir()
@@ -177,6 +249,9 @@ def test_arm_puts_the_wrapper_first_on_path(tmp_path):
     armed = arm_helm_guard(env, tmp_path / "guard")
     assert armed["PATH"].startswith(str(tmp_path / "guard"))
     assert armed["GENESTACK_HELM_REAL"] == str(binary)
+    shim = tmp_path / "guard" / "yq"
+    assert shim.is_file()
+    assert shim.stat().st_mode & stat.S_IXUSR
     script = render_helm_guard()
     assert "gateways.gateway.networking.k8s.io" in script
     assert "allowScheduling" not in script

@@ -855,6 +855,7 @@ def run_deploy(
         if guarded.get("GENESTACK_HELM_REAL"):
             extra_env = guarded
             log("[deploy] helm stops when a pod stays unschedulable")
+            log("[deploy] install scripts use mikefarah yq")
 
     # OVH + Talos: the metal is not Talos until BYOI finishes. If the hosts
     # stage will run, provision (or confirm :50000) before talosctl.
