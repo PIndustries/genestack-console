@@ -24,6 +24,7 @@ from app.schemas import Principal
 from app.services import novnc as novnc_svc
 from app.services import openstack_ops
 from app.services.envcontext import build_context
+from app.services.request_safety import log_field
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +99,9 @@ def create_console_session(
             username=principal.username,
         )
     except Exception:  # noqa: BLE001 — never 500; token must not leak
-        log.warning("novnc session: nova console lookup failed env=%s", env.id)
+        log.warning(
+            "novnc session: nova console lookup failed env=%s", log_field(env.id)
+        )
         return {
             "ok": False,
             "server_id": server_id,
@@ -111,10 +114,10 @@ def create_console_session(
     )
     log.info(
         "novnc session created env=%s server=%s session=%s user=%s",
-        env.id,
-        server_id,
-        session_id,
-        principal.username,
+        log_field(env.id),
+        log_field(server_id),
+        log_field(session_id),
+        log_field(principal.username),
     )
     return {
         "ok": True,
@@ -159,7 +162,9 @@ def _proxy_asset(
                 )
         except novnc_svc.NovncProxyError:
             log.warning(
-                "novnc asset proxy failed env=%s path=%s", environment_id, upstream_path
+                "novnc asset proxy failed env=%s path=%s",
+                log_field(environment_id),
+                log_field(upstream_path),
             )
             if html:
                 return _html_error()
@@ -292,12 +297,16 @@ async def novnc_websockify(
         except novnc_svc.NovncProxyError:
             log.warning(
                 "novnc port-forward failed env=%s session=%s",
-                environment_id,
-                session_id,
+                log_field(environment_id),
+                log_field(session_id),
             )
             await websocket.close(code=CLOSE_UPSTREAM)
             return
-        log.info("novnc websockify open env=%s session=%s", environment_id, session_id)
+        log.info(
+            "novnc websockify open env=%s session=%s",
+            log_field(environment_id),
+            log_field(session_id),
+        )
         try:
             upstream = await novnc_svc.connect_novnc_upstream(
                 url, None, {}, subprotocol
@@ -305,9 +314,9 @@ async def novnc_websockify(
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "novnc upstream connect failed env=%s session=%s err=%s",
-                environment_id,
-                session_id,
-                type(exc).__name__,
+                log_field(environment_id),
+                log_field(session_id),
+                log_field(type(exc).__name__),
             )
             await websocket.close(code=CLOSE_UPSTREAM)
             return

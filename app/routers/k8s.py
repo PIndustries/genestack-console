@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, status
@@ -29,6 +30,9 @@ from app.services.demo import (
 )
 from app.services.envcontext import build_context
 from app.services.job_runner import ConflictError, execute_operation
+from app.services.request_safety import client_detail, log_field
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["k8s"])
 
@@ -74,7 +78,8 @@ class ApplyBody(BaseModel):
 
 
 def _conflict_http(exc: ConflictError) -> HTTPException:
-    detail: dict[str, Any] = {"message": str(exc)}
+    log.warning("%s", log_field(exc))
+    detail: dict[str, Any] = {"message": client_detail(exc)}
     if exc.job_id:
         detail["conflicting_job_id"] = exc.job_id
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
@@ -715,9 +720,8 @@ async def pod_exec_ws(
         session.spawn(argv, extra_env={"KUBECONFIG": kube})
     except (OSError, FileNotFoundError) as exc:
         ctx.cleanup()
-        await term._reject(
-            ws, term.CLOSE_SPAWN_FAILED, f"failed to spawn kubectl exec: {exc}"
-        )
+        log.warning("%s", log_field(exc))
+        await term._reject(ws, term.CLOSE_SPAWN_FAILED, client_detail(exc))
         return
     _exec_sessions[key] = session
     term._write_audit(

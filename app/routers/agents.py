@@ -37,6 +37,7 @@ from app.schemas import AgentStatusRead, AgentTokenCreate, AgentTokenRead, Princ
 from app.services import agents as agents_service
 from app.services.agents import AgentRecord
 from app.services.job_runner import JobRunner
+from app.services.request_safety import client_detail, log_field
 
 log = logging.getLogger(__name__)
 
@@ -169,7 +170,8 @@ def create_agent_token(
         cred, token = agents_service.create_credential(db, env.id, body.name)
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        log.warning("%s", log_field(exc))
+        raise HTTPException(status_code=400, detail=client_detail(exc)) from exc
     client_config = getattr(cred, "wg_client_config", None)
     wg_address = cred.wg_address
     wg_public = cred.wg_public_key
@@ -322,7 +324,7 @@ def _touch_credential(agent_id: str, **fields: Any) -> None:
 
 
 async def _fail(ws: WebSocket, reason: str) -> None:
-    log.warning("agent connect rejected: %s", reason)
+    log.warning("agent connect rejected: %s", log_field(reason))
     await ws.close(code=CLOSE_AUTH_FAILED)
 
 
@@ -376,7 +378,7 @@ async def agent_connect(ws: WebSocket, token: str = Query(default="")) -> None:
     )
     agents_service.registry.register(record)
     _touch_credential(agent_id, last_seen=_utcnow())
-    log.info("agent %s connected for env %s", agent_id, env_id)
+    log.info("agent %s connected for env %s", log_field(agent_id), log_field(env_id))
 
     try:
         while True:
@@ -405,14 +407,18 @@ async def agent_connect(ws: WebSocket, token: str = Query(default="")) -> None:
                 # upserted into the env's discovery inbox; bad frames ignored.
                 agents_service.handle_agent_event(env_id, frame)
             elif ftype == "bye":
-                log.info("agent %s said bye: %s", agent_id, frame.get("reason"))
+                log.info(
+                    "agent %s said bye: %s",
+                    log_field(agent_id),
+                    log_field(frame.get("reason")),
+                )
                 break
             # Unknown frame types are ignored.
     except WebSocketDisconnect:
         pass
     except Exception:  # noqa: BLE001 — never let a bad agent crash the app
-        log.warning("agent %s connection error", agent_id, exc_info=True)
+        log.warning("agent %s connection error", log_field(agent_id), exc_info=True)
     finally:
         agents_service.registry.unregister(record)
         _touch_credential(agent_id, last_seen=_utcnow())
-        log.info("agent %s disconnected", agent_id)
+        log.info("agent %s disconnected", log_field(agent_id))

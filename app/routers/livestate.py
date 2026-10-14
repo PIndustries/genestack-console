@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,9 @@ from app.services.demo import (
     is_demo_env,
 )
 from app.services.envcontext import build_context
+from app.services.request_safety import client_detail, log_field
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["livestate"])
 
@@ -107,7 +111,8 @@ def get_environment_health(
     try:
         return livestate.environment_health(ctx, db, env.id)
     except Exception as exc:  # noqa: BLE001
-        return livestate._unknown_health(str(exc))
+        log.warning("%s", log_field(exc))
+        return livestate._unknown_health(client_detail(exc))
     finally:
         ctx.cleanup()
 

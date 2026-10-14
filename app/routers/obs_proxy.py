@@ -18,6 +18,7 @@ from app.schemas import Principal
 from app.services import obs_proxy as ob
 from app.services.envcontext import build_context
 from app.services.horizon_proxy import rewrite_location
+from app.services.request_safety import client_detail, log_field
 
 log = logging.getLogger(__name__)
 
@@ -62,10 +63,25 @@ def create_obs_session(
             kube, env_id=env.id, actor=principal.username, kind=kind
         )
     except ob.ObsProxyError as exc:
-        log.warning("%s session failed env=%s err=%s", kind, env.id, exc)
-        return {"ok": False, "session_id": None, "embed_url": None, "error": str(exc)}
+        log.warning(
+            "%s session failed env=%s err=%s",
+            log_field(kind),
+            log_field(env.id),
+            log_field(exc),
+        )
+        return {
+            "ok": False,
+            "session_id": None,
+            "embed_url": None,
+            "error": client_detail(exc),
+        }
     except Exception as exc:  # noqa: BLE001
-        log.warning("%s session failed env=%s", kind, env.id, exc_info=True)
+        log.warning(
+            "%s session failed env=%s",
+            log_field(kind),
+            log_field(env.id),
+            exc_info=True,
+        )
         return {
             "ok": False,
             "session_id": None,
@@ -76,7 +92,12 @@ def create_obs_session(
         ctx.cleanup()
     home = str(ob.KINDS[kind].get("home") or "/")
     embed = ob.proxy_prefix(env.id, kind, sid) + home
-    log.info("%s session created env=%s session=%s", kind, env.id, sid)
+    log.info(
+        "%s session created env=%s session=%s",
+        log_field(kind),
+        log_field(env.id),
+        log_field(sid),
+    )
     return {"ok": True, "session_id": sid, "embed_url": embed, "error": None, "kind": kind}
 
 
@@ -117,6 +138,7 @@ async def _proxy(
         async with httpx.AsyncClient(timeout=ob.HTTP_TIMEOUT, follow_redirects=False) as client:
             upstream = await client.request(request.method, url, headers=headers, content=body)
     except httpx.HTTPError as exc:
+        log.warning("%s", log_field(exc))
         raise HTTPException(status_code=502, detail=f"{kind} proxy failed") from exc
     media = upstream.headers.get("content-type") or "application/octet-stream"
     payload = ob.rewrite_body(kind, media, upstream.content, prefix)

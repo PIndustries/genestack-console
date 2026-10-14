@@ -13,6 +13,7 @@ from app.deps import get_db, get_env_scoped
 from app.models import Environment
 from app.services import envconfig as envconfig_service
 from app.services import pxe as pxe_service
+from app.services.request_safety import client_detail, log_field
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +32,12 @@ def get_pxe_status(
         doc = current[0] if current else {}
         return pxe_service.render_env_pxe_status(env, db, doc, settings)
     except Exception as exc:
-        logger.error("pxe status error: %s", exc)
+        logger.error("pxe status error: %s", log_field(exc))
         return {
             "enabled": False,
             "flat_config": None,
             "agent_configs": [],
-            "error": str(exc),
+            "error": client_detail(exc),
         }
 
 
@@ -52,12 +53,12 @@ def pxe_prep(
         doc = current[0] if current else {}
 
         def _log(msg: str) -> None:
-            logger.info("[pxe-prep] %s", msg)
+            logger.info("[pxe-prep] %s", log_field(msg))
 
         return pxe_service.ensure_assets_and_config(env, doc, settings, _log)
     except Exception as exc:
-        logger.error("pxe prep error: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        logger.error("pxe prep error: %s", log_field(exc))
+        return {"ok": False, "error": client_detail(exc)}
 
 
 @router.post("/pxe/render")
@@ -72,12 +73,12 @@ def pxe_render(
         doc = current[0] if current else {}
 
         def _log(msg: str) -> None:
-            logger.info("[pxe-render] %s", msg)
+            logger.info("[pxe-render] %s", log_field(msg))
 
         return pxe_service.ensure_assets_and_config(env, doc, settings, _log)
     except Exception as exc:
-        logger.error("pxe render error: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        logger.error("pxe render error: %s", log_field(exc))
+        return {"ok": False, "error": client_detail(exc)}
 
 
 @router.post("/pxe/agent")
@@ -134,5 +135,5 @@ def pxe_restart(
             "error": result.get("error"),
         }
     except Exception as exc:
-        logger.error("pxe restart error: %s", exc)
-        return {"ok": False, "error": str(exc)}
+        logger.error("pxe restart error: %s", log_field(exc))
+        return {"ok": False, "error": client_detail(exc)}
