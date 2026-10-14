@@ -60,13 +60,13 @@ The console source is [PIndustries/genestack-console](https://github.com/PIndust
 
 ## What you do in the console
 
-An environment is one cloud: a lab, one rack, or one region. A tenant is the group of people allowed to use that cloud. Jobs and passwords for the cloud stay inside the environment.
+An environment is one cloud: a lab, one rack, or one region. A second cloud is a second environment. The servers in one environment stay in that environment. A tenant is the group of people allowed to use that cloud. Jobs and passwords for the cloud stay inside the environment.
 
 Point the environment at `/opt/genestack` and at the `/etc/genestack` directory `bootstrap.sh` already created. Saving settings in the console does not change those directories by itself. A job copies the saved settings onto the deploy host, then runs the install scripts from this tree. The log of that job stays on the environment.
 
 The console database on the deploy host holds the passwords, the kubeconfig, and the management-port passwords. A job writes `kubesecrets.yaml` so the install scripts can read it, and removes that file when the job finishes, including when the job fails or is cancelled. A kubeconfig the job created is stored in that database and then removed from the deploy host. A kubeconfig path that was already on the host stays. [How a job runs](runtime.md) is the longer account of that cleanup.
 
-When the install has finished, the same environment is where you look at Kubernetes, act on namespaces, nodes, and pods, run the OpenStack service steps, and download two credential files. The kubeconfig is how you talk to Kubernetes. The talosconfig is how you talk to Talos. Both are saved in that environment's vault. Download grabs the vault copy. An admin can view, edit, and delete a record in that vault. Regenerate asks the cluster for a new client certificate, valid for one year, and replaces the vault copy. Skyline is the OpenStack web page for people using the cloud day to day. The console is the page for the people who build the cloud.
+When the install has finished, the same environment is where you look at Kubernetes, act on namespaces, nodes, and pods, run the OpenStack service steps, and download two credential files. The kubeconfig is how you talk to Kubernetes. The talosconfig is how you talk to Talos. Both are saved in that environment's vault. Download grabs the vault copy. An admin can view, edit, and delete a record in that vault. Regenerate asks the cluster for a new client certificate, valid for one year, and replaces the vault copy. Skyline is the OpenStack web page for people using the cloud day to day. Open Horizon, on the OpenStack tab, opens the Horizon dashboard in the console window. New tab opens that same page. The login uses the cloud admin account. The console is the page for the people who build the cloud.
 
 People who sign in have one of three roles: viewer, operator, or admin. An API key in `config.yaml` is the emergency login, for when the user accounts cannot be used.
 
