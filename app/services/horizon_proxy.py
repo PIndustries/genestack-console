@@ -317,6 +317,10 @@ def rewrite_html(html: str, prefix: str, public_hosts: tuple[str, ...] = ()) -> 
         text,
         flags=re.I,
     )
+    # Horizon hides the document until it is the top window, then busts
+    # out of a frame. The console modal is a same-origin iframe, so that
+    # hide rule leaves a white panel. A new tab is the top window and paints.
+    text = _allow_console_frame(text)
     # Horizon frame-bust when DISALLOW_IFRAME_EMBED is true.
     text = re.sub(
         r"if\s*\(\s*(?:self|window)\s*!==?\s*(?:top|parent)\s*\)\s*\{[^}]*\}",
@@ -334,6 +338,32 @@ def rewrite_html(html: str, prefix: str, public_hosts: tuple[str, ...] = ()) -> 
         text,
     )
     return _rewrite_baked_roots(text, prefix)
+
+
+def _allow_console_frame(text: str) -> str:
+    """Let Horizon paint inside the console modal.
+
+    The dashboard ships ``<style id="anti-clickjack">body{display:none}</style>``
+    and only removes it when ``self === top``. Drop that rule and the script
+    that depends on it. The proxy already limits framing to this console.
+    """
+    text = re.sub(
+        r"""<style\b[^>]*\bid=["']anti-clickjack["'][^>]*>.*?</style>""",
+        "",
+        text,
+        flags=re.I | re.S,
+    )
+    text = re.sub(
+        r"""<script\b[^>]*>\s*if\s*\(\s*(?:window\.)?self\s*===?\s*(?:window\.)?top\s*\)\s*\{.*?\}\s*else\s*\{.*?\}\s*</script>""",
+        "",
+        text,
+        flags=re.I | re.S,
+    )
+    return re.sub(
+        r"antiClickjack\.parentNode\.removeChild\(\s*antiClickjack\s*\)\s*;?",
+        "if (antiClickjack) antiClickjack.parentNode.removeChild(antiClickjack);",
+        text,
+    )
 
 
 def _rewrite_baked_roots(text: str, prefix: str) -> str:

@@ -100,6 +100,42 @@ def test_session_failure_is_not_a_500(monkeypatch):
     assert "not found" in body["error"]
 
 
+def test_rewrite_shows_horizon_inside_the_console_modal():
+    prefix = "/api/v1/environments/env-1/cloud/horizon/hz_abc"
+    html = """
+    <style id="anti-clickjack">body{display:none !important;}</style>
+    <script type="text/javascript" charset="utf-8">
+      if (self === top) {
+        var antiClickjack = document.getElementById("anti-clickjack");
+        antiClickjack.parentNode.removeChild(antiClickjack);
+      } else {
+        top.location = self.location;
+      }
+    </script>
+    <a href="/project/">Overview</a>
+    """
+    rewritten = hz.rewrite_html(html, prefix)
+    assert "display:none" not in rewritten
+    assert "anti-clickjack" not in rewritten
+    assert "top.location" not in rewritten
+    assert f'href="{prefix}/project/"' in rewritten
+
+    quoted = """
+    <style id='anti-clickjack'>body{display:none !important;}</style>
+    <script>
+      if (window.self === window.top) {
+        var antiClickjack = document.getElementById("anti-clickjack");
+        antiClickjack.parentNode.removeChild(antiClickjack);
+      } else {
+        top.location.replace(self.location.href);
+      }
+    </script>
+    """
+    rewritten = hz.rewrite_html(quoted, prefix)
+    assert "display:none" not in rewritten
+    assert "top.location" not in rewritten
+
+
 def test_rewrite_keeps_webroot_and_static_on_the_session():
     prefix = "/api/v1/environments/env-1/cloud/horizon/hz_abc"
     html = '<script src="/static/app.js"></script> conf.static_url = "/static/";'
