@@ -101,6 +101,10 @@ _STRIP_REQ = frozenset({"x-forwarded-proto", "x-forwarded-host", "x-forwarded-fo
 class HorizonProxyError(RuntimeError):
     """Could not reach Horizon or complete auto-login."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 @dataclass
 class HorizonSession:
@@ -340,6 +344,69 @@ def rewrite_html(html: str, prefix: str, public_hosts: tuple[str, ...] = ()) -> 
     return _rewrite_baked_roots(text, prefix)
 
 
+def _find_tag_open(lower: str, name: str, start: int) -> int:
+    needle = "<" + name
+    pos = start
+    limit = len(lower)
+    while pos < limit:
+        found = lower.find(needle, pos)
+        if found < 0:
+            return -1
+        after = found + len(needle)
+        if after >= limit or lower[after] in " \t\r\n/>":
+            return found
+        pos = after
+    return -1
+
+
+def _drop_anti_clickjack_styles(text: str) -> str:
+    """Drop ``<style id="anti-clickjack">...</style>`` without a nested regex."""
+    lower = text.lower()
+    pos = 0
+    while True:
+        start = _find_tag_open(lower, "style", pos)
+        if start < 0:
+            return text
+        tag_end = lower.find(">", start)
+        if tag_end < 0:
+            return text
+        tag = lower[start : tag_end + 1]
+        if 'id="anti-clickjack"' not in tag and "id='anti-clickjack'" not in tag:
+            pos = tag_end + 1
+            continue
+        close = lower.find("</style>", tag_end + 1)
+        if close < 0:
+            return text
+        end = close + len("</style>")
+        text = text[:start] + text[end:]
+        lower = lower[:start] + lower[end:]
+        pos = start
+
+
+def _drop_short_frame_scripts(text: str) -> str:
+    """Drop a short script that hides the page unless it is the top window."""
+    lower = text.lower()
+    pos = 0
+    while True:
+        start = _find_tag_open(lower, "script", pos)
+        if start < 0:
+            return text
+        tag_end = lower.find(">", start)
+        if tag_end < 0:
+            return text
+        close = lower.find("</script>", tag_end + 1)
+        if close < 0:
+            return text
+        end = close + len("</script>")
+        block = lower[start:end]
+        if len(block) < 2000 and "self" in block and "top" in block and "else" in block:
+            text = text[:start] + text[end:]
+            lower = lower[:start] + lower[end:]
+            pos = start
+            continue
+        pos = end
+
+
 def _allow_console_frame(text: str) -> str:
     """Let Horizon paint inside the console modal.
 
@@ -347,18 +414,8 @@ def _allow_console_frame(text: str) -> str:
     and only removes it when ``self === top``. Drop that rule and the script
     that depends on it. The proxy already limits framing to this console.
     """
-    text = re.sub(
-        r"""<style\b[^>]*\bid=["']anti-clickjack["'][^>]*>.*?</style>""",
-        "",
-        text,
-        flags=re.I | re.S,
-    )
-    text = re.sub(
-        r"""<script\b[^>]*>\s*if\s*\(\s*(?:window\.)?self\s*===?\s*(?:window\.)?top\s*\)\s*\{.*?\}\s*else\s*\{.*?\}\s*</script>""",
-        "",
-        text,
-        flags=re.I | re.S,
-    )
+    text = _drop_anti_clickjack_styles(text)
+    text = _drop_short_frame_scripts(text)
     return re.sub(
         r"antiClickjack\.parentNode\.removeChild\(\s*antiClickjack\s*\)\s*;?",
         "if (antiClickjack) antiClickjack.parentNode.removeChild(antiClickjack);",

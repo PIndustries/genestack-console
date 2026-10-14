@@ -681,7 +681,7 @@ def observe_logs(
         "lines": [],
         "count": 0,
     }
-    duration = re.fullmatch(r"([1-9][0-9]*)([smhd])", since)
+    duration = re.fullmatch(r"([1-9][0-9]{0,6})([smhd])", since)
     if not duration or len(since) > 8:
         result["error"] = "since must be a positive duration such as 15m or 1h"
         return result

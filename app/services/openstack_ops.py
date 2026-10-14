@@ -13,6 +13,7 @@ error string. Mutating actions validate ids/names before any call.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -65,7 +66,6 @@ SERVER_ID_RE = re.compile(
 REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .:_-]{0,80}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,62}$")
 CIDR_RE = re.compile(r"^(\d{1,3}\.){3}\d{1,3}/(\d|[12]\d|3[0-2])$")
-IPV6_CIDR_RE = re.compile(r"^[0-9a-fA-F:]*:[0-9a-fA-F:]+/(\d|[1-9]\d|1[0-2]\d)$")
 SG_DIRECTIONS = ("ingress", "egress")
 SG_ETHERTYPES = ("IPv4", "IPv6")
 SG_PROTOCOLS = ("tcp", "udp", "icmp")
@@ -441,6 +441,16 @@ def _server_cli_args(action: str, server_id: str) -> list[str]:
     return ["server", action, server_id]
 
 
+def _is_ipv6_cidr(text: str) -> bool:
+    if "/" not in text:
+        return False
+    try:
+        network = ipaddress.ip_network(text, strict=False)
+    except ValueError:
+        return False
+    return isinstance(network, ipaddress.IPv6Network)
+
+
 def validate_cidr(
     value: Any, *, field: str = "cidr", required: bool = True
 ) -> str | None:
@@ -455,13 +465,7 @@ def validate_cidr(
         except ValueError:
             return f"invalid {field} {text!r}"
         return None
-    if IPV6_CIDR_RE.match(text):
-        try:
-            prefix = int(text.rsplit("/", 1)[1])
-        except (TypeError, ValueError):
-            return f"invalid {field} {text!r}"
-        if prefix > 128:
-            return f"invalid {field} {text!r}"
+    if _is_ipv6_cidr(text):
         return None
     return f"invalid {field} {text!r}"
 
