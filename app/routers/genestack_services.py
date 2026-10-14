@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import yaml
@@ -19,7 +20,10 @@ from app.services import envconfig as envconfig_service
 from app.services import genestack_bridge as bridge
 from app.services.envcontext import build_context
 from app.services.job_runner import JobRunner
+from app.services.request_safety import client_detail, log_field
 from app.services.service_registry import build_service_registry, get_pipeline
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/genestack", tags=["genestack"])
 
@@ -146,7 +150,8 @@ def update_components(
             db, env, yaml.safe_dump(doc, sort_keys=False), principal.username
         )
     except envconfig_service.ConfigValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        log.warning("%s", log_field(exc))
+        raise HTTPException(status_code=422, detail=client_detail(exc)) from exc
 
     runner = JobRunner(db)
     runner.write_audit(

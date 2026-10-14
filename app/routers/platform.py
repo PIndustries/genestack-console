@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Literal
 
@@ -21,6 +22,9 @@ from app.services.demo import (
     is_demo_env,
 )
 from app.services.job_runner import ConflictError, execute_operation
+from app.services.request_safety import client_detail, log_field
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["platform"])
 
@@ -80,7 +84,8 @@ class MutateBody(BaseModel):
 
 
 def _conflict_http(exc: ConflictError) -> HTTPException:
-    detail: dict[str, Any] = {"message": str(exc)}
+    log.warning("%s", log_field(exc))
+    detail: dict[str, Any] = {"message": client_detail(exc)}
     if exc.job_id:
         detail["conflicting_job_id"] = exc.job_id
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)

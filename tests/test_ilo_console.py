@@ -212,7 +212,7 @@ def test_console_session_login_error(client, admin_headers, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is False
-    assert "401" in body["error"]
+    assert body["error"] == "The request failed."
 
 
 def test_asset_proxy_rewrites_socket_js(client, admin_headers, monkeypatch):

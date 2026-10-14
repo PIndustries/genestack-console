@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +15,9 @@ from app.models import Environment
 from app.schemas import Principal
 from app.services import overlays
 from app.services.job_runner import JobRunner
+from app.services.request_safety import client_detail, log_field
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["overlays"])
 
@@ -24,10 +28,11 @@ class OverlayPut(BaseModel):
 
 
 def _http(exc: Exception) -> HTTPException:
+    log.warning("%s", log_field(exc))
     if isinstance(exc, overlays.OverlayNotFound):
         return HTTPException(status_code=404, detail="overlay file not found")
     if isinstance(exc, overlays.OverlayError):
-        return HTTPException(status_code=400, detail=str(exc))
+        return HTTPException(status_code=400, detail=client_detail(exc))
     return HTTPException(status_code=500, detail="overlay failed")
 
 
