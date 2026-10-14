@@ -1793,7 +1793,7 @@ def _push_file_local(
         shutil.copy2(target, backup)
         _log(log, f"[backup] {target} -> {backup}")
     target.write_bytes(data)
-    os.chmod(target, 0o644)
+    os.chmod(target, 0o640)
     _log(log, f"[write] {target} ({len(data)} bytes)")
 
 

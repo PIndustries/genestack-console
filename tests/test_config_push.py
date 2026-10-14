@@ -141,9 +141,9 @@ def test_push_local_writes_files_and_backs_up(client, admin_headers, tmp_path):
     overrides = config_dir / "helm-configs" / "keystone" / "console-rendered.yaml"
     assert yaml.safe_load(overrides.read_text()) == {"replicas": 3}
 
-    # Files are written 0644
+    # Files are written 0640
     mode = stat.S_IMODE(os.stat(config_dir / "provider").st_mode)
-    assert mode == 0o644
+    assert mode == 0o640
 
     # The pre-existing provider file was backed up under .console-backup/<ts>/
     backups = list((config_dir / ".console-backup").glob("*/provider"))
