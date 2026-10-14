@@ -35,6 +35,7 @@ from app.services.crypto import encrypt_secret
 from app.services.events import publish_sync
 from app.services.inventory import build_inventory_from_environment
 from app.services.job_runner import JobRunner
+from app.services.request_safety import client_detail, configured_path, log_field
 from app.services.ssh_keys import store_key_pair
 
 router = APIRouter(prefix="/api/v1/environments", tags=["environments"])
@@ -127,12 +128,18 @@ def create_environment(
         kubeconfig_data = encrypt_secret(kubeconfig_data)
 
     config_dir = (body.genestack_config_dir or "").strip()
-    if not config_dir:
-        config_dir = _default_genestack_config_dir(settings.data_dir, body.name)
+    if config_dir:
         try:
-            Path(config_dir).mkdir(parents=True, exist_ok=True)
-        except OSError:
-            pass
+            resolved = configured_path(config_dir)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid config directory") from exc
+    else:
+        config_dir = _default_genestack_config_dir(settings.data_dir, body.name)
+        resolved = Path(config_dir)
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
     env = Environment(
         name=body.name,
@@ -371,7 +378,8 @@ def put_environment_registry(
             db, env, principal.username, host, upstreams, images
         )
     except envconfig_service.ConfigValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        log.warning("registry config rejected: %s", log_field(exc))
+        raise HTTPException(status_code=422, detail=client_detail(exc)) from exc
     except (envconfig_service.ConfigConflictError, IntegrityError) as exc:
         db.rollback()
         raise HTTPException(

@@ -31,6 +31,7 @@ from app.models import Environment
 from app.schemas import Principal
 from app.services import baremetal as baremetal_service
 from app.services import ilo_console as ilo_svc
+from app.services.request_safety import client_detail, log_field
 
 log = logging.getLogger(__name__)
 
@@ -106,17 +107,24 @@ def create_ilo_console_session(
         )
     except ilo_svc.IloConsoleError as exc:
         log.warning(
-            "ilo console login failed env=%s node=%s: %s", env.id, node.name, exc
+            "ilo console login failed env=%s node=%s: %s",
+            log_field(env.id),
+            log_field(node.name),
+            log_field(exc),
         )
         return {
             "ok": False,
             "node_id": node_id,
             "session_id": None,
             "embed_url": None,
-            "error": str(exc),
+            "error": client_detail(exc),
         }
     except Exception:  # noqa: BLE001
-        log.warning("ilo console session failed env=%s node=%s", env.id, node.name)
+        log.warning(
+            "ilo console session failed env=%s node=%s",
+            log_field(env.id),
+            log_field(node.name),
+        )
         return {
             "ok": False,
             "node_id": node_id,
@@ -128,10 +136,10 @@ def create_ilo_console_session(
     embed_url = f"{prefix}/irc.html?token={session_key}"
     log.info(
         "ilo console session created env=%s node=%s session=%s user=%s",
-        env.id,
-        node.name,
-        session_id,
-        principal.username,
+        log_field(env.id),
+        log_field(node.name),
+        log_field(session_id),
+        log_field(principal.username),
     )
     return {
         "ok": True,
@@ -174,7 +182,11 @@ def _proxy_asset(
             extra_headers=extra_headers,
         )
     except ilo_svc.IloConsoleError:
-        log.warning("ilo asset proxy failed env=%s path=%s", environment_id, rel)
+        log.warning(
+            "ilo asset proxy failed env=%s path=%s",
+            log_field(environment_id),
+            log_field(rel),
+        )
         if html:
             return _html_error()
         raise HTTPException(
@@ -307,13 +319,17 @@ async def ilo_kvm_socket(
         except Exception as exc:  # noqa: BLE001
             log.warning(
                 "ilo kvm upstream failed env=%s session=%s err=%s",
-                environment_id,
-                session_id,
-                type(exc).__name__,
+                log_field(environment_id),
+                log_field(session_id),
+                log_field(type(exc).__name__),
             )
             await websocket.close(code=CLOSE_UPSTREAM)
             return
-        log.info("ilo kvm open env=%s node=%s", environment_id, session.node_name)
+        log.info(
+            "ilo kvm open env=%s node=%s",
+            log_field(environment_id),
+            log_field(session.node_name),
+        )
         await _bridge(websocket, upstream)
     finally:
         if upstream is not None:

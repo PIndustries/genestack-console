@@ -59,6 +59,10 @@ _TOKEN_QUERY_RE = re.compile(r"([?&])token=[^&\"'\s#]*")
 class NovncProxyError(RuntimeError):
     """Kube / nova-novncproxy HTTP or TLS setup failed."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 @dataclass(frozen=True)
 class NovncSession:

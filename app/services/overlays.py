@@ -28,6 +28,7 @@ import yaml
 from app.config import Settings, get_settings
 from app.models import Environment
 from app.services.envcontext import build_context
+from app.services.request_safety import client_detail, log_field
 
 log = logging.getLogger(__name__)
 
@@ -189,9 +190,17 @@ _added_repos: set[str] = set()
 class OverlayError(ValueError):
     """Invalid overlay path or content."""
 
+    def __init__(self, message: str) -> None:
+        self.public_detail = message
+        super().__init__(message)
+
 
 class OverlayNotFound(FileNotFoundError):
     """Requested overlay file does not exist."""
+
+    def __init__(self, message: str) -> None:
+        self.public_detail = message
+        super().__init__(message)
 
 
 def merge_dicts(base: Any, overrides: Any) -> Any:
@@ -457,7 +466,12 @@ def ensure_helm_repo(helm: str, name: str, url: str) -> bool:
         with _helm_lock:
             _added_repos.add(name)
         return True
-    log.info("helm repo add %s: %s", name, (err or "").strip().splitlines()[-1:] or err)
+    lines = (err or "").strip().splitlines()
+    log.info(
+        "helm repo add %s: %s",
+        log_field(name),
+        log_field(lines[-1] if lines else err),
+    )
     return False
 
 
@@ -516,7 +530,7 @@ def load_helm_chart_values(
             _HELM_CACHE[key] = (now, data)
         return copy.deepcopy(data), f"{ref}:{version}"
     if last_err:
-        log.info("helm show values %s: %s", service, last_err)
+        log.info("helm show values %s: %s", log_field(service), log_field(last_err))
     return {}, None
 
 
@@ -966,11 +980,14 @@ def sync_overlay_to_state_repo(
             path=repo_rel,
         )
     except Exception as exc:
-        log.info("overlay git sync failed: %s", _truncate_git_error(str(exc)))
+        log.info(
+            "overlay git sync failed: %s",
+            log_field(_truncate_git_error(str(exc))),
+        )
         return _git_sync_result(
             attempted=True,
             path=repo_rel,
-            error=_truncate_git_error(str(exc)),
+            error=client_detail(exc),
         )
 
 
@@ -1040,10 +1057,13 @@ def write_overlay(
         try:
             result["git"] = sync_overlay_to_state_repo(env, rel, file_content)
         except Exception as exc:
-            log.info("overlay git sync failed: %s", _truncate_git_error(str(exc)))
+            log.info(
+                "overlay git sync failed: %s",
+                log_field(_truncate_git_error(str(exc))),
+            )
             result["git"] = _git_sync_result(
                 attempted=True,
-                error=_truncate_git_error(str(exc)),
+                error=client_detail(exc),
             )
         return result
     finally:

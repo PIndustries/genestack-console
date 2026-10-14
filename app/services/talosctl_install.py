@@ -125,7 +125,7 @@ def ensure() -> None:
         if not file_is_elf(tmp):
             log.warning("talosctl download was not a Linux ELF — left unused")
             return
-        os.chmod(tmp, 0o755)
+        os.chmod(tmp, 0o750)
         os.replace(tmp, dest)
         tmp = ""
         log.info("talosctl %s installed at %s", version, dest)

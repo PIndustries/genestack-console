@@ -50,6 +50,7 @@ from app.services.ovh import (
     planned_ovh_tags,
 )
 from app.services.job_runner import ConflictError, execute_operation
+from app.services.request_safety import client_detail, log_field
 
 log = logging.getLogger(__name__)
 
@@ -290,8 +291,20 @@ def _client_for_account(account: OvhAccount, consumer_key: str = "") -> OvhClien
     return client
 
 
+def _ovh_detail(exc: BaseException) -> str:
+    log.warning("%s", log_field(exc))
+    return client_detail(exc)
+
+
 def _raise_ovh(exc: OvhError) -> None:
-    raise HTTPException(status_code=exc.status_code or 502, detail=str(exc)) from exc
+    raise HTTPException(status_code=exc.status_code or 502, detail=_ovh_detail(exc)) from exc
+
+
+def _conflict_http(exc: ConflictError) -> HTTPException:
+    detail: dict[str, Any] = {"message": _ovh_detail(exc)}
+    if exc.job_id:
+        detail["conflicting_job_id"] = exc.job_id
+    return HTTPException(status_code=409, detail=detail)
 
 
 # ----------------------------------------------------------------------
@@ -735,7 +748,11 @@ def bind_ovh_account(
             adopted = result.get("adopted") or []
             adopt_version = result.get("version")
         except OvhError as exc:
-            log.warning("OVH adopt on bind failed for env %s: %s", env.id, exc)
+            log.warning(
+                "OVH adopt on bind failed for env %s: %s",
+                log_field(env.id),
+                log_field(exc),
+            )
     db.commit()
     db.refresh(env)
     return {
@@ -889,10 +906,7 @@ def env_ovh_vrack_attach(
             run_sync=body.run_sync,
         )
     except ConflictError as exc:
-        detail: dict[str, Any] = {"message": str(exc)}
-        if exc.job_id:
-            detail["conflicting_job_id"] = exc.job_id
-        raise HTTPException(status_code=409, detail=detail) from exc
+        raise _conflict_http(exc) from exc
     db.refresh(job)
     return {
         "ok": True,
@@ -947,10 +961,7 @@ def env_ovh_vrack_provision(
                 run_sync=False,
             )
         except ConflictError as exc:
-            detail: dict[str, Any] = {"message": str(exc)}
-            if exc.job_id:
-                detail["conflicting_job_id"] = exc.job_id
-            raise HTTPException(status_code=409, detail=detail) from exc
+            raise _conflict_http(exc) from exc
         db.refresh(job)
         job_payload = {
             "job_id": job.id,
@@ -1017,7 +1028,7 @@ def env_ovh_vrack_nics(
             ),
         )
     except envconfig_service.ConfigValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=_ovh_detail(exc)) from exc
     db.commit()
     return {
         "ok": True,
@@ -1079,17 +1090,17 @@ def env_ovh_templates(
             # osAvailabilities is not guaranteed on every region; degrade
             # rather than hide the per-server lists.
             out["hardware_templates"] = []
-            out["hardware_templates_error"] = str(exc)
+            out["hardware_templates_error"] = _ovh_detail(exc)
         try:
             out["compatible"] = client.list_compatible_templates(server)
         except OvhError as exc:
             out["compatible"] = {}
-            out["compatible_error"] = str(exc)
+            out["compatible_error"] = _ovh_detail(exc)
         try:
             out["status"] = client.install_status(server)
         except OvhError as exc:
             out["status"] = None
-            out["status_error"] = str(exc)
+            out["status_error"] = _ovh_detail(exc)
         return out
     except OvhError as exc:
         _raise_ovh(exc)
@@ -1130,10 +1141,7 @@ def env_ovh_byoi_reinstall(
             run_sync=body.run_sync,
         )
     except ConflictError as exc:
-        detail: dict[str, Any] = {"message": str(exc)}
-        if exc.job_id:
-            detail["conflicting_job_id"] = exc.job_id
-        raise HTTPException(status_code=409, detail=detail) from exc
+        raise _conflict_http(exc) from exc
     db.refresh(job)
     return {
         "ok": True,

@@ -16,6 +16,7 @@ and under the session path, and so HTTP (not only HTTPS) pages use ``ws://``.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import secrets
 import threading
@@ -92,6 +93,10 @@ UNAVAILABLE_HTML = (
 class IloConsoleError(RuntimeError):
     """iLO JSON login or HTTP fetch failed."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 @dataclass(frozen=True)
 class IloSession:
@@ -167,18 +172,97 @@ def _reset() -> None:
         _store.clear()
 
 
+_BMC_HOST_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$"
+)
+_BMC_IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+_BMC_IPV6_RE = re.compile(r"^[0-9A-Fa-f:.]{2,128}$")
+
+
+def _split_bmc_host_port(hostport: str) -> tuple[str, int | None]:
+    if hostport.startswith("["):
+        bracket = hostport.find("]")
+        if bracket <= 1:
+            raise IloConsoleError("invalid BMC address")
+        host = hostport[1:bracket]
+        tail = hostport[bracket + 1 :]
+        if tail == "":
+            return host, None
+        if not tail.startswith(":") or not tail[1:].isdigit() or len(tail) > 6:
+            raise IloConsoleError("invalid BMC address")
+        return host, int(tail[1:])
+    if hostport.count(":") > 1:
+        return hostport, None
+    if ":" in hostport:
+        host, _, port_text = hostport.rpartition(":")
+        if not host or not port_text.isdigit() or len(port_text) > 5:
+            raise IloConsoleError("invalid BMC address")
+        return host, int(port_text)
+    return hostport, None
+
+
+def _safe_bmc_host(host: str) -> str | None:
+    """Hostname or IP, as text that matched a host check. No zone id."""
+    if not host or len(host) > 253:
+        return None
+    v4 = _BMC_IPV4_RE.fullmatch(host)
+    if v4 is not None:
+        try:
+            ipaddress.IPv4Address(v4.group(0))
+        except ValueError:
+            return None
+        return v4.group(0)
+    if ":" in host:
+        v6 = _BMC_IPV6_RE.fullmatch(host)
+        if v6 is None:
+            return None
+        try:
+            addr = ipaddress.IPv6Address(v6.group(0))
+        except ValueError:
+            return None
+        if addr.scope_id:
+            return None
+        return "[" + v6.group(0) + "]"
+    match = _BMC_HOST_RE.fullmatch(host)
+    if match is None:
+        return None
+    return match.group(0)
+
+
 def bmc_origin(host: str) -> str:
-    host = (host or "").strip().rstrip("/")
-    if host.startswith(("http://", "https://")):
-        return host
-    return f"https://{host}"
+    """https origin from a BMC host and optional port. No userinfo or path."""
+    raw = str(host or "")
+    if any(ord(ch) < 32 or ch == "\x7f" or ch in "@\\?#" for ch in raw):
+        raise IloConsoleError("invalid BMC address")
+    text = raw.strip()
+    if not text or " " in text:
+        raise IloConsoleError("invalid BMC address")
+    body = text
+    if "://" in body:
+        scheme, _, rest = body.partition("://")
+        if scheme.lower() not in {"http", "https"} or not rest:
+            raise IloConsoleError("invalid BMC address")
+        body = rest
+    body = body.rstrip("/")
+    if not body or "/" in body:
+        raise IloConsoleError("invalid BMC address")
+    hostname, port = _split_bmc_host_port(body)
+    if port is not None and not 0 <= port <= 65535:
+        raise IloConsoleError("invalid BMC address")
+    safe = _safe_bmc_host(hostname)
+    if safe is None:
+        raise IloConsoleError("invalid BMC address")
+    if port is None:
+        return f"https://{safe}"
+    return f"https://{safe}:{port}"
 
 
 def json_login(host: str, username: str, password: str) -> str:
     """iLO 4 JSON login; returns session_key. Never logs the password."""
     origin = bmc_origin(host)
     try:
-        with httpx.Client(verify=False, timeout=15.0, follow_redirects=True) as client:
+        with httpx.Client(verify=False, timeout=15.0, follow_redirects=False) as client:
             response = client.post(
                 f"{origin}/json/login_session",
                 json={
@@ -219,7 +303,7 @@ def is_safe_console_path(path: str) -> bool:
         return False
     if text in ("irc.html", "favicon.ico"):
         return True
-    if re.match(r"^(?:json|rest|blob)/[A-Za-z0-9._$-/]+$", text):
+    if re.match(r"^(?:json|rest|blob)/[A-Za-z0-9._$/-]+$", text):
         return True
     return bool(_ASSET_RE.match(text))
 
@@ -301,7 +385,7 @@ def fetch_ilo_asset(
                 headers[key] = value
     method = (method or "GET").upper()
     try:
-        with httpx.Client(verify=False, timeout=20.0, follow_redirects=True) as client:
+        with httpx.Client(verify=False, timeout=20.0, follow_redirects=False) as client:
             response = client.request(
                 method,
                 url,

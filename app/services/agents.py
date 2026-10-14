@@ -57,6 +57,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import AgentCredential, DiscoveredBmc, DiscoveredNode, Environment
+from app.services.request_safety import log_field
 
 if TYPE_CHECKING:
     from app.config import Settings
@@ -117,6 +118,10 @@ def verify_proof(token: str, nonce: str, proof: str) -> bool:
 
 class AgentUnavailableError(RuntimeError):
     """No agent connected (or it dropped) for the requested environment."""
+
+    def __init__(self, message: object = "") -> None:
+        self.public_detail = message
+        super().__init__(message)
 
 
 class AgentCommandTimeout(AgentUnavailableError):
@@ -247,10 +252,10 @@ class AgentRegistry:
         q = record.pending.get(cmd_id)
         if q is None:
             log.warning(
-                "agent %s sent %s for unknown command id %r",
-                record.agent_id,
-                frame.get("type"),
-                cmd_id,
+                "agent %s sent %s for unknown command id %s",
+                log_field(record.agent_id),
+                log_field(frame.get("type")),
+                log_field(cmd_id),
             )
             return
         if frame.get("type") == "log":
@@ -422,9 +427,9 @@ class AgentRegistry:
                 raise
             log.warning(
                 "env %s: dispatch to agent %s failed; failing over to agent %s",
-                env_id,
-                record.agent_id,
-                other.agent_id,
+                log_field(env_id),
+                log_field(record.agent_id),
+                log_field(other.agent_id),
             )
             return self._await_result(other, build(other), timeout)
 
@@ -745,7 +750,11 @@ def handle_agent_event(env_id: str, frame: dict[str, Any]) -> bool:
     kind = str(frame.get("kind") or "").strip()
     payload = frame.get("payload")
     if kind not in EVENT_KINDS or not isinstance(payload, dict):
-        log.warning("agent event ignored (env %s): bad kind/payload %r", env_id, kind)
+        log.warning(
+            "agent event ignored (env %s): bad kind/payload %s",
+            log_field(env_id),
+            log_field(kind),
+        )
         return False
 
     db = SessionLocal()
@@ -753,7 +762,9 @@ def handle_agent_event(env_id: str, frame: dict[str, Any]) -> bool:
         if kind == "pxe_request":
             mac = (_event_str(payload, "mac", 32) or "").lower()
             if not mac:
-                log.warning("pxe_request ignored (env %s): missing mac", env_id)
+                log.warning(
+                    "pxe_request ignored (env %s): missing mac", log_field(env_id)
+                )
                 return False
             upsert_discovered_node(
                 db,
@@ -767,7 +778,11 @@ def handle_agent_event(env_id: str, frame: dict[str, Any]) -> bool:
             try:
                 ip = str(ipaddress.ip_address(ip))
             except ValueError:
-                log.warning("bmc_found ignored (env %s): bad ip %r", env_id, ip)
+                log.warning(
+                    "bmc_found ignored (env %s): bad ip %s",
+                    log_field(env_id),
+                    log_field(ip),
+                )
                 return False
             upsert_discovered_bmc(
                 db,
@@ -780,7 +795,10 @@ def handle_agent_event(env_id: str, frame: dict[str, Any]) -> bool:
         return True
     except Exception:  # noqa: BLE001 — a bad event must never kill the WS loop
         log.warning(
-            "agent event ingest failed (env %s, kind %s)", env_id, kind, exc_info=True
+            "agent event ingest failed (env %s, kind %s)",
+            log_field(env_id),
+            log_field(kind),
+            exc_info=True,
         )
         db.rollback()
         return False
@@ -1151,7 +1169,7 @@ def seed_default_local_agent(
             log.warning(
                 "local-agent seed skipped: agent.default_environment_id=%s "
                 "does not match any environment.",
-                settings.agent_default_environment_id,
+                log_field(settings.agent_default_environment_id),
             )
             return
 
@@ -1180,9 +1198,9 @@ def seed_default_local_agent(
             "would disconnect any agent currently using it. Re-create the "
             "token explicitly via the API (POST /environments/{id}/agent/token) "
             "if a rotation is intended.",
-            env.id,
-            env.name,
-            token_file,
+            log_field(env.id),
+            log_field(env.name),
+            log_field(token_file),
         )
         return
 
@@ -1195,10 +1213,10 @@ def seed_default_local_agent(
     try:
         token_file.chmod(0o600)
     except OSError:
-        log.warning("could not chmod 0600 %s", token_file)
+        log.warning("could not chmod 0600 %s", log_field(token_file))
     log.info(
         "seeded local-agent credential for environment %s (%s); token written to %s",
-        env.id,
-        env.name,
-        token_file,
+        log_field(env.id),
+        log_field(env.name),
+        log_field(token_file),
     )

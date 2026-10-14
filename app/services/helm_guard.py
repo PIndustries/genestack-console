@@ -355,7 +355,7 @@ def install_helm_guard(dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     path = dest / "helm"
     path.write_text(render_helm_guard(), encoding="utf-8")
-    os.chmod(path, 0o755)
+    os.chmod(path, 0o750)
     return path
 
 
@@ -445,7 +445,7 @@ def install_yq_shim(dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     path = dest / "yq"
     path.write_text(_YQ_SHIM, encoding="utf-8")
-    os.chmod(path, 0o755)
+    os.chmod(path, 0o750)
     return path
 
 

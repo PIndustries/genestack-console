@@ -24,6 +24,7 @@ import yaml
 from app.config import Settings, get_settings
 from app.models import Environment
 from app.services.catalog import PLAYBOOK_ALLOWLIST
+from app.services.request_safety import configured_path
 from app.services.service_registry import SERVICE_NAME_RE, discover_deployable_services
 
 LogFn = Callable[[str], None]
@@ -40,13 +41,13 @@ def resolve_genestack_root(
 ) -> Path:
     settings = settings or get_settings()
     if env and env.genestack_path:
-        return Path(env.genestack_path).expanduser().resolve()
-    return Path(settings.genestack_root).expanduser().resolve()
+        return configured_path(env.genestack_path)
+    return configured_path(str(settings.genestack_root))
 
 
 def resolve_ansible_root(settings: Settings | None = None) -> Path:
     settings = settings or get_settings()
-    return Path(settings.ansible_root).expanduser().resolve()
+    return configured_path(str(settings.ansible_root))
 
 
 def resolve_components_path(
@@ -59,7 +60,7 @@ def resolve_components_path(
     (scope "global", legacy behavior). Reads and writes share this rule.
     """
     if env and env.genestack_config_dir:
-        config_dir = Path(env.genestack_config_dir).expanduser().resolve()
+        config_dir = configured_path(env.genestack_config_dir)
         return config_dir / "openstack-components.yaml", "environment"
     return resolve_genestack_root(settings, env) / "openstack-components.yaml", "global"
 

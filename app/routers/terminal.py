@@ -60,6 +60,7 @@ from app.models import BaremetalNode, Environment
 from app.schemas import Principal
 from app.services import envconfig, tickets
 from app.services.job_runner import JobRunner
+from app.services.request_safety import client_detail, log_field
 from app.services.ssh_access import login_for_server
 from app.services.ssh_keys import get_decrypted_private_key
 
@@ -147,9 +148,19 @@ def _write_audit(actor: str, action: str, env_id: str, details: dict[str, Any]) 
         )
         db.commit()
     except Exception:  # noqa: BLE001 — audit must never break the session
-        log.warning("terminal audit write failed (%s)", action, exc_info=True)
+        log.warning(
+            "terminal audit write failed (%s)", log_field(action), exc_info=True
+        )
     finally:
         db.close()
+
+
+class _TerminalError(ValueError):
+    """A terminal request we refuse. The message is safe to show."""
+
+    def __init__(self, message: str) -> None:
+        self.public_detail = message
+        super().__init__(message)
 
 
 class _InventoryReject(Exception):
@@ -158,6 +169,8 @@ class _InventoryReject(Exception):
     def __init__(self, code: int, reason: str) -> None:
         self.code = code
         self.reason = reason
+        self.public_detail = reason
+        super().__init__(reason)
 
 
 def _inventory_target(db: Session, env: Environment, machine: str) -> tuple[str, str]:
@@ -243,7 +256,9 @@ def _target_argv(env_host: str, env_user: str | None, identity_file: str | None 
         return shlex.split(override)
     host = (env_host or "").strip()
     if not host:
-        raise ValueError("terminal requires a deploy host; local-shell fallback removed")
+        raise _TerminalError(
+            "terminal requires a deploy host; local-shell fallback removed"
+        )
     user = (env_user or "").strip() or "root"
     # Defense in depth: username must stay a single ssh destination component.
     if (
@@ -253,7 +268,7 @@ def _target_argv(env_host: str, env_user: str | None, identity_file: str | None 
         or "@" in user
         or "proxycommand" in user.lower()
     ):
-        raise ValueError("refusing unsafe deployer_ssh_user for terminal ssh")
+        raise _TerminalError("refusing unsafe deployer_ssh_user for terminal ssh")
     argv = [
         "ssh",
         "-o",
@@ -378,7 +393,9 @@ class TerminalSession:
         except WebSocketDisconnect:
             pass
         except Exception:  # noqa: BLE001 — never let a session crash the app
-            log.warning("terminal session error (env %s)", self.env_id, exc_info=True)
+            log.warning(
+                "terminal session error (env %s)", log_field(self.env_id), exc_info=True
+            )
         finally:
             await self.finish(reason="client disconnected")
 
@@ -462,10 +479,10 @@ class TerminalSession:
         )
         log.info(
             "terminal closed: actor=%s env=%s target=%s reason=%s",
-            self.actor,
-            self.env_id,
-            self.target,
-            reason,
+            log_field(self.actor),
+            log_field(self.env_id),
+            log_field(self.target),
+            log_field(reason),
         )
         if close_ws:
             try:
@@ -475,7 +492,7 @@ class TerminalSession:
 
 
 async def _reject(ws: WebSocket, code: int, reason: str) -> None:
-    log.warning("terminal connect rejected: %s", reason)
+    log.warning("terminal connect rejected: %s", log_field(reason))
     await ws.close(code=code, reason=reason)
 
 
@@ -560,12 +577,14 @@ async def terminal_ws(
     except ValueError as exc:
         _drop_identity(identity_path)
         session.identity_path = None
-        await _reject(ws, CLOSE_NO_DEPLOYER, str(exc))
+        log.warning("%s", log_field(exc))
+        await _reject(ws, CLOSE_NO_DEPLOYER, client_detail(exc))
         return
     except (OSError, FileNotFoundError) as exc:
         _drop_identity(identity_path)
         session.identity_path = None
-        await _reject(ws, CLOSE_SPAWN_FAILED, f"failed to spawn ssh: {exc}")
+        log.warning("%s", log_field(exc))
+        await _reject(ws, CLOSE_SPAWN_FAILED, client_detail(exc))
         return
     _sessions[key] = session
     _write_audit(
@@ -574,5 +593,10 @@ async def terminal_ws(
         env_id,
         {"target": target, "auth_method": principal.auth_method},
     )
-    log.info("terminal opened: actor=%s env=%s target=%s", principal.username, env_id, target)
+    log.info(
+        "terminal opened: actor=%s env=%s target=%s",
+        log_field(principal.username),
+        log_field(env_id),
+        log_field(target),
+    )
     await session.run()

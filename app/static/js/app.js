@@ -21,15 +21,6 @@ const PAGES = { fleet, hosts, environments, hardware, activity, operations, obse
 // Pages reached via cross-page navigation that should highlight another nav item.
 const NAV_ALIAS = { setup: "fleet", environments: "fleet" };
 
-// Legacy hashes from before the nav collapse — send each to its new home.
-const ROUTE_REDIRECTS = {
-  dashboard: () => "#/fleet",
-  machines: () => "#/hardware?tab=baremetal",
-  alerts: () => "#/activity?tab=alerts",
-  audit: () => "#/activity?tab=audit",
-  jobs: (param) => "#/activity?tab=jobs" + (param ? "&job=" + encodeURIComponent(param) : ""),
-};
-
 let current = null;
 let authed = false;
 let alertsStream = null;
@@ -846,8 +837,21 @@ function syncNav(name, param, query) {
 async function route() {
   if (!authed) return;
   const { name, param, query } = parseHash();
-  if (ROUTE_REDIRECTS[name]) {
-    location.replace(ROUTE_REDIRECTS[name](param));
+  // Legacy hashes from before the nav collapse — send each to its new home.
+  if (name === "dashboard") {
+    location.replace("#/fleet");
+    return;
+  } else if (name === "machines") {
+    location.replace("#/hardware?tab=baremetal");
+    return;
+  } else if (name === "alerts") {
+    location.replace("#/activity?tab=alerts");
+    return;
+  } else if (name === "audit") {
+    location.replace("#/activity?tab=audit");
+    return;
+  } else if (name === "jobs") {
+    location.replace("#/activity?tab=jobs" + (param ? "&job=" + encodeURIComponent(param) : ""));
     return;
   }
   const page = PAGES[name] || PAGES.fleet;

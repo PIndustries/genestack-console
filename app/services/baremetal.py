@@ -37,6 +37,7 @@ from app.services.bootselect import (
     validate_report,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.request_safety import under_root
 
 LogFn = Callable[[str], None]
 
@@ -613,7 +614,10 @@ def record_boot_fetch(root: str, url_path: str) -> None:
     filename = url_path.rstrip("/").rsplit("/", 1)[-1]
     mac = filename[: -len(".ipxe")] if filename.endswith(".ipxe") else ""
     profile = "unknown"
-    script_path = Path(root) / "mac" / filename
+    try:
+        script_path = under_root(Path(root) / "mac", filename)
+    except ValueError:
+        return
     if script_path.is_file():
         profile = profile_from_script(script_path.read_text(encoding="utf-8"))
     with SessionLocal() as db:

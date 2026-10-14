@@ -9,6 +9,7 @@ X-API-Key, so that id is the capability.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -23,6 +24,7 @@ from app.models import Environment
 from app.schemas import Principal
 from app.services import horizon_proxy as hz
 from app.services.envcontext import build_context
+from app.services.request_safety import client_detail, log_field
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +32,14 @@ router = APIRouter(prefix="/api/v1", tags=["horizon"])
 _operator_env = get_env_scoped("operator")
 _METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 _PASS = frozenset({"accept", "content-type", "x-csrftoken", "x-requested-with"})
+_COOKIE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_COOKIE_VALUE_RE = re.compile(r"^[A-Za-z0-9._~+/-]{0,4096}$")
+_COOKIE_ATTR_RE = re.compile(
+    r"^(?:; (?:Path=/[A-Za-z0-9._~/+-]{0,512}"
+    r"|Secure|HttpOnly|SameSite=(?:Lax|Strict|None)"
+    r"|Max-Age=[0-9]{1,10}|Expires=[A-Za-z0-9, :+-]{1,80}))*$",
+    re.IGNORECASE,
+)
 
 
 def _session_or_404(session_id: str, environment_id: str) -> hz.HorizonSession:
@@ -43,26 +53,56 @@ def _failed(error: str) -> dict[str, Any]:
     return {"ok": False, "session_id": None, "embed_url": None, "error": error}
 
 
+def _cookie_match(name: str, value: str) -> tuple[str, str] | None:
+    name_match = _COOKIE_NAME_RE.fullmatch(name.strip())
+    value_match = _COOKIE_VALUE_RE.fullmatch(value)
+    if name_match is None or value_match is None:
+        return None
+    return name_match.group(0), value_match.group(0)
+
+
 def _browser_cookies(session: hz.HorizonSession, upstream: list[str]) -> list[str]:
     """Give the iframe the login cookies. Horizon JS must be able to read csrftoken."""
     seen: set[str] = set()
     for raw in upstream:
-        name = raw.split("=", 1)[0].strip().lower()
-        if name:
-            seen.add(name)
+        name = raw.split("=", 1)[0].strip()
+        name_match = _COOKIE_NAME_RE.fullmatch(name)
+        if name_match is not None:
+            seen.add(name_match.group(0).lower())
     extra: list[str] = []
     for name, value in session.cookies.items():
-        key = str(name).strip()
-        text = str(value)
-        if not key or key.lower() in seen:
+        pair = _cookie_match(str(name), str(value))
+        if pair is None:
             continue
-        if any(ch in key or ch in text for ch in "\r\n;"):
+        key, text = pair
+        if key.lower() in seen:
             continue
         flags = "; SameSite=Lax"
         if key.lower() != "csrftoken":
             flags += "; HttpOnly"
         extra.append(f"{key}={text}{flags}")
     return extra
+
+
+def _accept_set_cookie(header: str) -> str | None:
+    """Keep a Set-Cookie only when its name and value match the allowlist."""
+    raw = (header or "").strip()
+    if not raw or "=" not in raw:
+        return None
+    pair, sep, rest = raw.partition(";")
+    name, eq, value = pair.strip().partition("=")
+    if not eq:
+        return None
+    matched = _cookie_match(name, value.strip())
+    if matched is None:
+        return None
+    key, text = matched
+    if not sep:
+        return f"{key}={text}"
+    attr_match = _COOKIE_ATTR_RE.fullmatch(";" + rest)
+    if attr_match is None:
+        return None
+    return f"{key}={text}{attr_match.group(0)}"
 
 
 @router.post("/environments/{environment_id}/cloud/horizon/session")
@@ -164,7 +204,8 @@ async def _proxy(
             extra_headers=extra,
         )
     except hz.HorizonProxyError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        log.warning("%s", log_field(exc))
+        raise HTTPException(status_code=502, detail=client_detail(exc)) from exc
     finally:
         ctx.cleanup()
     media = headers.get("content-type") or headers.get("Content-Type") or "application/octet-stream"
@@ -181,8 +222,9 @@ async def _proxy(
     secure = request.url.scheme == "https"
     for raw in list(set_cookies) + _browser_cookies(session, set_cookies):
         rewritten = hz.rewrite_set_cookie(raw, prefix, secure=secure)
-        if rewritten:
-            response.headers.append("set-cookie", rewritten)
+        accepted = _accept_set_cookie(rewritten or "")
+        if accepted:
+            response.headers.append("set-cookie", accepted)
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
     return response

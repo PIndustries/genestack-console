@@ -52,6 +52,7 @@ import httpx
 
 from app.config import Settings
 from app.services.job_runner import ImageDownloadError, download_factory_image
+from app.services.request_safety import under_root
 
 LogFn = Callable[[str], None]
 
@@ -61,6 +62,10 @@ DEFAULT_NETMASK = "255.255.255.0"
 
 class PxeError(RuntimeError):
     """PXE config/asset preparation failed (bad section, unusable image)."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
 
 
 def _log(log: LogFn | None, msg: str) -> None:
@@ -533,7 +538,10 @@ def ensure_assets_and_config(
                         "enable per-agent PXE provisioning"
                     ),
                 }
-            root = Path(settings.data_dir) / "pxe" / agent_id
+            try:
+                root = under_root(Path(settings.data_dir) / "pxe", str(agent_id))
+            except ValueError:
+                return {"ok": False, "error": "invalid agent id"}
         else:
             pxe_cfg = doc.get("pxe")
             if not isinstance(pxe_cfg, dict) or not pxe_cfg:
@@ -545,7 +553,7 @@ def ensure_assets_and_config(
                         "config to enable console-managed PXE provisioning"
                     ),
                 }
-            root = Path(settings.data_dir) / "pxe"
+            root = under_root(Path(settings.data_dir), "pxe")
 
         nodes = _baremetal_nodes(doc)
         seen_macs = {str(node.get("pxe_mac") or "").lower() for node in nodes}
@@ -751,7 +759,10 @@ def render_env_pxe_status(
     for cred in creds:
         cfg = cred.pxe_config or {}
         agent_id = cred.id
-        root = Path(settings.data_dir) / "pxe" / agent_id
+        try:
+            root = under_root(Path(settings.data_dir) / "pxe", str(agent_id))
+        except ValueError:
+            continue
         http_port = int(cfg.get("http_port") or DEFAULT_HTTP_PORT)
         next_server = str(cfg.get("next_server") or cfg.get("gateway") or "").strip()
         running = False

@@ -123,6 +123,8 @@ def test_is_safe_console_path():
     assert ilo_svc.is_safe_console_path("json/login_session")
     assert ilo_svc.is_safe_console_path("json/ui_events/12")
     assert ilo_svc.is_safe_console_path("rest/v1/Systems/1")
+    assert ilo_svc.is_safe_console_path("json/foo-bar")
+    assert not ilo_svc.is_safe_console_path("json/foo&bar")
     assert not ilo_svc.is_safe_console_path("../etc/passwd")
     assert not ilo_svc.is_safe_console_path("/json/login_session")
     assert not ilo_svc.is_safe_console_path("js/foo.js?x=1")
@@ -131,6 +133,13 @@ def test_is_safe_console_path():
 def test_bmc_origin_adds_https():
     assert ilo_svc.bmc_origin("192.0.2.5") == "https://192.0.2.5"
     assert ilo_svc.bmc_origin("https://ilo.example/") == "https://ilo.example"
+    assert ilo_svc.bmc_origin("http://ilo.example:443/") == "https://ilo.example:443"
+    with pytest.raises(ilo_svc.IloConsoleError):
+        ilo_svc.bmc_origin("https://user:pass@ilo.example/latest")
+    with pytest.raises(ilo_svc.IloConsoleError):
+        ilo_svc.bmc_origin("ilo.example/path")
+    with pytest.raises(ilo_svc.IloConsoleError):
+        ilo_svc.bmc_origin("ilo.example\n.evil")
 
 
 def _suffix() -> str:
@@ -212,7 +221,7 @@ def test_console_session_login_error(client, admin_headers, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is False
-    assert "401" in body["error"]
+    assert body["error"] == "iLO login HTTP 401"
 
 
 def test_asset_proxy_rewrites_socket_js(client, admin_headers, monkeypatch):
