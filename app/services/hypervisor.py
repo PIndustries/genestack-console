@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.models import HostVM
+from app.services.request_safety import configured_path
 
 LogFn = Callable[[str], None]
 
@@ -59,6 +60,10 @@ class VMNotFoundError(LookupError):
 
 class SerialPathError(ValueError):
     """The stored serial log path fails validation (outside the VM workdir)."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
 
 
 # ---------------------------------------------------------------------------
@@ -297,8 +302,8 @@ def _roots(settings: Settings) -> list[Path]:
     roots: list[Path] = []
     for raw in settings.hypervisor_roots or []:
         try:
-            roots.append(Path(raw).expanduser().resolve())
-        except OSError:
+            roots.append(configured_path(str(raw)))
+        except (OSError, ValueError):
             continue
     return roots
 

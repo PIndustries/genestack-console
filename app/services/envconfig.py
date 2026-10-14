@@ -387,9 +387,17 @@ MANIFEST_FILENAME = ".genestack-manifest.yaml"
 class ConfigConflictError(ValueError):
     """The expected config version is no longer current."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 class ConfigValidationError(ValueError):
     """The config document is invalid (bad YAML, wrong shape, unsafe keys)."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
 
 
 def _log(log: LogFn | None, msg: str) -> None:

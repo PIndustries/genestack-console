@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -32,8 +33,23 @@ def under_root(root: Path, name: str) -> Path:
         raise ValueError("invalid path")
     if name.startswith(("/", "\\")) or ".." in Path(name).parts:
         raise ValueError("invalid path")
-    base = Path(root).resolve()
-    candidate = (base / name).resolve()
-    if not candidate.is_relative_to(base):
+    base = os.path.realpath(root)
+    candidate = os.path.realpath(os.path.join(base, name))
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    if not candidate.startswith(prefix):
         raise ValueError("invalid path")
-    return candidate
+    return Path(candidate)
+
+
+def configured_path(value: str) -> Path:
+    """Resolve an operator-configured path. Reject NUL and ``..`` parts.
+
+    The path stays wherever the operator configured it. This does not force
+    it under a second root.
+    """
+    if not isinstance(value, str) or "\x00" in value:
+        raise ValueError("invalid path")
+    text = value.strip()
+    if ".." in Path(text).parts:
+        raise ValueError("invalid path")
+    return Path(text).expanduser().resolve()

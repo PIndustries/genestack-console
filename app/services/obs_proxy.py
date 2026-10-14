@@ -93,6 +93,10 @@ KINDS: dict[str, dict[str, Any]] = {
 class ObsProxyError(RuntimeError):
     """Could not reach a monitoring dashboard."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 @dataclass
 class ObsSession:

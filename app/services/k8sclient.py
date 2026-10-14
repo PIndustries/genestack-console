@@ -150,6 +150,10 @@ CLUSTER_SCOPED_KINDS = frozenset(
 class K8sError(RuntimeError):
     """Kubernetes API call failed."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 class K8sClient:
     """kube-apiserver REST client (mTLS / bearer from kubeconfig)."""

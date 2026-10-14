@@ -55,6 +55,7 @@ from app.services.catalog import (
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services import secret_lease
 from app.services.envcontext import EnvContext, build_context
+from app.services.request_safety import under_root
 
 log = logging.getLogger(__name__)
 
@@ -89,18 +90,31 @@ class ConflictError(RuntimeError):
     def __init__(self, message: str, job_id: str | None = None):
         super().__init__(message)
         self.job_id = job_id
+        self.public_detail = message
 
 
 class ImageDownloadError(RuntimeError):
     """Factory image download failed (HTTP error or size bound exceeded)."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 class JobCancelledError(RuntimeError):
     """An operator cancelled the job while it was running (between commands)."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
+
 
 class JobDeadlineExceededError(RuntimeError):
     """The per-job deadline (started_at + effective timeout) passed mid-loop."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
 
 
 CANCELLED_ERROR = "cancelled by operator"
@@ -216,8 +230,22 @@ def download_factory_image(
     dest = Path(dest_dir)
     if not filename:
         stem = Path(urlparse(url).path).name or "factory-image"
+        if stem in ("", ".", ".."):
+            stem = "factory-image"
         filename = f"{stem}.img"
-    dest_path = dest / filename
+    if (
+        not filename
+        or filename in (".", "..")
+        or "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or Path(filename).name != filename
+    ):
+        raise ImageDownloadError("invalid download filename")
+    try:
+        dest_path = under_root(dest, filename)
+    except ValueError as exc:
+        raise ImageDownloadError("invalid download filename") from exc
     dest.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256()
     total = 0
@@ -252,6 +280,10 @@ def download_factory_image(
 
 class K8sUpgradeFileError(RuntimeError):
     """The k8s_cluster group_vars file is missing or has no kube_version line."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_detail = message
 
 
 def _read_group_vars_text(
@@ -345,7 +377,7 @@ def _write_group_vars_with_backup(
         if file_path.exists():
             shutil.copy2(file_path, backup_path)
         file_path.write_text(new_text, encoding="utf-8")
-        os.chmod(file_path, 0o644)
+        os.chmod(file_path, 0o640)
     log(f"[backup] {file_path} -> {backup_path}")
     log(f"[write] {file_path} ({len(new_text)} bytes)")
     return backup_path

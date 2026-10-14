@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Generator
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+from app.services.request_safety import configured_path
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +92,7 @@ def _sqlite_path_from_url(url: str) -> Path | None:
     if not path.is_absolute():
         # relative to CWD (typically genestack-console/)
         path = Path.cwd() / path
-    return path
+    return configured_path(os.fspath(path))
 
 
 def _chmod_owner_only(path: Path) -> None:

@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from app.services.request_safety import client_detail, log_field, under_root
+from app.services.request_safety import (
+    client_detail,
+    configured_path,
+    log_field,
+    under_root,
+)
 
 
 class Shown(Exception):
@@ -34,3 +39,24 @@ def test_under_root_keeps_the_name_inside_the_directory(tmp_path: Path):
 def test_under_root_rejects_an_escaping_name(tmp_path: Path, name: str):
     with pytest.raises(ValueError):
         under_root(tmp_path, name)
+
+
+def test_under_root_rejects_a_symlink_that_leaves_the_directory(tmp_path: Path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "escape").symlink_to(outside)
+    with pytest.raises(ValueError):
+        under_root(root, "escape/file")
+
+
+def test_configured_path_resolves_an_operator_path(tmp_path: Path):
+    target = tmp_path / "console.db"
+    assert configured_path(str(target)) == target.resolve()
+
+
+@pytest.mark.parametrize("value", ["../etc/passwd", "/tmp/../etc/passwd", "a\x00b"])
+def test_configured_path_rejects_escape(value: str):
+    with pytest.raises(ValueError):
+        configured_path(value)
