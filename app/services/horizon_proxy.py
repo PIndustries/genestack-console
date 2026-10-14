@@ -333,7 +333,51 @@ def rewrite_html(html: str, prefix: str, public_hosts: tuple[str, ...] = ()) -> 
         "/* iframe ok */",
         text,
     )
-    return text
+    return _rewrite_baked_roots(text, prefix)
+
+
+def _rewrite_baked_roots(text: str, prefix: str) -> str:
+    """Point Horizon's baked WEBROOT and /static/ at the console session.
+
+    The dashboard bundle starts with ``var WEBROOT="/";var STATIC_URL="/static/"``.
+    The header reload then requests ``/header/`` on the console origin, and
+    fonts and Angular templates do the same with ``/static/``.
+    """
+    prefix = prefix.rstrip("/")
+
+    def _static(match: re.Match[str]) -> str:
+        return f"{match.group('q')}{prefix}/"
+
+    text = re.sub(
+        r"""(\bWEBROOT\s*=\s*["'])/(?!/)""",
+        rf"\1{prefix}/",
+        text,
+    )
+    return re.sub(
+        r"""(?P<q>["'])/(?=static/)""",
+        _static,
+        text,
+    )
+
+
+def rewrite_js(js: str, prefix: str) -> str:
+    """Rewrite a Horizon JavaScript file. See ``_rewrite_baked_roots``."""
+    return _rewrite_baked_roots(js, prefix)
+
+
+def rewrite_css(css: str, prefix: str) -> str:
+    """Keep font and image urls on the Horizon session."""
+    prefix = prefix.rstrip("/")
+
+    def _url(match: re.Match[str]) -> str:
+        return f"{match.group('lead')}{prefix}/"
+
+    return re.sub(
+        r"""(?P<lead>url\(\s*["']?)/(?=static/)""",
+        _url,
+        css,
+        flags=re.I,
+    )
 
 
 def _admin_password(kube: httpx.Client, apiserver: str) -> str:

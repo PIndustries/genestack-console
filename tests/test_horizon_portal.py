@@ -100,6 +100,47 @@ def test_session_failure_is_not_a_500(monkeypatch):
     assert "not found" in body["error"]
 
 
+def test_rewrite_keeps_webroot_and_static_on_the_session():
+    prefix = "/api/v1/environments/env-1/cloud/horizon/hz_abc"
+    html = '<script src="/static/app.js"></script> conf.static_url = "/static/";'
+    rewritten = hz.rewrite_html(html, prefix)
+    assert rewritten.count(prefix) == 2
+    assert f'src="{prefix}/static/app.js"' in rewritten
+    assert f'conf.static_url = "{prefix}/static/";' in rewritten
+
+    js = 'var STATIC_URL="/static/";var WEBROOT="/";var t="/static/app/x.html";'
+    rewritten = hz.rewrite_js(js, prefix)
+    assert f'var STATIC_URL="{prefix}/static/";' in rewritten
+    assert f'var WEBROOT="{prefix}/";' in rewritten
+    assert f'var t="{prefix}/static/app/x.html";' in rewritten
+    assert 'WEBROOT="/"' not in rewritten.replace(f'WEBROOT="{prefix}/"', "")
+
+    css = 'src:url(/static/bootstrap/fonts/x.woff2) format("woff2")'
+    assert f"url({prefix}/static/bootstrap/fonts/x.woff2)" in hz.rewrite_css(css, prefix)
+
+
+def test_proxy_rewrites_horizon_javascript(monkeypatch):
+    sid = hz.create_session(env_id="env-1", actor="ops")
+    entry = hz.get_session(sid, "env-1")
+    assert entry is not None
+    entry.service = "horizon-int"
+
+    def fake_forward(_kube, _session, **kwargs):
+        body = 'var STATIC_URL="/static/";var WEBROOT="/";'
+        return 200, body.encode(), {"content-type": "text/javascript"}, []
+
+    monkeypatch.setattr(horizon_router, "build_context", lambda *_a, **_k: _Ctx())
+    monkeypatch.setattr(horizon_router.hz, "forward", fake_forward)
+    app = _app()
+    app.dependency_overrides[get_db] = lambda: _DB()
+    client = TestClient(app)
+    resp = client.get(f"/api/v1/environments/env-1/cloud/horizon/{sid}/static/app.js")
+    assert resp.status_code == 200
+    prefix = f"/api/v1/environments/env-1/cloud/horizon/{sid}"
+    assert f'var WEBROOT="{prefix}/";' in resp.text
+    assert f'var STATIC_URL="{prefix}/static/";' in resp.text
+
+
 def test_proxy_rewrites_horizon_links(monkeypatch):
     sid = hz.create_session(env_id="env-1", actor="ops")
     entry = hz.get_session(sid, "env-1")

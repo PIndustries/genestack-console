@@ -96,6 +96,20 @@ def create_horizon_session(
     return {"ok": True, "session_id": sid, "embed_url": embed, "error": None}
 
 
+def _rewrite_payload(payload: bytes, media: str, prefix: str) -> bytes:
+    """Rewrite Horizon HTML, JavaScript, and CSS onto the session prefix."""
+    low = (media or "").lower()
+    if "html" in low:
+        rewrite = hz.rewrite_html
+    elif "javascript" in low or "ecmascript" in low:
+        rewrite = hz.rewrite_js
+    elif "css" in low:
+        rewrite = hz.rewrite_css
+    else:
+        return payload
+    return rewrite(payload.decode("utf-8", "replace"), prefix).encode("utf-8")
+
+
 def _env_or_404(db: Session, environment_id: str) -> Environment:
     env = db.get(Environment, environment_id)
     if env is None:
@@ -154,8 +168,7 @@ async def _proxy(
     finally:
         ctx.cleanup()
     media = headers.get("content-type") or headers.get("Content-Type") or "application/octet-stream"
-    if "html" in media.lower():
-        payload = hz.rewrite_html(payload.decode("utf-8", "replace"), prefix).encode("utf-8")
+    payload = _rewrite_payload(payload, media, prefix)
     response = Response(content=payload, status_code=status, media_type=media.split(";")[0])
     for key, val in headers.items():
         low = key.lower()
