@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.14.2
+
+Horizon paints inside the console window.
+
+- The dashboard stays visible in the Horizon window. The same page still opens in a new tab.
+
 ## 2026.10.14.1
 
 Horizon stays inside the console session.
