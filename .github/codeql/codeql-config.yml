@@ -1,0 +1,4 @@
+name: Genestack Console CodeQL
+paths-ignore:
+  - tests
+  - "**/tests/**"
