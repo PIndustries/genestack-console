@@ -506,7 +506,13 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
     to hostname-keyed entries (see :func:`_normalize_servers`). ``group_vars:``
     group names must match ``^[a-z][a-z0-9_]*$`` and hold mappings; unknown
     ``network:`` and ``storage:`` keys warn.
+
+    A value that is not text is rejected before the YAML reader sees it.
+    The reader treats other objects as files and calls ``read`` until it
+    gets an empty string. A stand-in that never returns one does not finish.
     """
+    if not isinstance(yaml_text, (str, bytes)):
+        raise ConfigValidationError("Config document must be YAML text")
     try:
         data = yaml.safe_load(yaml_text)
     except yaml.YAMLError as exc:

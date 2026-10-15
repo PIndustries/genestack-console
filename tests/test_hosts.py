@@ -229,9 +229,17 @@ def test_adopt_live_encrypts_kubeconfig(monkeypatch):
 
 
 def test_ubuntu_next_boot_writes_that_machines_seed(tmp_path, monkeypatch):
-    from unittest.mock import MagicMock
-
     from app.services import baremetal
+
+    class _NoConfig:
+        def scalar(self, *_args, **_kwargs):
+            return None
+
+        def add(self, *_args, **_kwargs):
+            return None
+
+        def flush(self):
+            return None
 
     node = SimpleNamespace(
         id="node-1",
@@ -251,7 +259,7 @@ def test_ubuntu_next_boot_writes_that_machines_seed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(baremetal, "pxe_boot", powered)
     result = baremetal.set_next_boot(
-        MagicMock(),
+        _NoConfig(),
         env,
         node,
         "ubuntu",
@@ -268,7 +276,7 @@ def test_ubuntu_next_boot_writes_that_machines_seed(tmp_path, monkeypatch):
     assert "lab2" not in text
 
     missing_key = baremetal.set_next_boot(
-        MagicMock(),
+        _NoConfig(),
         SimpleNamespace(id="env-1", ssh_public_key=""),
         node,
         "ubuntu",
@@ -288,7 +296,7 @@ def test_ubuntu_next_boot_writes_that_machines_seed(tmp_path, monkeypatch):
         boot_stage="new",
     )
     missing_mac = baremetal.set_next_boot(
-        MagicMock(),
+        _NoConfig(),
         env,
         no_mac,
         "ubuntu",

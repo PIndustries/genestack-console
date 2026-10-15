@@ -566,6 +566,11 @@ def test_render_group_vars_paths_and_content():
     }
 
 
+def test_parse_document_rejects_non_text():
+    with pytest.raises(envconfig_service.ConfigValidationError):
+        envconfig_service.parse_document(object())
+
+
 def test_parse_document_rejects_invalid_group_vars():
     with pytest.raises(envconfig_service.ConfigValidationError):
         envconfig_service.parse_document("group_vars: [all]\n")
