@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.15.2
+
+Saved machines show up before the dial finishes.
+
+- The machine list and the fabric card paint the saved names and addresses, then fill Talos, Kubernetes, and OpenStack when that dial returns. A machine that is still being checked is not marked down.
+- Pods, services, gateways, routes, ingresses, address pools, and the VM list are remembered for 15 seconds. One refresh dials at a time.
+- A second cloud inventory request waits for the dial already in flight.
+
 ## 2026.10.15.1
 
 The page stays responsive when a machine or the cluster is slow.
