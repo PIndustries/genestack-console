@@ -648,7 +648,7 @@ export function wirePlatformCard(getEnvId) {
     btn.dataset.wired = "1";
     btn.addEventListener("click", () => {
       const id = (envIdGetter && envIdGetter()) || activeEnvId;
-      if (id) loadPlatformCard(id);
+      if (id) loadPlatformCard(id, { refresh: true });
     });
   }
   const card = document.getElementById("pf-card");
@@ -897,7 +897,7 @@ async function upgradeAll(envId) {
   } catch (err) {
     toast(err && err.message ? err.message : "upgrade failed", "error");
   }
-  await loadPlatformCard(envId);
+  await loadPlatformCard(envId, { refresh: true });
 }
 
 async function onClick(e) {
@@ -1012,7 +1012,7 @@ async function onClick(e) {
       toast(err && err.message ? err.message : `${action} failed`, "error");
       ok = false;
     }
-    if (ok) await loadPlatformCard(envId);
+    if (ok) await loadPlatformCard(envId, { refresh: true });
     return;
   }
   const reboot = e.target.closest("[data-talos-reboot]");
@@ -1154,7 +1154,7 @@ async function onClick(e) {
       toast(err && err.message ? err.message : "upgrade failed", "error");
       ok = false;
     }
-    if (ok) await loadPlatformCard(envId);
+    if (ok) await loadPlatformCard(envId, { refresh: true });
     return;
   }
   const dmesg = e.target.closest("[data-talos-dmesg]");
@@ -1171,7 +1171,7 @@ async function onClick(e) {
   }
 }
 
-export async function loadPlatformCard(envId, { silent = false } = {}) {
+export async function loadPlatformCard(envId, { silent = false, refresh = false } = {}) {
   activeEnvId = envId || "";
   const body = document.getElementById("pf-body");
   const msg = document.getElementById("pf-msg");
@@ -1203,7 +1203,8 @@ export async function loadPlatformCard(envId, { silent = false } = {}) {
       /* continue */
     }
   }
-  inflight = api(`/api/v1/environments/${encodeURIComponent(activeEnvId)}/platform`, { timeout: 25000 });
+  const refreshQ = refresh ? "?refresh=1" : "";
+  inflight = api(`/api/v1/environments/${encodeURIComponent(activeEnvId)}/platform${refreshQ}`, { timeout: 25000 });
   let d;
   try {
     d = await inflight;

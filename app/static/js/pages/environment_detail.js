@@ -9,12 +9,12 @@ import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremet
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
 import { destroyWorkflowCard } from "./environment_workflow.js?v=ls61";
-import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard, openTalosMachine, closeTalosMachine } from "./environment_platform.js?v=ls72";
+import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard, openTalosMachine, closeTalosMachine } from "./environment_platform.js?v=ls73";
 import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls61";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard, openHorizon } from "./environment_cloud.js?v=ls73";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap, pauseMapPoll, refreshFleetLine } from "./environment_deploy_map.js?v=ls74";
+import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap, pauseMapPoll, refreshFleetLine } from "./environment_deploy_map.js?v=ls75";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";

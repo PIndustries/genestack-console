@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -30,7 +33,14 @@ from app.services.talos import (
     valid_node_endpoint,
 )
 
-TALOS_TIMEOUT = 12
+# A version check is a reachability badge. One silent machine must not hold
+# the page for the old 12s, and more than one wave of those must not stack.
+TALOS_TIMEOUT = 3
+_PLATFORM_TTL_S = 15.0
+_PLATFORM_WAIT_S = 20.0
+_platform_lock = threading.Lock()
+_platform_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_platform_inflight: dict[str, threading.Event] = {}
 DMESG_LINES = 80
 LOG_LINES = 200
 # A cold factory-image pull exceeds 60s and talosctl is killed before the
@@ -287,10 +297,84 @@ def _cluster_summary(
     }
 
 
+def _platform_key(env: Environment) -> str:
+    return str(getattr(env, "id", "") or "")
+
+
+def _platform_copy(key: str, *, max_age: float | None) -> dict[str, Any] | None:
+    with _platform_lock:
+        hit = _platform_cache.get(key)
+        if hit is None:
+            return None
+        stored_at, payload = hit
+        if max_age is not None and time.monotonic() - stored_at > max_age:
+            return None
+        return copy.deepcopy(payload)
+
+
+def _platform_store(key: str, payload: dict[str, Any]) -> None:
+    with _platform_lock:
+        _platform_cache[key] = (time.monotonic(), copy.deepcopy(payload))
+
+
+def _platform_claim(key: str) -> tuple[bool, threading.Event]:
+    with _platform_lock:
+        current = _platform_inflight.get(key)
+        if current is not None:
+            return False, current
+        event = threading.Event()
+        _platform_inflight[key] = event
+        return True, event
+
+
+def _platform_release(key: str, event: threading.Event) -> None:
+    with _platform_lock:
+        if _platform_inflight.get(key) is event:
+            _platform_inflight.pop(key, None)
+    event.set()
+
+
 def platform_overview(
+    env: Environment,
+    settings: Settings | None = None,
+    db: Session | None = None,
+    *,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """One row per inventory machine: Talos + Kubernetes + Nova compute.
+
+    A recent result is reused so Overview and Machines do not each dial
+    every node. One caller dials; the others wait for that result.
+    """
+    key = _platform_key(env)
+    if not key:
+        return _load_platform_overview(env, settings, db)
+    if not refresh:
+        fresh = _platform_copy(key, max_age=_PLATFORM_TTL_S)
+        if fresh is not None:
+            return fresh
+        leader, event = _platform_claim(key)
+        if not leader:
+            event.wait(_PLATFORM_WAIT_S)
+            cached = _platform_copy(key, max_age=None)
+            if cached is not None:
+                return cached
+        else:
+            try:
+                result = _load_platform_overview(env, settings, db)
+                _platform_store(key, result)
+                return result
+            finally:
+                _platform_release(key, event)
+    result = _load_platform_overview(env, settings, db)
+    _platform_store(key, result)
+    return result
+
+
+def _load_platform_overview(
     env: Environment, settings: Settings | None = None, db: Session | None = None
 ) -> dict[str, Any]:
-    """One row per inventory machine: Talos + Kubernetes + Nova compute."""
+    """Dial Talos, Kubernetes, and Nova. Callers use ``platform_overview``."""
     settings = settings or get_settings()
     ctx = build_context(env, settings)
     nodes: list[dict[str, Any]] = []

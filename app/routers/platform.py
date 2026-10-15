@@ -143,13 +143,14 @@ def _check_service(service_id: str) -> str:
 
 @router.get("/environments/{environment_id}/platform")
 def get_environment_platform(
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     if is_demo_env(env):
         return {"environment_id": env.id, **canned_platform_overview(env)}
-    result = platform.platform_overview(env, settings, db)
+    result = platform.platform_overview(env, settings, db, refresh=refresh)
     return {"environment_id": env.id, **result}
 
 

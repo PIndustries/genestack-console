@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, select
+from sqlalchemy.orm import Session, defer
 
 from app.auth import role_allows
 from app.deps import (
@@ -31,12 +31,56 @@ from app.services.job_runner import (
 
 router = APIRouter(prefix="/api/v1", tags=["jobs"])
 
+# The list is polled from Overview and Activity. A deploy log is large, and
+# sending every byte of it stalls SQLite and the page. The open job still
+# returns the full log from GET /jobs/{id}.
+_LOG_HEAD = 4096
+_LOG_TAIL = 4096
+_LOG_MARK = "\n… log truncated …\n"
+
 
 def _conflict_http(exc: ConflictError) -> HTTPException:
     detail = {"message": str(exc)}
     if exc.job_id:
         detail["conflicting_job_id"] = exc.job_id
     return HTTPException(status_code=409, detail=detail)
+
+
+def _log_excerpt(head: str | None, tail: str | None, length: int | None) -> str:
+    """Start and end of a log. A short log is returned whole."""
+    size = int(length or 0)
+    head_text = head or ""
+    tail_text = tail or ""
+    if size <= _LOG_HEAD:
+        return head_text
+    if size <= _LOG_HEAD + _LOG_TAIL:
+        overlap = _LOG_HEAD + _LOG_TAIL - size
+        if overlap >= len(tail_text):
+            return head_text
+        return head_text + tail_text[overlap:]
+    return head_text + _LOG_MARK + tail_text
+
+
+def _listed_job(
+    job: Job, head: str | None, tail: str | None, length: int | None
+) -> JobRead:
+    status = job.status.value if hasattr(job.status, "value") else job.status
+    return JobRead(
+        id=job.id,
+        environment_id=job.environment_id,
+        operation=job.operation,
+        params=job.params,
+        status=status,
+        log_text=_log_excerpt(head, tail, length),
+        created_by=job.created_by,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        error=job.error,
+        user_step=job.user_step,
+        dry_run=job.dry_run,
+        cancel_requested=bool(job.cancel_requested),
+        created_at=job.created_at,
+    )
 
 
 @router.get("/jobs", response_model=list[JobRead])
@@ -46,8 +90,17 @@ def list_jobs(
     limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     principal: Principal = Depends(require_viewer),
-) -> list[Job]:
-    stmt = select(Job).order_by(Job.created_at.desc()).limit(limit)
+) -> list[JobRead]:
+    log_len = func.length(Job.log_text)
+    head_expr = func.substr(Job.log_text, 1, _LOG_HEAD)
+    tail_at = case((log_len <= _LOG_TAIL, 1), else_=log_len - _LOG_TAIL + 1)
+    tail_expr = func.substr(Job.log_text, tail_at, _LOG_TAIL)
+    stmt = (
+        select(Job, head_expr, tail_expr, log_len)
+        .options(defer(Job.log_text))
+        .order_by(Job.created_at.desc())
+        .limit(limit)
+    )
     if environment_id:
         env = db.get(Environment, environment_id)
         if not env:
@@ -69,7 +122,8 @@ def list_jobs(
         stmt = stmt.where(Job.environment_id.in_(member_envs))
     if status_filter:
         stmt = stmt.where(Job.status == status_filter)
-    return list(db.scalars(stmt).all())
+    rows = db.execute(stmt).all()
+    return [_listed_job(job, head, tail, length) for job, head, tail, length in rows]
 
 
 @router.get("/jobs/{job_id}", response_model=JobRead)

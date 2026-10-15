@@ -904,3 +904,47 @@ def test_talos_shutdown_missing_talosctl_not_500(client, admin_headers, monkeypa
     assert body["ok"] is False
     assert body["status"] == "failed"
     assert "talosctl" in (body.get("error") or "").lower()
+
+
+def test_platform_overview_reuses_a_recent_result(monkeypatch):
+    calls = {"n": 0}
+
+    def fake(env, settings=None, db=None):
+        calls["n"] += 1
+        return {"nodes": [{"name": "n1"}], "error": None}
+
+    monkeypatch.setattr(platform, "_load_platform_overview", fake)
+    platform._platform_cache.clear()
+    platform._platform_inflight.clear()
+    env = SimpleNamespace(id="env-cache-1")
+    first = platform.platform_overview(env)
+    second = platform.platform_overview(env)
+    assert calls["n"] == 1
+    assert second == first
+    second["nodes"].append({"name": "mutated"})
+    third = platform.platform_overview(env)
+    assert third["nodes"] == [{"name": "n1"}]
+    refreshed = platform.platform_overview(env, refresh=True)
+    assert calls["n"] == 2
+    assert refreshed["nodes"] == [{"name": "n1"}]
+
+
+def test_talos_version_probe_gives_up_quickly(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+
+        class Proc:
+            returncode = 0
+            stdout = "Tag: v1.13.9\n"
+            stderr = ""
+
+        return Proc()
+
+    monkeypatch.setattr(platform.subprocess, "run", fake_run)
+    monkeypatch.setattr(platform, "talosctl_bin", lambda: "/usr/bin/talosctl")
+    monkeypatch.setattr(platform, "valid_node_endpoint", lambda _ip: True)
+    result = platform._talos_version("/tmp/talosconfig", "10.0.0.8")
+    assert seen["timeout"] == 3
+    assert result["reachable"] is True

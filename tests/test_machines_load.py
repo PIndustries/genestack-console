@@ -12,7 +12,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert 'activePtab === "kubernetes"' in text
     assert "environment_servers.js?v=ls72" in text
     assert "environment_next.js?v=ls71" in text
-    assert "environment_deploy_map.js?v=ls74" in text
+    assert "environment_deploy_map.js?v=ls75" in text
     assert 'nextStripHtml("overview")' in text
 
     servers = client.get("/static/js/pages/environment_servers.js")
@@ -31,6 +31,8 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert "/api/v1/ops/jobs/" not in script
     assert "No stage yet means the log has not loaded" in script
     assert "export function pauseMapPoll()" in script
+    assert "function heavyDue()" in script
+    assert "HEAVY_MS = 60000" in script
     assert "export function refreshFleetLine(id)" in script
     tick = script.split("async function tick()", 1)[1].split("let fleetLineGen", 1)[0]
     assert "!overviewOpen()" in tick
@@ -57,7 +59,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     shell = client.get("/static/js/app.js")
     assert "healthMisses" in shell.text
     assert "health: slow" in shell.text
-    assert "environment_detail.js?v=ls74" in shell.text
+    assert "environment_detail.js?v=ls75" in shell.text
     assert "env_wizard.js?v=ls67" in shell.text
 
     nxt = client.get("/static/js/pages/environment_next.js")

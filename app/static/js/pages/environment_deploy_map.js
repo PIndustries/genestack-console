@@ -28,6 +28,17 @@ import { mergeSnapshot, applyLive, bindLiveEnv } from "./environment_live_state.
 const POLL_MS = 8000;
 const LIVE_POLL_MS = 3500;
 const IDLE_MS = 20000;
+// Cluster, cloud, and Kubernetes lists are the slow calls. Inventory and
+// job status stay on the short timer. An idle page asks the cluster once
+// a minute. A running deploy asks every 15 seconds.
+const HEAVY_MS = 60000;
+const HEAVY_LIVE_MS = 15000;
+let heavyAt = 0;
+
+function heavyDue() {
+  const live = isLive() || (job && ACTIVE.has(String(job.status || "")));
+  return Date.now() - heavyAt >= (live ? HEAVY_LIVE_MS : HEAVY_MS);
+}
 const SNAP_TIMEOUT = 8000;
 const PODS_TIMEOUT = 12000;
 const PODS_REFRESH_MS = 20000;
@@ -4151,21 +4162,42 @@ async function fetchState() {
   let released = false;
   refreshRegistry(id);
   try {
-    refreshPods(id);
-    const snapP = api(`/api/v1/ops/environments/${encodeURIComponent(id)}/snapshot`, { timeout: SNAP_TIMEOUT }).catch(() => null);
+    const wantHeavy = heavyDue();
+    if (wantHeavy) heavyAt = Date.now();
+    if (isLive() || wantHeavy) refreshPods(id);
+    const quiet = Promise.resolve(null);
+    const snapP = wantHeavy
+      ? api(`/api/v1/ops/environments/${encodeURIComponent(id)}/snapshot`, { timeout: SNAP_TIMEOUT }).catch(() => null)
+      : quiet;
     const pipeP = catalog.length
       ? Promise.resolve({ stages: catalog })
       : api("/api/v1/genestack/pipeline", { timeout: 5000 }).catch(() => ({ stages: [] }));
-    const vmsP = api(`/api/v1/environments/${encodeURIComponent(id)}/vms`, { timeout: 12000 }).catch(() => null);
+    const vmsP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/vms`, { timeout: 12000 }).catch(() => null)
+      : quiet;
     const jobsP = api(`/api/v1/jobs?environment_id=${encodeURIComponent(id)}&limit=16`, { timeout: 4000 }).catch(() => null);
     const bmP = api(`/api/v1/environments/${encodeURIComponent(id)}/baremetal`, { timeout: 6000 }).catch(() => null);
-    const cloudP = api(`/api/v1/environments/${encodeURIComponent(id)}/cloud`, { timeout: 20000 }).catch(() => null);
-    const ingP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/ingresses`, { timeout: 10000 }).catch(() => null);
-    const svcP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/services`, { timeout: 10000 }).catch(() => null);
-    const gwP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/gateways`, { timeout: 10000 }).catch(() => null);
-    const routeP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/httproutes`, { timeout: 10000 }).catch(() => null);
-    const poolP = api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/metallb/pools`, { timeout: 8000 }).catch(() => null);
-    const platP = api(`/api/v1/environments/${encodeURIComponent(id)}/platform`, { timeout: 20000 }).catch(() => null);
+    const cloudP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/cloud`, { timeout: 20000 }).catch(() => null)
+      : quiet;
+    const ingP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/ingresses`, { timeout: 10000 }).catch(() => null)
+      : quiet;
+    const svcP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/services`, { timeout: 10000 }).catch(() => null)
+      : quiet;
+    const gwP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/gateways`, { timeout: 10000 }).catch(() => null)
+      : quiet;
+    const routeP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/httproutes`, { timeout: 10000 }).catch(() => null)
+      : quiet;
+    const poolP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/metallb/pools`, { timeout: 8000 }).catch(() => null)
+      : quiet;
+    const platP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/platform`, { timeout: 20000 }).catch(() => null)
+      : quiet;
     const srvP = api(`/api/v1/environments/${encodeURIComponent(id)}/servers`, { timeout: 8000 }).catch(() => null);
     // Inventory is enough for the shared line. Cloud and VM calls can sit
     // on their full timeout, and that must not leave the line at 0 machines.
@@ -7262,6 +7294,7 @@ export async function loadDeployMap(id) {
   lastMetalKey = "";
   lastMetalAt = 0;
   if (!same) {
+    heavyAt = 0;
     selected = "infra";
     mapFocus = "";
     restoreFold();

@@ -393,3 +393,67 @@ def test_mutating_job_lock_per_environment(client, admin_headers):
     )
     assert other_env.status_code in (200, 201), other_env.text
     assert _job_status(other_env.json()) in {"success", "succeeded", "completed"}
+
+
+def test_job_list_keeps_the_ends_of_a_long_log(client, admin_headers):
+    """The list used by Overview must not ship a whole deploy log."""
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus
+
+    env_id = _create_env(client, admin_headers, "log-list")
+    full = "HEAD-START\n" + ("x" * 12000) + "MIDDLE-MARKER" + ("y" * 12000) + "\nTAIL-END failed"
+    db = SessionLocal()
+    try:
+        row = Job(
+            environment_id=env_id,
+            operation="genestack.deploy",
+            params={},
+            status=JobStatus.success,
+            log_text=full,
+            created_by="log-list",
+        )
+        db.add(row)
+        db.commit()
+        job_id = row.id
+    finally:
+        db.close()
+
+    listed = client.get(
+        "/api/v1/jobs",
+        headers=admin_headers,
+        params={"environment_id": env_id, "limit": 10},
+    )
+    assert listed.status_code == 200, listed.text
+    body = next(item for item in listed.json() if item["id"] == job_id)
+    assert "HEAD-START" in body["log_text"]
+    assert "TAIL-END" in body["log_text"]
+    assert "MIDDLE-MARKER" not in body["log_text"]
+    assert "log truncated" in body["log_text"]
+    assert len(body["log_text"]) < len(full)
+
+    detail = client.get(f"/api/v1/jobs/{job_id}", headers=admin_headers)
+    assert detail.status_code == 200, detail.text
+    assert "MIDDLE-MARKER" in detail.json()["log_text"]
+
+    db = SessionLocal()
+    try:
+        brief = Job(
+            environment_id=env_id,
+            operation="host.basic_ops",
+            params={},
+            status=JobStatus.success,
+            log_text="only-short",
+            created_by="log-list",
+        )
+        db.add(brief)
+        db.commit()
+        brief_id = brief.id
+    finally:
+        db.close()
+    short = client.get(
+        "/api/v1/jobs",
+        headers=admin_headers,
+        params={"environment_id": env_id, "limit": 10},
+    )
+    brief_row = next(item for item in short.json() if item["id"] == brief_id)
+    assert brief_row["log_text"] == "only-short"
