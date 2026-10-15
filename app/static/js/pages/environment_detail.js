@@ -3,13 +3,13 @@
 import { api, esc, fmtTime, toast } from "../api.js";
 import { store, loadEnvs, envOptionsHtml, canAdmin, canRun, gate, isDemoEnv, applyEnvLifecycle } from "../store.js";
 import { configCardHtml, wireConfigCard, loadConfigCard, destroyConfigCard } from "./environment_config.js";
-import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls72";
+import { serversCardHtml, wireServersCard, loadServersCard, destroyServersCard, syncOsView } from "./environment_servers.js?v=ls73";
 import { nextStripHtml, wireNextStrip, loadNextStrip, destroyNextStrip } from "./environment_next.js?v=ls71";
 import { baremetalCardHtml, wireBaremetalCard, loadBaremetalCard, destroyBaremetalCard } from "./environment_baremetal.js";
 import { discoveryCardHtml, wireDiscoveryCard, loadDiscoveryCard, destroyDiscoveryCard } from "./environment_discovery.js";
 import { pxeCardHtml, wirePxeCard, loadPxeCard, destroyPxeCard } from "./environment_pxe.js";
 import { destroyWorkflowCard } from "./environment_workflow.js?v=ls61";
-import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard, openTalosMachine, closeTalosMachine } from "./environment_platform.js?v=ls73";
+import { platformCardHtml, wirePlatformCard, loadPlatformCard, destroyPlatformCard, openTalosMachine, closeTalosMachine } from "./environment_platform.js?v=ls74";
 import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard } from "./environment_cluster.js?v=ls61";
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard, openHorizon } from "./environment_cloud.js?v=ls73";

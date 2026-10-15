@@ -399,4 +399,4 @@ def test_vault_page_offers_record_actions(client):
     assert 'els.area.value = value || ""' in text
     assert "innerHTML = payload" not in text
     shell = client.get("/static/js/app.js")
-    assert 'environment_detail.js?v=ls75' in shell.text
+    assert 'environment_detail.js?v=ls76' in shell.text

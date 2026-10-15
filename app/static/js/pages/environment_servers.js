@@ -750,6 +750,19 @@ function hostMachineOs(server, boot, metalPath) {
   return metalPath === "kubespray" ? "ubuntu" : "talos";
 }
 
+function ovhBannerHtml(metalPath) {
+  const osWord = metalPath === "kubespray" ? "Ubuntu" : "Talos";
+  return `<div class="hint-row" style="color:var(--ok,#4caf50)">OVH environment. Dedicated servers from the bound account. ${osWord} uses the private NIC.</div>`;
+}
+
+function bootMapFromNodes(nodes) {
+  const bootByName = new Map();
+  for (const n of nodes || []) {
+    if (n && n.name) bootByName.set(String(n.name), n);
+  }
+  return bootByName;
+}
+
 function statusPill(kind, label) {
   return `<span class="pill ${kind}">${esc(label)}</span>`;
 }
@@ -1928,6 +1941,85 @@ async function reconfigureHost(envId, row, choice, installed) {
   }
 }
 
+function bindOsChoiceInputs(root, envId) {
+  if (!root) return;
+  root.querySelectorAll("input[data-os]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const cell = input.closest(".srv-os-cell");
+      const btn = cell && cell.querySelector("button[data-reconfigure]");
+      if (cell) {
+        cell.querySelectorAll(".srv-os-choice").forEach((label) => {
+          const radio = label.querySelector("input");
+          label.classList.toggle("on", !!(radio && radio.checked));
+        });
+      }
+      if (btn) paintOsButton(btn, input.value);
+    });
+  });
+  root.querySelectorAll("button[data-reconfigure]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const row = becomeTargets[Number(btn.dataset.reconfigure)];
+      const picked = btn.parentElement && btn.parentElement.querySelector("input[data-os]:checked");
+      const choice = picked ? picked.value : "";
+      if (!row || !choice || btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await reconfigureHost(envId, row, choice, btn.dataset.installed || "");
+      } finally {
+        if (btn.isConnected) paintOsButton(btn, choice);
+      }
+    })
+  );
+}
+
+function syncMachineBoot(envId, invRows, bmNodes, metalPath) {
+  const bootByName = bootMapFromNodes(bmNodes);
+  lastBmNodes = bmNodes || [];
+  renderBmcWall(envId, lastBmNodes);
+  rememberMetalPath(metalPath);
+  window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: metalPath, quiet: true } }));
+  const ovhBanner = document.getElementById("srv-ovh-banner");
+  if (ovhBanner && ovhBanner.innerHTML) ovhBanner.innerHTML = ovhBannerHtml(metalPath);
+  const tbody = document.getElementById("srv-tbody");
+  (invRows || []).forEach((s, i) => {
+    const boot = bootByName.get(String((s && s.hostname) || "")) || {};
+    const machineOs = hostMachineOs(s, boot, metalPath);
+    if (lastMachineRows[i]) {
+      lastMachineRows[i].os = machineOs;
+      lastMachineRows[i].bmcHost = boot.bmc_host || "";
+    }
+    if (becomeTargets[i]) becomeTargets[i].nodeId = boot.id ? String(boot.id) : "";
+    const tr = tbody && tbody.querySelector(`tr[data-row="${i}"]`);
+    if (!tr) return;
+    tr.dataset.machineOs = machineOs;
+    const osName = tr.querySelector("[data-srv-os]");
+    if (osName) osName.innerHTML = osNameHtml(machineOs);
+    const ilo = tr.querySelector("[data-srv-ilo]");
+    if (ilo) {
+      ilo.innerHTML = boot.bmc_host
+        ? `<div style="font-size:.7rem;color:var(--fg-muted,#b7d4c4)">iLO ${esc(boot.bmc_host)}</div>`
+        : "";
+    }
+    const rolesHost = tr.querySelector("[data-srv-roles]");
+    if (rolesHost) {
+      const showSsh = machineOs !== "talos";
+      const hasSsh = !!rolesHost.querySelector("[data-ssh-user]");
+      if (showSsh !== hasSsh) {
+        const roles = Array.isArray(s.roles) ? s.roles : [];
+        rolesHost.innerHTML = roleEditor("inv", i, roles, s.ssh_user || "", machineOs);
+      }
+    }
+    const osctl = tr.querySelector("[data-srv-osctl]");
+    if (osctl) {
+      osctl.innerHTML = osControlHtml(i, s, bootByName, becomeTargets[i], metalPath);
+      bindOsChoiceInputs(osctl, envId);
+    }
+  });
+  syncOsView(osView());
+  syncBecomeBar();
+  gateBecome();
+}
+
 async function applyBecome(envId) {
   const msg = document.getElementById("srv-become-msg");
   const picks = selectedBecome();
@@ -2015,7 +2107,7 @@ export async function loadServersCard(envId) {
   const paintGen = ++serversPaintGen;
   // The node list talks to the API server. A cluster that is not up holds
   // that call for the client timeout. The inventory itself is a database
-  // read, so the table paints from that and fills Cluster when nodes arrive.
+  // read, so the table paints from /servers before nodes, reach, or baremetal.
   let k8sSettled = false;
   let k8sEarly = null;
   const k8sP = api(`/api/v1/environments/${encodeURIComponent(envId)}/k8s/nodes`)
@@ -2025,20 +2117,21 @@ export async function loadServersCard(envId) {
       k8sEarly = res;
       return res;
     });
+  let bmRes = null;
+  let pathName = "";
+  let extrasSettled = false;
+  const extrasP = Promise.all([
+    api(`/api/v1/environments/${encodeURIComponent(envId)}/baremetal`).catch(() => null),
+    fetchMetalPath(api, envId),
+  ]).then(([bm, path]) => {
+    extrasSettled = true;
+    bmRes = bm;
+    pathName = path || "";
+    return [bm, path];
+  });
   try {
-    const [serversRes, bmRes, pathName] = await Promise.all([
-      api(`/api/v1/environments/${encodeURIComponent(envId)}/servers`),
-      api(`/api/v1/environments/${encodeURIComponent(envId)}/baremetal`).catch(() => null),
-      fetchMetalPath(api, envId),
-    ]);
+    data = await api(`/api/v1/environments/${encodeURIComponent(envId)}/servers`);
     if (paintGen !== serversPaintGen || serversLoadedEnvId !== envId) return;
-    metalPath = pathName;
-    data = serversRes;
-    bmNodes = (bmRes && bmRes.nodes) || [];
-    for (const n of bmNodes) {
-      if (n && n.name) bootByName.set(String(n.name), n);
-    }
-    if (k8sSettled) clusterIps = clusterIpsFrom(k8sEarly);
   } catch (e) {
     msg.textContent = "";
     renderBmcWall(envId, [], "BMC list unavailable");
@@ -2046,8 +2139,16 @@ export async function loadServersCard(envId) {
     err.innerHTML = `<div class="error">${esc(e.message)}</div>`;
     return;
   }
-  renderBmcWall(envId, bmNodes);
-  lastBmNodes = bmNodes;
+  if (extrasSettled) {
+    metalPath = pathName;
+    bmNodes = (bmRes && bmRes.nodes) || [];
+    for (const n of bmNodes) {
+      if (n && n.name) bootByName.set(String(n.name), n);
+    }
+    renderBmcWall(envId, bmNodes);
+    lastBmNodes = bmNodes;
+  }
+  if (k8sSettled) clusterIps = clusterIpsFrom(k8sEarly);
 
   // Contract is an object envelope ({servers, ovh_bound, ...}); tolerate a bare array.
   const servers = Array.isArray(data) ? data : data && Array.isArray(data.servers) ? data.servers : [];
@@ -2066,49 +2167,19 @@ export async function loadServersCard(envId) {
       ? "Dedicated servers use a public NIC for management and a private NIC on the vRack."
       : "Talos is already installed applies the config to every saved address. A machine that is already running Talos is not rebooted until you confirm that machine by name. Confirming replaces the running install. A management port can do that reboot after the confirm.";
   }
-  rememberMetalPath(metalPath);
-  window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: metalPath, quiet: true } }));
+  if (extrasSettled) {
+    rememberMetalPath(metalPath);
+    window.dispatchEvent(new CustomEvent("gsc-metal-path", { detail: { provider: metalPath, quiet: true } }));
+  }
   msg.textContent = servers.length ? `${servers.length} server(s)` : "No servers in inventory yet.";
   const ovhBanner = document.getElementById("srv-ovh-banner");
   if (ovhBanner) {
     ovhBanner.innerHTML = ovhBound
-      ? `<div class="hint-row" style="color:var(--ok,#4caf50)">OVH environment. Dedicated servers from the bound account. ${metalPath === "kubespray" ? "Ubuntu" : "Talos"} uses the private NIC.</div>`
+      ? ovhBannerHtml(metalPath)
       : "";
   }
   const vrackBox = document.getElementById("srv-vrack");
   if (vrackBox && !ovhBound) vrackBox.innerHTML = "";
-
-  // OVH-bound env: persist source:ovh on static hosts that match live inventory
-  // so Talos BYOI and the YAML agree with the bound account.
-  if (ovhBound && canRun() && !adoptingOvh) {
-    const needsAdopt = servers.some(
-      (s) =>
-        s &&
-        s.assigned &&
-        s.source !== "ovh" &&
-        s.source !== "maas" &&
-        s.source !== "baremetal" &&
-        s.source !== "terraform"
-    );
-    if (needsAdopt) {
-      adoptingOvh = true;
-      try {
-        const adopted = await api(`/api/v1/environments/${encodeURIComponent(envId)}/ovh/adopt`, {
-          method: "POST",
-          body: "{}",
-        });
-        const n = adopted && Array.isArray(adopted.adopted) ? adopted.adopted.length : 0;
-        if (n) {
-          toast(`${n} server(s) tagged as OVH`, "ok");
-          adoptingOvh = false;
-          return loadServersCard(envId);
-        }
-      } catch {
-        // 403/503/unbound — inventory still renders; operator can Import from OVH.
-      }
-      adoptingOvh = false;
-    }
-  }
 
   const invRows = servers.filter((s) => s && typeof s === "object" && s.assigned);
   lastServers = invRows;
@@ -2192,14 +2263,14 @@ export async function loadServersCard(envId) {
             : "";
           return `<tr data-row="${i}" data-machine-os="${machineOs}">
             <td><input type="checkbox" class="srv-pick" data-srv-pick="${i}" aria-label="Select ${esc(s.hostname || "host")}"></td>
-            <td><button type="button" class="linkish" data-machine-open="${i}"><strong>${esc(s.hostname || "?")}</strong></button>${sub}${ilo}${sourceNote}</td>
+            <td><button type="button" class="linkish" data-machine-open="${i}"><strong>${esc(s.hostname || "?")}</strong></button>${sub}<span data-srv-ilo="${i}">${ilo}</span>${sourceNote}</td>
             <td class="muted">${ipCell}</td>
-            <td>${osNameHtml(machineOs)}</td>
+            <td data-srv-os="${i}">${osNameHtml(machineOs)}</td>
             <td data-srv-cluster="${esc(s.hostname || "")}">${hostClusterCell(s, clusterIps)}</td>
             <td data-srv-reach="${esc(s.hostname || "")}">${checkingHtml()}</td>
-            <td>${roleEditor("inv", i, roles, s.ssh_user || "", machineOs)}</td>
+            <td data-srv-roles="${i}">${roleEditor("inv", i, roles, s.ssh_user || "", machineOs)}</td>
             <td class="srv-os-cell">
-              ${osControlHtml(i, s, bootByName, becomeTargets[i], metalPath)}
+              <span data-srv-osctl="${i}">${osControlHtml(i, s, bootByName, becomeTargets[i], metalPath)}</span>
               <button class="secondary btn-sm" type="button" data-save="${i}" ${gate(canRun(), "operator")}>Save</button>
               ${removeBtn}
               <span class="muted" style="font-size:.75rem" data-save-msg="${i}"></span>
@@ -2209,33 +2280,14 @@ export async function loadServersCard(envId) {
         .join("")
     : `<tr><td colspan="8" class="muted">No servers in inventory yet.</td></tr>`;
 
-  tbody.querySelectorAll("input[data-os]").forEach((input) => {
-    input.addEventListener("change", () => {
-      const cell = input.closest(".srv-os-cell");
-      const btn = cell && cell.querySelector("button[data-reconfigure]");
-      if (cell) {
-        cell.querySelectorAll(".srv-os-choice").forEach((label) => {
-          const radio = label.querySelector("input");
-          label.classList.toggle("on", !!(radio && radio.checked));
-        });
-      }
-      if (btn) paintOsButton(btn, input.value);
+  bindOsChoiceInputs(tbody, envId);
+  if (!extrasSettled) {
+    const rowsForBoot = invRows;
+    extrasP.then(() => {
+      if (paintGen !== serversPaintGen || serversLoadedEnvId !== envId) return;
+      syncMachineBoot(envId, rowsForBoot, (bmRes && bmRes.nodes) || [], pathName || "");
     });
-  });
-  tbody.querySelectorAll("button[data-reconfigure]").forEach((btn) =>
-    btn.addEventListener("click", async () => {
-      const row = becomeTargets[Number(btn.dataset.reconfigure)];
-      const picked = btn.parentElement && btn.parentElement.querySelector("input[data-os]:checked");
-      const choice = picked ? picked.value : "";
-      if (!row || !choice || btn.disabled) return;
-      btn.disabled = true;
-      try {
-        await reconfigureHost(envId, row, choice, btn.dataset.installed || "");
-      } finally {
-        if (btn.isConnected) paintOsButton(btn, choice);
-      }
-    })
-  );
+  }
   tbody.querySelectorAll("button[data-save]").forEach((btn) =>
     btn.addEventListener("click", () => saveInventoryRow(envId, invRows[Number(btn.dataset.save)], btn.dataset.save))
   );
@@ -2244,6 +2296,39 @@ export async function loadServersCard(envId) {
   );
   syncBecomeBar();
   gateBecome();
+
+  // OVH-bound env: persist source:ovh on static hosts that match live inventory
+  // so Talos BYOI and the YAML agree with the bound account. The table is
+  // already on screen; this must not hold the first paint.
+  if (ovhBound && canRun() && !adoptingOvh) {
+    const needsAdopt = servers.some(
+      (s) =>
+        s &&
+        s.assigned &&
+        s.source !== "ovh" &&
+        s.source !== "maas" &&
+        s.source !== "baremetal" &&
+        s.source !== "terraform"
+    );
+    if (needsAdopt) {
+      adoptingOvh = true;
+      try {
+        const adopted = await api(`/api/v1/environments/${encodeURIComponent(envId)}/ovh/adopt`, {
+          method: "POST",
+          body: "{}",
+        });
+        const n = adopted && Array.isArray(adopted.adopted) ? adopted.adopted.length : 0;
+        if (n) {
+          toast(`${n} server(s) tagged as OVH`, "ok");
+          adoptingOvh = false;
+          return loadServersCard(envId);
+        }
+      } catch {
+        // 403/503/unbound — inventory still renders; operator can Import from OVH.
+      }
+      adoptingOvh = false;
+    }
+  }
 
   // Always render the Add host form at top of discovered section.
   // Compute current cluster status across all assigned hosts.

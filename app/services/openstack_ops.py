@@ -13,10 +13,12 @@ error string. Mutating actions validate ids/names before any call.
 
 from __future__ import annotations
 
+import copy
 import ipaddress
 import json
 import os
 import re
+import threading
 import time
 from typing import Any, Callable
 
@@ -57,6 +59,10 @@ SERVER_ACTIONS = (
     "revert-resize",
 )
 _CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_inventory_lock = threading.Lock()
+_inventory_inflight: dict[str, threading.Event] = {}
+# Wait out the API attempt plus the 25s CLI fallback before a second dial.
+_INVENTORY_WAIT_S = 40.0
 
 # Nova server ids are UUIDs; reject everything else before touching a shell.
 SERVER_ID_RE = re.compile(
@@ -920,8 +926,49 @@ def _mutate(
 
 
 def invalidate_cloud_cache(env_id: str | None) -> None:
-    if env_id:
+    if not env_id:
+        return
+    with _inventory_lock:
         _CACHE.pop(str(env_id), None)
+
+
+def _inventory_claim(key: str) -> tuple[bool, threading.Event]:
+    with _inventory_lock:
+        current = _inventory_inflight.get(key)
+        if current is not None:
+            return False, current
+        event = threading.Event()
+        _inventory_inflight[key] = event
+        return True, event
+
+
+def _inventory_release(key: str, event: threading.Event) -> None:
+    with _inventory_lock:
+        if _inventory_inflight.get(key) is event:
+            _inventory_inflight.pop(key, None)
+    event.set()
+
+
+def _inventory_copy(key: str, *, max_age: float | None) -> dict[str, Any] | None:
+    with _inventory_lock:
+        hit = _CACHE.get(key)
+        if hit is None:
+            return None
+        stored_at, payload = hit
+        if max_age is not None and time.monotonic() - stored_at > max_age:
+            return None
+    copied = copy.deepcopy(payload)
+    copied["cached"] = True
+    return copied
+
+
+def _inventory_store(key: str, payload: dict[str, Any]) -> None:
+    """Remember an available inventory. An unavailable result is not stored."""
+    if not payload.get("available"):
+        return
+    stored = copy.deepcopy({k: v for k, v in payload.items() if k != "cached"})
+    with _inventory_lock:
+        _CACHE[key] = (time.monotonic(), stored)
 
 
 def cloud_inventory(
@@ -931,15 +978,45 @@ def cloud_inventory(
     log: LogFn | None = None,
     refresh: bool = False,
 ) -> dict[str, Any]:
-    """Horizon-style inventory of the env's cloud. Never raises."""
+    """Horizon-style inventory of the env's cloud. Never raises.
+
+    A recent available inventory is reused. One caller dials on a miss;
+    the others wait for that copy instead of opening another context.
+    """
     settings = settings or get_settings()
     cache_key = str(getattr(env, "id", "") or "")
-    if cache_key and not refresh:
-        hit = _CACHE.get(cache_key)
-        if hit is not None:
-            ts, cached = hit
-            if time.monotonic() - ts < INVENTORY_CACHE_TTL:
-                return {**cached, "cached": True}
+    if not cache_key:
+        return _load_cloud_inventory(env, settings, log=log)
+    if not refresh:
+        fresh = _inventory_copy(cache_key, max_age=INVENTORY_CACHE_TTL)
+        if fresh is not None:
+            return fresh
+        leader, event = _inventory_claim(cache_key)
+        if not leader:
+            event.wait(_INVENTORY_WAIT_S)
+            cached = _inventory_copy(cache_key, max_age=None)
+            if cached is not None:
+                return cached
+        else:
+            try:
+                result = _load_cloud_inventory(env, settings, log=log)
+                _inventory_store(cache_key, result)
+                return result
+            finally:
+                _inventory_release(cache_key, event)
+    result = _load_cloud_inventory(env, settings, log=log)
+    _inventory_store(cache_key, result)
+    return result
+
+
+def _load_cloud_inventory(
+    env: Environment,
+    settings: Settings | None = None,
+    *,
+    log: LogFn | None = None,
+) -> dict[str, Any]:
+    """Dial OpenStack for one inventory. Callers use ``cloud_inventory``."""
+    settings = settings or get_settings()
     ctx = build_context(env, settings)
     out: dict[str, Any] = {
         "available": False,
@@ -964,11 +1041,6 @@ def cloud_inventory(
     try:
         native = _inventory_via_api(ctx)
         if native is not None:
-            if cache_key and native.get("available"):
-                _CACHE[cache_key] = (
-                    time.monotonic(),
-                    {k: v for k, v in native.items() if k != "cached"},
-                )
             return native
         errors: list[str] = []
         bundled = _run_admin(
@@ -1010,11 +1082,6 @@ def cloud_inventory(
         )
         if errors and out["available"]:
             out["error"] = None
-        if cache_key and out.get("available"):
-            _CACHE[cache_key] = (
-                time.monotonic(),
-                {k: v for k, v in out.items() if k != "cached"},
-            )
         return out
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)[:200]

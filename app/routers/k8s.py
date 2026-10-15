@@ -17,6 +17,7 @@ from app.models import Environment
 from app.routers import terminal as term
 from app.schemas import Principal
 from app.services import k8s_ops
+from app.services.read_cache import cached_read
 from app.services.demo import (
     DEMO_JOB_MESSAGE,
     canned_gateways,
@@ -158,17 +159,47 @@ def _check_kind(kind: str, allowed: frozenset[str]) -> str:
     return text
 
 
+def _k8s_read_key(
+    env: Environment,
+    kind: str,
+    *,
+    namespace: str | None = None,
+    pods_only: bool | None = None,
+) -> str:
+    """Live-read cache key. Empty when the environment has no id.
+
+    ``k8s.{kind}:{environment_id}`` plus ``:{namespace}`` when the handler
+    is namespaced, and ``:pods_only={0|1}`` for the workloads flag.
+    """
+    env_id = str(getattr(env, "id", "") or "").strip()
+    if not env_id:
+        return ""
+    key = f"k8s.{kind}:{env_id}"
+    if namespace is not None:
+        key += f":{namespace}"
+    if pods_only is not None:
+        key += f":pods_only={int(bool(pods_only))}"
+    return key
+
+
 @router.get("/environments/{environment_id}/k8s/workloads")
 def get_workloads(
     namespace: str = Query(default=""),
     pods_only: bool = Query(default=False),
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     ns = _check_namespace(namespace, allow_empty=True)
     if is_demo_env(env):
         return canned_workloads(namespace=ns, pods_only=pods_only)
-    return k8s_ops.list_workloads(env, settings, namespace=ns, pods_only=pods_only)
+    return cached_read(
+        _k8s_read_key(env, "workloads", namespace=ns, pods_only=pods_only),
+        lambda: k8s_ops.list_workloads(
+            env, settings, namespace=ns, pods_only=pods_only
+        ),
+        refresh=refresh,
+    )
 
 
 @router.post(
@@ -347,13 +378,18 @@ def remove_namespace(
 @router.get("/environments/{environment_id}/k8s/services")
 def get_services(
     namespace: str = Query(default=""),
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     ns = _check_namespace(namespace, allow_empty=True)
     if is_demo_env(env):
         return canned_services(namespace=ns)
-    return k8s_ops.list_services(env, settings, namespace=ns)
+    return cached_read(
+        _k8s_read_key(env, "services", namespace=ns),
+        lambda: k8s_ops.list_services(env, settings, namespace=ns),
+        refresh=refresh,
+    )
 
 
 @router.delete("/environments/{environment_id}/k8s/services/{namespace}/{name}")
@@ -371,47 +407,67 @@ def remove_service(
 @router.get("/environments/{environment_id}/k8s/ingresses")
 def get_ingresses(
     namespace: str = Query(default=""),
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     ns = _check_namespace(namespace, allow_empty=True)
     if is_demo_env(env):
         return canned_ingresses(namespace=ns)
-    return k8s_ops.list_ingresses(env, settings, namespace=ns)
+    return cached_read(
+        _k8s_read_key(env, "ingresses", namespace=ns),
+        lambda: k8s_ops.list_ingresses(env, settings, namespace=ns),
+        refresh=refresh,
+    )
 
 
 @router.get("/environments/{environment_id}/k8s/gateways")
 def get_gateways(
     namespace: str = Query(default=""),
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     ns = _check_namespace(namespace, allow_empty=True)
     if is_demo_env(env):
         return canned_gateways(namespace=ns)
-    return k8s_ops.list_gateways(env, settings, namespace=ns)
+    return cached_read(
+        _k8s_read_key(env, "gateways", namespace=ns),
+        lambda: k8s_ops.list_gateways(env, settings, namespace=ns),
+        refresh=refresh,
+    )
 
 
 @router.get("/environments/{environment_id}/k8s/httproutes")
 def get_httproutes(
     namespace: str = Query(default=""),
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     ns = _check_namespace(namespace, allow_empty=True)
     if is_demo_env(env):
         return canned_httproutes(namespace=ns)
-    return k8s_ops.list_httproutes(env, settings, namespace=ns)
+    return cached_read(
+        _k8s_read_key(env, "httproutes", namespace=ns),
+        lambda: k8s_ops.list_httproutes(env, settings, namespace=ns),
+        refresh=refresh,
+    )
 
 
 @router.get("/environments/{environment_id}/k8s/metallb/pools")
 def get_metallb_pools(
+    refresh: bool = Query(default=False),
     env: Environment = Depends(get_env_scoped("viewer")),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     if is_demo_env(env):
         return canned_metallb_pools()
-    return k8s_ops.list_metallb_pools(env, settings)
+    return cached_read(
+        _k8s_read_key(env, "metallb_pools"),
+        lambda: k8s_ops.list_metallb_pools(env, settings),
+        refresh=refresh,
+    )
 
 
 @router.get("/environments/{environment_id}/k8s/persistentvolumeclaims")

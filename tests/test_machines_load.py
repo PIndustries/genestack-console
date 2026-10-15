@@ -10,7 +10,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert "refreshFleetLine(envId)" in text
     assert "loadDeployMap(envId)" not in text
     assert 'activePtab === "kubernetes"' in text
-    assert "environment_servers.js?v=ls72" in text
+    assert "environment_servers.js?v=ls73" in text
     assert "environment_next.js?v=ls71" in text
     assert "environment_deploy_map.js?v=ls75" in text
     assert 'nextStripHtml("overview")' in text
@@ -19,9 +19,29 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert servers.status_code == 200
     body = servers.text
     paint = body.split('msg.textContent = "Loading…"', 1)[1].split("loadReach(envId)", 1)[0]
-    waited = paint.split("await Promise.all", 1)[1].split("]);", 1)[0]
-    assert "/servers`" in waited or "/servers\"" in waited or "/servers`" in paint
+    assert "tbody.innerHTML" in paint
+    before_table = paint.split("tbody.innerHTML", 1)[0]
+    assert "/servers`" in before_table or '/servers"' in before_table
+    # The wait that gates the table is the inventory read, not the node dial.
+    assert "await " in before_table
+    first_wait = before_table.split("await ", 1)[1]
+    waited = first_wait.split(";", 1)[0]
+    if "Promise.all" in waited:
+        waited = first_wait.split("]);", 1)[0]
+    assert "/servers" in waited
     assert "/k8s/nodes" not in waited
+    assert "/platform" not in waited
+    assert "/servers/reach" not in before_table
+
+    platform = client.get("/static/js/pages/environment_platform.js")
+    assert platform.status_code == 200
+    platform_src = platform.text
+    card = platform_src.split("export async function loadPlatformCard", 1)[1]
+    assert "/servers`" in card or '/servers"' in card
+    rows = platform_src.split("function rowsHtml", 1)[1].split("function inspTabState", 1)[0]
+    assert "pending" in rows
+    assert "checkingCell()" in rows
+    assert 'muted">checking</span>' in platform_src.split("function checkingCell", 1)[1].split("function nodeDown", 1)[0]
 
     deploy = client.get("/static/js/pages/environment_deploy_map.js")
     assert deploy.status_code == 200
@@ -59,7 +79,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     shell = client.get("/static/js/app.js")
     assert "healthMisses" in shell.text
     assert "health: slow" in shell.text
-    assert "environment_detail.js?v=ls75" in shell.text
+    assert "environment_detail.js?v=ls76" in shell.text
     assert "env_wizard.js?v=ls67" in shell.text
 
     nxt = client.get("/static/js/pages/environment_next.js")

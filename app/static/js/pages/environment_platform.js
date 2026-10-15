@@ -15,6 +15,7 @@ let inspTab = "overview";
 let menuOpen = "";
 let refreshTimer = null;
 let inflight = null;
+let platformLoadGen = 0;
 let logsText = "";
 let logsFor = "";
 let servicesState = null;
@@ -79,7 +80,56 @@ function talosNodes(nodes) {
   return (nodes || []).filter((n) => !n || n.os !== "ubuntu");
 }
 
+function serverOs(server) {
+  // `os` on the inventory row keeps Ubuntu out of the Talos table.
+  // adopt:kubespray is the same mark when the server list has no os field.
+  const raw = server && server.os != null ? String(server.os).trim() : "";
+  if (raw) return raw.toLowerCase();
+  if (String((server && server.adopt) || "") === "kubespray") return "ubuntu";
+  return "";
+}
+
+function nodesFromServers(data) {
+  const list = Array.isArray(data) ? data : data && Array.isArray(data.servers) ? data.servers : [];
+  const nodes = [];
+  for (const server of list) {
+    if (!server || typeof server !== "object" || server.assigned === false) continue;
+    const name = String(server.hostname || server.name || "").trim();
+    if (!name) continue;
+    nodes.push({
+      name,
+      private_ip: server.private_ip || server.ip || "",
+      public_ip: server.public_ip || "",
+      roles: server.roles || [],
+      os: serverOs(server),
+      pending: true,
+      talos: { pending: true },
+      kubernetes: null,
+      openstack: null,
+    });
+  }
+  return nodes;
+}
+
+function nodePending(info) {
+  if (!info || typeof info !== "object") return false;
+  if (info.pending) return true;
+  const talos = info.talos && typeof info.talos === "object" ? info.talos : null;
+  return !!(talos && talos.pending);
+}
+
+function checkingCell() {
+  return '<span class="muted">checking</span>';
+}
+
+function nodeDown(n) {
+  // Still dialing. Not a down machine.
+  if (!n || nodePending(n)) return false;
+  return !talosUp(n) || k8sReady(n.kubernetes) === false;
+}
+
 function talosStatusLabel(talos) {
+  if (talos && talos.pending) return "checking";
   if (talos && talos.reachable) return talos.version || "up";
   const err = String((talos && talos.error) || "");
   if (!err || err === "no ip") return "down";
@@ -178,7 +228,7 @@ function filteredNodes(nodes) {
   return list.filter((n) => {
     if (filter === "cp") return isControlPlane(n && n.roles);
     if (filter === "worker") return !isControlPlane(n && n.roles);
-    if (filter === "down") return !talosUp(n) || k8sReady(n && n.kubernetes) === false;
+    if (filter === "down") return nodeDown(n);
     return true;
   });
 }
@@ -186,9 +236,12 @@ function filteredNodes(nodes) {
 function statsHtml(data) {
   const c = clusterFrom(data);
   const nodes = data.nodes || [];
-  const talos = (c.talos_versions || []).join(" · ") || "—";
-  const k8s = (c.kubernetes_versions || []).join(" · ") || "—";
-  const readyOk = c.machines > 0 && c.ready === c.machines && c.talos_reachable === c.machines;
+  const waiting = nodes.some((n) => nodePending(n));
+  const talos = waiting ? "checking" : (c.talos_versions || []).join(" · ") || "—";
+  const k8s = waiting ? "checking" : (c.kubernetes_versions || []).join(" · ") || "—";
+  const readyOk = waiting ? null : c.machines > 0 && c.ready === c.machines && c.talos_reachable === c.machines;
+  const talosOk = waiting ? null : c.talos_reachable === c.machines && c.machines > 0;
+  const reachLabel = waiting ? "checking" : `${c.talos_reachable || 0}/${nodes.length}`;
   return `
     <div class="om-stats">
       <div class="om-stat">
@@ -197,7 +250,7 @@ function statsHtml(data) {
       </div>
       <div class="om-stat">
         <div class="om-stat-k">Talos</div>
-        <div class="om-stat-v">${dot(c.talos_reachable === c.machines && c.machines > 0)} <code>${esc(talos)}</code></div>
+        <div class="om-stat-v">${dot(talosOk)} <code>${esc(talos)}</code></div>
       </div>
       <div class="om-stat">
         <div class="om-stat-k">Kubernetes</div>
@@ -213,7 +266,7 @@ function statsHtml(data) {
       </div>
       <div class="om-stat">
         <div class="om-stat-k">Reachable</div>
-        <div class="om-stat-v">${esc(String(c.talos_reachable || 0))}/${esc(String(nodes.length))}</div>
+        <div class="om-stat-v">${esc(reachLabel)}</div>
       </div>
     </div>`;
 }
@@ -255,7 +308,7 @@ function filterHtml(nodes) {
   const all = nodes.length;
   const cp = nodes.filter((n) => isControlPlane(n.roles)).length;
   const w = all - cp;
-  const down = nodes.filter((n) => !talosUp(n) || k8sReady(n.kubernetes) === false).length;
+  const down = nodes.filter((n) => nodeDown(n)).length;
   const btn = (id, label, count) => {
     const on = filter === id ? " active" : "";
     return `<button type="button" class="om-filter${on}" data-pf-filter="${id}">${esc(label)} <span class="om-count">${count}</span></button>`;
@@ -313,6 +366,7 @@ function rowsHtml(nodes) {
         const talos = info.talos && typeof info.talos === "object" ? info.talos : {};
         const name = info.name || "?";
         const sel = name === selected ? " pf-row-sel" : "";
+        const pending = nodePending(info);
         const ips = [info.private_ip ? `priv ${info.private_ip}` : "", info.public_ip ? `pub ${info.public_ip}` : ""]
           .filter(Boolean)
           .join(" · ");
@@ -321,17 +375,24 @@ function rowsHtml(nodes) {
               .filter(Boolean)
               .join(" · ")
           : "—";
-        const talosCell = `${dot(talos.reachable === true)}${
+        // Pending is the inventory paint. No down-dot until the dial returns.
+        const talosCell = pending
+          ? checkingCell()
+          : `${dot(talos.reachable === true)}${
           talos.reachable
             ? `<code>${esc(talos.version || "up")}</code>`
             : `<span class="muted" title="${esc(talos.error || "")}">${esc(talosStatusLabel(talos))}</span>`
         }`;
-        const k8sCell = kn
+        const k8sCell = pending
+          ? checkingCell()
+          : kn
           ? `${dot(k8sReady(kn))}<code>${esc(kn.version || kn.status || "—")}</code>${
               nodeCordoned(kn) === true ? ' <span class="pill warn">cordoned</span>' : ""
             }`
           : '<span class="muted">not joined</span>';
-        const osCell = os
+        const osCell = pending
+          ? checkingCell()
+          : os
           ? `${dot(novaUp(os))}<span class="muted">${esc(os.state || os.status || "—")}</span>`
           : '<span class="muted">—</span>';
         return `<tr class="${sel.trim()}" data-pf-sel="${esc(name)}">
@@ -378,6 +439,7 @@ function inspOverview(info) {
   const kn = info.kubernetes && typeof info.kubernetes === "object" ? info.kubernetes : null;
   const os = info.openstack && typeof info.openstack === "object" ? info.openstack : {};
   const talos = info.talos && typeof info.talos === "object" ? info.talos : {};
+  const pending = nodePending(info);
   const copy = (label, value) =>
     value
       ? `<button type="button" class="om-copy" data-copy="${esc(value)}" title="Copy ${esc(label)}">${esc(label)} <code>${esc(
@@ -391,16 +453,22 @@ function inspOverview(info) {
       <div><span class="k">Roles</span> ${roleChips(info.roles)}</div>
       <div><span class="k">Private IP</span> ${copy("private", info.private_ip) || "—"}</div>
       <div><span class="k">Public IP</span> ${copy("public", info.public_ip) || "—"}</div>
-      <div><span class="k">Talos</span> ${dot(talos.reachable === true)} ${esc(talos.version || talos.error || "—")}</div>
+      <div><span class="k">Talos</span> ${
+        pending ? checkingCell() : `${dot(talos.reachable === true)} ${esc(talos.version || talos.error || "—")}`
+      }</div>
       <div><span class="k">Kubernetes</span> ${
-        kn
+        pending
+          ? checkingCell()
+          : kn
           ? `${dot(k8sReady(kn))} <code>${esc(kn.name || "—")}</code> ${esc(kn.status || "")} ${esc(kn.version || "")}`
           : "not joined"
       }</div>
       <div><span class="k">Hardware</span> ${
         kn ? esc([kn.cpu_capacity ? `${kn.cpu_capacity} CPU` : "", kn.mem_gi != null ? `${kn.mem_gi} GiB` : ""].filter(Boolean).join(" · ") || "—") : "—"
       }</div>
-      <div><span class="k">Nova</span> ${os && os.host ? `${esc(os.host)} ${esc(os.state || "")}` : "—"}</div>
+      <div><span class="k">Nova</span> ${
+        pending ? checkingCell() : os && os.host ? `${esc(os.host)} ${esc(os.state || "")}` : "—"
+      }</div>
     </div>
     ${
       canRun()
@@ -1171,7 +1239,22 @@ async function onClick(e) {
   }
 }
 
+function unavailableHtml(err) {
+  return err && err.status === 404
+    ? `<div class="muted">Machines join API not deployed yet.</div>`
+    : `<div class="muted">Unavailable — ${esc((err && err.message) || "error")}</div>`;
+}
+
+function paintPendingInventory(nodes, failHtml) {
+  cache = { nodes, pending: true };
+  render();
+  if (!failHtml) return;
+  const fresh = document.getElementById("pf-body");
+  if (fresh) fresh.insertAdjacentHTML("beforeend", failHtml);
+}
+
 export async function loadPlatformCard(envId, { silent = false, refresh = false } = {}) {
+  const loadGen = ++platformLoadGen;
   activeEnvId = envId || "";
   const body = document.getElementById("pf-body");
   const msg = document.getElementById("pf-msg");
@@ -1192,9 +1275,24 @@ export async function loadPlatformCard(envId, { silent = false, refresh = false 
     return;
   }
   if (!silent && msg) msg.textContent = "";
+  // Refresh and silent reloads keep the rows already on screen.
   if (!silent && !cache) {
     body.classList.remove("muted");
     body.innerHTML = skeletonHtml(5);
+  }
+  const requestedEnv = activeEnvId;
+  const early = { failed: false, html: "" };
+  // Inventory is a database read. Paint those names before the Talos dial.
+  if (!cache) {
+    api(`/api/v1/environments/${encodeURIComponent(requestedEnv)}/servers`)
+      .then((data) => {
+        if (loadGen !== platformLoadGen || activeEnvId !== requestedEnv) return;
+        if (cache && !cache.pending) return;
+        paintPendingInventory(nodesFromServers(data), early.failed ? early.html : "");
+      })
+      .catch(() => {
+        /* server list failed: keep the skeleton and still wait for /platform */
+      });
   }
   if (inflight) {
     try {
@@ -1203,13 +1301,15 @@ export async function loadPlatformCard(envId, { silent = false, refresh = false 
       /* continue */
     }
   }
+  if (loadGen !== platformLoadGen || activeEnvId !== requestedEnv) return;
   const refreshQ = refresh ? "?refresh=1" : "";
-  inflight = api(`/api/v1/environments/${encodeURIComponent(activeEnvId)}/platform${refreshQ}`, { timeout: 25000 });
+  const request = api(`/api/v1/environments/${encodeURIComponent(activeEnvId)}/platform${refreshQ}`, { timeout: 25000 });
+  inflight = request;
   let d;
   try {
-    d = await inflight;
+    d = await request;
   } catch (e) {
-    if (activeEnvId !== envId) return;
+    if (activeEnvId !== requestedEnv || loadGen !== platformLoadGen) return;
     if (live.platform && live.envId === envId) {
       if (msg) msg.textContent = "";
       cache = live.platform;
@@ -1218,28 +1318,34 @@ export async function loadPlatformCard(envId, { silent = false, refresh = false 
     }
     if (msg) msg.textContent = "";
     body.classList.remove("muted");
+    const unavailable = unavailableHtml(e);
+    early.failed = true;
+    early.html = unavailable;
+    if (cache && cache.pending) {
+      paintPendingInventory(cache.nodes || [], unavailable);
+      return;
+    }
     const overview = document.getElementById("pf-overview");
     if (overview && !overview.innerHTML) overview.innerHTML = overviewHtml({ nodes: [] });
-    body.innerHTML =
-      e && e.status === 404
-        ? `<div class="muted">Machines join API not deployed yet.</div>`
-        : `<div class="muted">Unavailable — ${esc(e.message || "error")}</div>`;
+    body.innerHTML = unavailable;
     return;
   } finally {
-    inflight = null;
+    if (inflight === request) inflight = null;
   }
-  if (activeEnvId !== envId) return;
+  if (activeEnvId !== envId || loadGen !== platformLoadGen) return;
   if (msg) msg.textContent = "";
   const next = d && typeof d === "object" ? d : { nodes: [] };
   const nextN = Array.isArray(next.nodes) ? next.nodes.length : 0;
   const prevN = cache && Array.isArray(cache.nodes) ? cache.nodes.length : 0;
-  if (nextN || !prevN) cache = next;
+  const pendingShown = !!(cache && cache.pending);
+  if (nextN || !prevN || pendingShown) cache = next;
   bindLiveEnv(activeEnvId);
   applyLive({ platform: cache });
   render();
 }
 
 export function destroyPlatformCard() {
+  platformLoadGen += 1;
   stopRefresh();
   const parked = document.getElementById("pf-host-modal");
   if (parked && parked.parentElement === document.body) parked.remove();
