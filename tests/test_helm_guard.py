@@ -9,7 +9,10 @@ import subprocess
 import textwrap
 from datetime import UTC, datetime, timedelta
 
+import shlex
+
 from app.services.helm_guard import (
+    REPO_INDEX_STAMP,
     arm_helm_guard,
     envoy_gateway_version,
     install_helm_guard,
@@ -193,6 +196,8 @@ def test_yq_shim_skips_python_yq(tmp_path):
     )
     shim = install_yq_shim(tmp_path / "guard")
     env = dict(os.environ)
+    # Unset: this case must use the mikefarah binary already on PATH.
+    env.pop("YQ_DOWNLOAD_URL", None)
     env["PATH"] = (
         f"{tmp_path / 'python-yq'}{os.pathsep}{tmp_path / 'mike'}"
         f"{os.pathsep}/bin{os.pathsep}/usr/bin"
@@ -211,7 +216,21 @@ def test_yq_shim_skips_python_yq(tmp_path):
 
 
 def test_yq_shim_downloads_mikefarah_when_python_yq_is_first(tmp_path):
+    """Python yq first must download YQ_DOWNLOAD_URL, not run a later yq.
+
+    GitHub-hosted Ubuntu installs mikefarah yq at /usr/bin/yq. A decoy later
+    on PATH stands in for that binary.
+    """
     _yq(tmp_path / "python-yq" / "yq", "#!/bin/sh\necho 'yq 3.4.3'\n")
+    _yq(
+        tmp_path / "system" / "yq",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  echo 'yq (https://github.com/mikefarah/yq/) version v4.54.1'\n"
+        "  exit 0\n"
+        "fi\n"
+        "echo system-yq \"$*\"\n",
+    )
     payload = tmp_path / "payload"
     _yq(
         payload,
@@ -224,7 +243,10 @@ def test_yq_shim_downloads_mikefarah_when_python_yq_is_first(tmp_path):
     )
     shim = install_yq_shim(tmp_path / "guard")
     env = dict(os.environ)
-    env["PATH"] = f"{tmp_path / 'python-yq'}{os.pathsep}/bin{os.pathsep}/usr/bin"
+    env["PATH"] = (
+        f"{tmp_path / 'python-yq'}{os.pathsep}{tmp_path / 'system'}"
+        f"{os.pathsep}/bin{os.pathsep}/usr/bin"
+    )
     env["YQ_DOWNLOAD_URL"] = payload.as_uri()
     result = subprocess.run(
         [str(shim), "eval", ".networking.ENABLE_SSL // false"],
@@ -255,6 +277,87 @@ def test_arm_puts_the_wrapper_first_on_path(tmp_path):
     script = render_helm_guard()
     assert "gateways.gateway.networking.k8s.io" in script
     assert "allowScheduling" not in script
+
+
+def test_repo_update_downloads_once_then_reuses_the_index(tmp_path):
+    """One real helm repo update per deploy. Later updates do not download."""
+    calls = tmp_path / "calls"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake = bindir / "helm"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n"
+        'if [ "$1" = "repo" ] && [ "$2" = "update" ]; then\n'
+        '  if [ "${GENESTACK_TEST_HELM_FAIL:-}" = "1" ]; then\n'
+        "    echo downloaded-fail\n"
+        "    exit 1\n"
+        "  fi\n"
+        "  echo downloaded\n"
+        "  exit 0\n"
+        "fi\n"
+        "echo ran\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    base = dict(os.environ)
+    base["PATH"] = f"{bindir}{os.pathsep}{base.get('PATH', '')}"
+    guard_dir = tmp_path / "guard"
+    armed = arm_helm_guard(base, guard_dir)
+    assert armed["PATH"].startswith(str(guard_dir))
+    assert armed["GENESTACK_HELM_REAL"] == str(fake)
+    assert REPO_INDEX_STAMP in render_helm_guard()
+    stamp = guard_dir / REPO_INDEX_STAMP
+    assert not stamp.exists()
+
+    def run(*args: str, fail: bool = False, env: dict | None = None):
+        run_env = dict(env or armed)
+        run_env["GENESTACK_HELM_GUARD_DELAY"] = "0"
+        if fail:
+            run_env["GENESTACK_TEST_HELM_FAIL"] = "1"
+        else:
+            run_env.pop("GENESTACK_TEST_HELM_FAIL", None)
+        return subprocess.run(
+            ["helm", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=run_env,
+            timeout=20,
+        )
+
+    failed = run("repo", "update", fail=True)
+    assert failed.returncode == 1, failed.stderr
+    assert "downloaded-fail" in failed.stdout
+    assert not stamp.exists()
+
+    first = run("repo", "update")
+    assert first.returncode == 0, first.stderr
+    assert "downloaded" in first.stdout
+    assert stamp.is_file()
+
+    second = run("repo", "update", "openstack-helm")
+    assert second.returncode == 0, second.stderr
+    assert "downloaded" not in second.stdout
+    assert "reusing the helm repo index" in second.stdout
+
+    listed = run("repo", "list")
+    assert listed.returncode == 0, listed.stderr
+    assert "ran" in listed.stdout
+
+    recorded = calls.read_text(encoding="utf-8").splitlines()
+    assert recorded.count("repo update") == 2
+    assert "repo update openstack-helm" not in recorded
+    assert "repo list" in recorded
+
+    stamp.write_text("stale\n", encoding="utf-8")
+    rearmed = arm_helm_guard(base, guard_dir)
+    assert not stamp.exists()
+    third = run("repo", "update", env=rearmed)
+    assert third.returncode == 0, third.stderr
+    assert "downloaded" in third.stdout
+    assert calls.read_text(encoding="utf-8").splitlines().count("repo update") == 3
 
 
 def test_gateway_crds_run_before_cert_manager_and_missing_crds_fail(tmp_path):

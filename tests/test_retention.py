@@ -54,7 +54,9 @@ def _count(db, model) -> int:
 
 
 def test_sweep_deletes_old_finished_jobs_keeps_recent_and_active(db, settings):
-    from app.models import Job, JobStatus
+    from sqlalchemy import select
+
+    from app.models import Job, JobLogChunk, JobStatus
     from app.services.retention import run_retention_sweep
 
     old = Job(
@@ -71,13 +73,19 @@ def test_sweep_deletes_old_finished_jobs_keeps_recent_and_active(db, settings):
     )
     active = Job(operation="internal.health", status=JobStatus.queued, log_text="")
     db.add_all([old, recent, active])
+    db.flush()
+    db.add(JobLogChunk(job_id=old.id, n=4, body="gone"))
+    db.add(JobLogChunk(job_id=recent.id, n=4, body="keep"))
     db.commit()
     old_id, recent_id, active_id = old.id, recent.id, active.id
 
     counts = run_retention_sweep(db, settings)
     assert counts["jobs"] >= 1
     assert db.get(Job, old_id) is None  # log_text goes with the row
+    assert db.scalars(select(JobLogChunk).where(JobLogChunk.job_id == old_id)).all() == []
     assert db.get(Job, recent_id) is not None
+    kept = db.scalars(select(JobLogChunk).where(JobLogChunk.job_id == recent_id)).all()
+    assert [row.body for row in kept] == ["keep"]
     assert db.get(Job, active_id) is not None  # unfinished jobs are never swept
 
 

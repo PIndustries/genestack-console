@@ -92,6 +92,18 @@ def _init_bare_remote(path: Path) -> Path:
     return path
 
 
+def _stored_log(job) -> str:
+    """Log as a reader sees it (chunk rows, or the legacy column)."""
+    from app.models import Job
+    from app.services.job_runner import read_job_log
+
+    db = SessionLocal()
+    try:
+        return read_job_log(db, db.get(Job, job.id))
+    finally:
+        db.close()
+
+
 def _run_export(env_id: str, created_by: str = "state-test") -> tuple:
     """Create + run a state.export job synchronously. Returns (job, audit rows)."""
     db = SessionLocal()
@@ -284,7 +296,7 @@ def test_export_dry_run_writes_nothing_commits_nothing(tmp_path):
     assert job.status == JobStatus.success, job.error
     assert job.dry_run is True
 
-    log_text = job.log_text or ""
+    log_text = _stored_log(job)
     assert f"version {version}" in log_text
     assert f"dry-run: would write {repo / 'state' / env.name / 'provider'}" in log_text
     assert "would commit" in log_text
@@ -320,7 +332,7 @@ def test_export_dry_run_with_remote_logs_push(tmp_path):
 
     job, audits = _run_export(env.id)
     assert job.status == JobStatus.success, job.error
-    assert f"would push to remote '{remote}'" in (job.log_text or "")
+    assert f"would push to remote '{remote}'" in _stored_log(job)
     assert audits[0].details["dry_run"] is True
     # The bare remote received nothing
     assert _git(remote, "for-each-ref") == ""
@@ -393,7 +405,7 @@ def test_export_second_run_is_noop(tmp_path):
 
     second, audits = _run_export(env.id)
     assert second.status == JobStatus.success, second.error
-    assert "no changes staged, skipping commit" in (second.log_text or "")
+    assert "no changes staged, skipping commit" in _stored_log(second)
     assert _git(repo, "rev-parse", "HEAD") == head
     assert _git(repo, "rev-list", "--count", "HEAD") == "2"
     # Second audit recorded the no-op (no commit, no push)
@@ -424,7 +436,7 @@ def test_export_pushes_to_bare_remote(tmp_path):
 
     job, audits = _run_export(env.id)
     assert job.status == JobStatus.success, job.error
-    assert f"pushed main to remote '{remote}'" in (job.log_text or "")
+    assert f"pushed main to remote '{remote}'" in _stored_log(job)
 
     # The remote's HEAD now contains the state subtree
     assert _git(remote, "rev-parse", "--abbrev-ref", "HEAD") == "main"
@@ -616,7 +628,7 @@ def test_export_excludes_secrets_files(tmp_path):
     job, audits = _run_export(env.id)
     assert job.status == JobStatus.success, job.error
 
-    log_text = job.log_text or ""
+    log_text = _stored_log(job)
     # doc secrets (1) + key pair (1) = 2 excluded files
     assert "[state.export] excluded 2 secret file(s)" in log_text
 
@@ -651,7 +663,7 @@ def test_export_excludes_secrets_log_only(tmp_path):
 
     job, _ = _run_export(env.id)
     assert job.status == JobStatus.success, job.error
-    assert "excluded" not in (job.log_text or "")
+    assert "excluded" not in _stored_log(job)
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +754,7 @@ def test_export_noop_not_triggered_by_unrelated_staged_file(tmp_path):
 
     second, _ = _run_export(env.id)
     assert second.status == JobStatus.success, second.error
-    assert "no changes staged, skipping commit" in (second.log_text or "")
+    assert "no changes staged, skipping commit" in _stored_log(second)
     # No new commit: the unrelated staged file did not trigger one
     assert _git(repo, "rev-parse", "HEAD") == head
     assert _git(repo, "rev-list", "--count", "HEAD") == "2"

@@ -34,13 +34,21 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 
-from app.models import AuditLog, EnvMutex, Environment, HostVM, Job, JobStatus
+from app.models import (
+    AuditLog,
+    EnvMutex,
+    Environment,
+    HostVM,
+    Job,
+    JobLogChunk,
+    JobStatus,
+)
 from app.schemas import OperationSpec
 from app.services import genestack_bridge as bridge
 from app.services import agent_relay
@@ -62,14 +70,16 @@ log = logging.getLogger(__name__)
 # Hard ceiling for any per-op timeout (6h) — constant, not configurable.
 MAX_JOB_TIMEOUT_SECONDS = 6 * 3600
 
-# Job-log commit batching: append_log keeps the log in memory per job and
-# commits once EITHER threshold is exceeded, or on an explicit flush_logs()
-# at job finalization. This ends the O(n^2) pattern of a full log_text
-# column rewrite plus commit/fsync per log line on long ops (deploy,
-# tempest). Each commit stays short and bounded, so the SQLite write lock
-# is released between bursts instead of being held across the dispatch.
+# Job-log commit batching. append_log adds JobLogChunk rows and commits once
+# EITHER threshold is exceeded, or on flush_logs() at finalization. The
+# jobs.log_text column is not assigned, so a flush does not rewrite the
+# accumulated log. Pending chunk rows stay on the Session until that commit,
+# so a caller that commits without flush_logs still persists them. Each
+# commit stays short, and the SQLite write lock is released between bursts
+# instead of being held across the dispatch.
 LOG_FLUSH_BYTES = 4 * 1024
 LOG_FLUSH_LINES = 4
+_CHUNK_PAGE = 40
 
 RECOVERY_ERROR = "job expired/recovered after restart"
 ABANDONED_ERROR = "worker restarted; in-flight job was abandoned"
@@ -118,6 +128,128 @@ class JobDeadlineExceededError(RuntimeError):
 
 
 CANCELLED_ERROR = "cancelled by operator"
+
+
+def read_job_log(db: Session, job: Job | None) -> str:
+    """Full log. Chunk rows win when any exist; otherwise the legacy column."""
+    if job is None:
+        return ""
+    bodies = db.scalars(
+        select(JobLogChunk.body)
+        .where(JobLogChunk.job_id == job.id)
+        .order_by(JobLogChunk.seq.asc())
+    ).all()
+    if bodies:
+        return "".join(bodies)
+    return job.log_text or ""
+
+
+def chunk_log_totals(db: Session, job_ids: list[str]) -> dict[str, tuple[int, int]]:
+    """``job_id -> (max seq, total chars)`` for jobs that have chunk rows.
+
+    Uses ``n``, not ``body``, so the historical text is not selected.
+    """
+    if not job_ids:
+        return {}
+    rows = db.execute(
+        select(
+            JobLogChunk.job_id,
+            func.max(JobLogChunk.seq),
+            func.coalesce(func.sum(JobLogChunk.n), 0),
+        )
+        .where(JobLogChunk.job_id.in_(job_ids))
+        .group_by(JobLogChunk.job_id)
+    ).all()
+    return {job_id: (int(seq), int(total or 0)) for job_id, seq, total in rows}
+
+
+def chunks_since(db: Session, job_id: str, after_seq: int | None) -> str:
+    """Chunk bodies with ``seq`` greater than ``after_seq``, in order.
+
+    ``after_seq`` None returns every chunk. Callers that only need the tail
+    or a delta must not use this for the historical prefix.
+    """
+    stmt = (
+        select(JobLogChunk.body)
+        .where(JobLogChunk.job_id == job_id)
+        .order_by(JobLogChunk.seq.asc())
+    )
+    if after_seq is not None:
+        stmt = stmt.where(JobLogChunk.seq > after_seq)
+    return "".join(db.scalars(stmt).all())
+
+
+def _chunk_prefix(db: Session, job_id: str, nchars: int) -> str:
+    if nchars <= 0:
+        return ""
+    parts: list[str] = []
+    size = 0
+    after: int | None = None
+    while size < nchars:
+        stmt = (
+            select(JobLogChunk.seq, JobLogChunk.body)
+            .where(JobLogChunk.job_id == job_id)
+            .order_by(JobLogChunk.seq.asc())
+            .limit(_CHUNK_PAGE)
+        )
+        if after is not None:
+            stmt = stmt.where(JobLogChunk.seq > after)
+        rows = db.execute(stmt).all()
+        if not rows:
+            break
+        for seq, body in rows:
+            text = body or ""
+            parts.append(text)
+            size += len(text)
+            after = int(seq)
+            if size >= nchars:
+                break
+        if len(rows) < _CHUNK_PAGE:
+            break
+    return "".join(parts)[:nchars]
+
+
+def chunk_log_tail(db: Session, job_id: str, nchars: int) -> str:
+    """Last ``nchars`` of the chunk log. Reads only the tail rows."""
+    if nchars <= 0:
+        return ""
+    parts: list[str] = []
+    size = 0
+    before: int | None = None
+    while size < nchars:
+        stmt = (
+            select(JobLogChunk.seq, JobLogChunk.body)
+            .where(JobLogChunk.job_id == job_id)
+            .order_by(JobLogChunk.seq.desc())
+            .limit(_CHUNK_PAGE)
+        )
+        if before is not None:
+            stmt = stmt.where(JobLogChunk.seq < before)
+        rows = db.execute(stmt).all()
+        if not rows:
+            break
+        for seq, body in rows:
+            text = body or ""
+            parts.append(text)
+            size += len(text)
+            before = int(seq)
+            if size >= nchars:
+                break
+        if len(rows) < _CHUNK_PAGE:
+            break
+    return "".join(reversed(parts))[-nchars:]
+
+
+def chunk_log_edges(
+    db: Session, job_id: str, total: int, *, head: int, tail: int
+) -> tuple[str, str]:
+    """Head and tail slices. Chunks strictly between them are not selected."""
+    if total <= 0:
+        return "", ""
+    head_text = _chunk_prefix(db, job_id, min(head, total))
+    if total <= head:
+        return head_text, ""
+    return head_text, chunk_log_tail(db, job_id, min(tail, total))
 
 _USER_STEP_KEYS = (
     "kind",
@@ -470,11 +602,10 @@ class JobRunner:
     def append_log(self, job: Job, line: str) -> None:
         stamp = _utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         chunk = f"[{stamp}] {logredact.redact_secret_line(line)}\n"
-        # Keep the in-memory column current on EVERY append so any commit —
-        # including one made outside this runner (the cancel API calls
-        # append_log and then commits its own session) — persists the full
-        # log so far. Only the commit itself is throttled (flush_logs).
-        job.log_text = (job.log_text or "") + chunk
+        # On the Session, not on jobs.log_text. Assigning that column is what
+        # makes SQLite rewrite the whole log. A caller commit (cancel API)
+        # persists the pending row without flush_logs.
+        self.db.add(JobLogChunk(job_id=job.id, n=len(chunk), body=chunk))
         self._log_lines[job.id] = self._log_lines.get(job.id, 0) + 1
         self._log_bytes[job.id] = self._log_bytes.get(job.id, 0) + len(chunk)
         if (
@@ -484,22 +615,21 @@ class JobRunner:
             self.flush_logs(job)
 
     def flush_logs(self, job: Job) -> None:
-        """Commit buffered log lines for one job; no-op when nothing pending.
+        """Commit buffered log chunks for one job; no-op when nothing pending.
 
-        Call at job finalization (success/failure/cancel/recovery) so the
-        log_text column is complete right after the job ends — SSE/live log
-        readers poll that column. Commits (not just flushes): a flush-only
-        session holds the SQLite write lock for the whole dispatch, which
-        deadlocks agent channel calls — agent_relay.agent_exec writes
-        agent_commands rows from the same thread on a second connection
-        while the job is still running. Threshold-bounded commits release
-        the lock between bursts instead of holding it across the dispatch.
+        Does not assign ``job.log_text``. Pending ``JobLogChunk`` rows are
+        already on this Session, so a caller commit without flush_logs
+        persists them too. Commits (not just flushes): a flush-only session
+        holds the SQLite write lock for the whole dispatch, which deadlocks
+        agent channel calls — agent_relay.agent_exec writes agent_commands
+        rows from the same thread on a second connection while the job is
+        still running. Threshold-bounded commits release the lock between
+        bursts instead of holding it across the dispatch.
         """
         if self._log_lines.pop(job.id, 0) == 0:
             self._log_bytes.pop(job.id, None)
             return
         self._log_bytes.pop(job.id, None)
-        self.db.add(job)
         self.db.commit()
 
     def write_audit(

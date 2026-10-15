@@ -7,9 +7,9 @@ line. This filter rewrites ``token=`` / ``ticket=`` values in every
 logs — defense in depth on top of the ticket mechanism.
 
 ``redact_secret_line`` does the same for persisted job logs: every line the
-job runner appends is scrubbed before it lands in ``jobs.log_text``, so a
-command that echoes a password, API key, token, or enrollment credential can
-never leave the secret in the stored log.
+job runner appends is scrubbed before it is stored, so a command that echoes
+a password, API key, token, or enrollment credential can never leave the
+secret in the stored log.
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def install(logger_name: str = "uvicorn.access") -> None:
 def redact_secret_line(line: str) -> str:
     """Scrub credential-like values from a single job-log line.
 
-    Applied to every line before it is persisted to ``jobs.log_text``:
+    Applied to every line before it is persisted:
 
       - ``Authorization: Bearer <token>``    → ``Authorization: <redacted>``
       - ``Bearer <token>`` / ``Basic <token>`` (standalone) → token → ``<redacted>``

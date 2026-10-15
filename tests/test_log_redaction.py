@@ -1,6 +1,6 @@
 """Job-log credential redaction (logredact.redact_secret_line + append_log).
 
-Every line the job runner persists to ``jobs.log_text`` is scrubbed first, so
+Every line the job runner persists is scrubbed first, so
 a command that echoes a password, API key, token, or enrollment credential
 cannot leave the secret in the stored log.
 """
@@ -113,7 +113,7 @@ def test_append_log_redacts_before_persist():
     """A secret echoed by a command never reaches the stored job log."""
     from app.db import SessionLocal
     from app.models import Job
-    from app.services.job_runner import JobRunner
+    from app.services.job_runner import JobRunner, read_job_log
 
     db = SessionLocal()
     job_id = ""
@@ -127,27 +127,31 @@ def test_append_log_redacts_before_persist():
         runner.append_log(job, "enroll token gsca_liveabc123xyz issued")
         runner.flush_logs(job)
         db.commit()
-        assert "SuperSecret1!" not in job.log_text
-        assert "gsca_liveabc123xyz" not in job.log_text
-        assert "<redacted>" in job.log_text
-        assert "gsca_***" in job.log_text
+        stored = read_job_log(db, job)
+        assert "SuperSecret1!" not in stored
+        assert "gsca_liveabc123xyz" not in stored
+        assert "<redacted>" in stored
+        assert "gsca_***" in stored
+        assert (job.log_text or "") == ""
         _finalize(db, job_id)
     finally:
         db.close()
 
-    # Re-read from a fresh session to prove the stored row is redacted.
+    # Re-read from a fresh session to prove the stored log is redacted.
     db = SessionLocal()
     try:
         row = db.get(Job, job_id)
-        assert "SuperSecret1!" not in row.log_text
-        assert "gsca_liveabc123xyz" not in row.log_text
+        stored = read_job_log(db, row)
+        assert "SuperSecret1!" not in stored
+        assert "gsca_liveabc123xyz" not in stored
+        assert (row.log_text or "") == ""
     finally:
         db.close()
 
 
 def test_append_log_preserves_normal_lines():
     from app.db import SessionLocal
-    from app.services.job_runner import JobRunner
+    from app.services.job_runner import JobRunner, read_job_log
 
     db = SessionLocal()
     job_id = ""
@@ -160,9 +164,10 @@ def test_append_log_preserves_normal_lines():
         runner.append_log(job, "ok: healthy, 3 hosts")
         runner.flush_logs(job)
         db.commit()
-        assert "Starting operation=internal.health" in job.log_text
-        assert "ok: healthy, 3 hosts" in job.log_text
-        assert "<redacted>" not in job.log_text
+        stored = read_job_log(db, job)
+        assert "Starting operation=internal.health" in stored
+        assert "ok: healthy, 3 hosts" in stored
+        assert "<redacted>" not in stored
         _finalize(db, job_id)
     finally:
         db.close()

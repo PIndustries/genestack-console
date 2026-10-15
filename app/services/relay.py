@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.models import (
     AlertEvent,
@@ -33,7 +33,15 @@ from app.models import (
     MetricSample,
 )
 from app.services import events
+from app.services.job_runner import (
+    chunk_log_tail,
+    chunk_log_totals,
+    chunks_since,
+)
 from app.services.workflow import parse_deploy_log
+
+# Tail shipped on job_log events. Not the whole log.
+_LOG_TAIL = 4000
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +56,28 @@ def _utcnow() -> datetime:
 
 def _status_value(status: JobStatus | str) -> str:
     return status.value if isinstance(status, JobStatus) else str(status)
+
+
+def _legacy_lengths(db: Session, job_ids: list[str]) -> dict[str, int]:
+    """Character length of jobs.log_text. Does not load the column into the ORM."""
+    if not job_ids:
+        return {}
+    rows = db.execute(
+        select(Job.id, func.length(Job.log_text)).where(Job.id.in_(job_ids))
+    ).all()
+    return {job_id: int(n or 0) for job_id, n in rows}
+
+
+def _legacy_delta_tail(db: Session, job_id: str, start: int, log_len: int) -> tuple[str, str]:
+    """New bytes since ``start`` and the last tail, via substr on the legacy column."""
+    tail_at = 1 if log_len <= _LOG_TAIL else log_len - _LOG_TAIL + 1
+    delta, tail = db.execute(
+        select(
+            func.substr(Job.log_text, start + 1, max(log_len - start, 0)),
+            func.substr(Job.log_text, tail_at, _LOG_TAIL),
+        ).where(Job.id == job_id)
+    ).one()
+    return delta or "", tail or ""
 
 
 def _stem_item(raw: Any) -> str:
@@ -74,6 +104,9 @@ class DBRelay:
         # insertion-ordered and capped at _MAX_TRACKED_JOBS.
         self._job_status: dict[str, str] = {}
         self._job_log_len: dict[str, int] = {}
+        # Max chunk seq already counted into _job_log_len. Growth after this
+        # seq is the delta; older chunk bodies are not selected.
+        self._job_log_seq: dict[str, int] = {}
         self._job_activity: dict[str, dict[str, Any]] = {}
         self._live = False
         # "Recently touched" window for new-job discovery in the jobs poll.
@@ -97,6 +130,7 @@ class DBRelay:
             # stays bounded; nothing is published either way.
             recent = db.scalars(
                 select(Job)
+                .options(defer(Job.log_text))
                 .where(Job.status != JobStatus.queued)
                 .order_by(Job.created_at.desc())
                 .limit(_MAX_TRACKED_JOBS)
@@ -104,9 +138,19 @@ class DBRelay:
             self._job_status = {
                 job.id: _status_value(job.status) for job in reversed(recent)
             }
-            self._job_log_len = {
-                job.id: len(job.log_text or "") for job in reversed(recent)
-            }
+            ids = [job.id for job in recent]
+            totals = chunk_log_totals(db, ids)
+            legacy_ids = [job_id for job_id in ids if job_id not in totals]
+            legacy_len = _legacy_lengths(db, legacy_ids)
+            self._job_log_len = {}
+            self._job_log_seq = {}
+            for job in reversed(recent):
+                if job.id in totals:
+                    seq, total = totals[job.id]
+                    self._job_log_len[job.id] = total
+                    self._job_log_seq[job.id] = seq
+                else:
+                    self._job_log_len[job.id] = legacy_len.get(job.id, 0)
         finally:
             db.close()
 
@@ -322,17 +366,23 @@ class DBRelay:
             conditions.append(Job.id.in_(list(self._job_status)))
         rows = db.scalars(
             select(Job)
+            .options(defer(Job.log_text))
             .where(Job.status != JobStatus.queued)
             .where(or_(*conditions))
             .order_by(Job.created_at.asc())
         ).all()
+        ids = [job.id for job in rows]
+        totals = chunk_log_totals(db, ids)
+        legacy_len = _legacy_lengths(db, [job_id for job_id in ids if job_id not in totals])
         live = False
         for job in rows:
             status = _status_value(job.status)
             if status == "running":
                 live = True
-            log_text = job.log_text or ""
-            log_len = len(log_text)
+            if job.id in totals:
+                max_seq, log_len = totals[job.id]
+            else:
+                max_seq, log_len = None, legacy_len.get(job.id, 0)
             prev_status = self._job_status.get(job.id)
             prev_len = self._job_log_len.get(job.id)
             if prev_status != status:
@@ -351,7 +401,25 @@ class DBRelay:
                     )
                 )
             if prev_len != log_len and log_len:
-                delta = parse_deploy_log(log_text[int(prev_len or 0) :])
+                if max_seq is None:
+                    delta_text, tail = _legacy_delta_tail(
+                        db, job.id, int(prev_len or 0), log_len
+                    )
+                else:
+                    prev_seq = self._job_log_seq.get(job.id)
+                    # No watermark yet: the whole chunk log is the delta.
+                    # After that, only rows newer than the watermark are read.
+                    if prev_seq is None or prev_len is None or int(prev_len) > log_len:
+                        delta_text = chunks_since(db, job.id, None)
+                    else:
+                        delta_text = chunks_since(db, job.id, prev_seq)
+                    tail = (
+                        delta_text[-_LOG_TAIL:]
+                        if len(delta_text) >= _LOG_TAIL
+                        else chunk_log_tail(db, job.id, _LOG_TAIL)
+                    )
+                    self._job_log_seq[job.id] = max_seq
+                delta = parse_deploy_log(delta_text)
                 prev_act = self._job_activity.get(job.id) or {}
                 item = _stem_item(delta.get("item") or prev_act.get("item") or "")
                 current = {
@@ -373,7 +441,7 @@ class DBRelay:
                     "operation": job.operation,
                     "status": status,
                     "log_len": log_len,
-                    "log_tail": log_text[-4000:],
+                    "log_tail": tail,
                     "current": current,
                     "error": job.error,
                 }
@@ -391,6 +459,7 @@ class DBRelay:
             evicted = next(iter(self._job_status))
             self._job_status.pop(evicted)
             self._job_log_len.pop(evicted, None)
+            self._job_log_seq.pop(evicted, None)
             self._job_activity.pop(evicted, None)
 
 

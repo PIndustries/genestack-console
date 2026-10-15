@@ -350,6 +350,51 @@ async def _test_job_log_growth_relays_without_status_change():
         events.unsubscribe(queue)
 
 
+def test_job_log_growth_reads_chunks_not_the_column():
+    asyncio.run(_test_job_log_growth_reads_chunks_not_the_column())
+
+
+async def _test_job_log_growth_reads_chunks_not_the_column():
+    from app.services.job_runner import JobRunner
+
+    queue = events.subscribe(["jobs"])
+    try:
+        relay = await _initialized_relay(queue)
+        job_id = _add_job(JobStatus.running)
+        await relay.poll_once()
+        _drain(queue)
+
+        db = SessionLocal()
+        try:
+            row = db.get(Job, job_id)
+            runner = JobRunner(db)
+            runner.append_log(row, "$ bash bin/install-keystone.sh")
+            runner.flush_logs(row)
+            db.refresh(row)
+            assert (row.log_text or "") == ""
+        finally:
+            db.close()
+
+        await relay.poll_once()
+        logs = [
+            p for t, p in _drain(queue) if t == "jobs" and p.get("type") == "job_log"
+        ]
+        assert len(logs) == 1
+        assert logs[0]["id"] == job_id
+        assert "install-keystone.sh" in (logs[0].get("log_tail") or "")
+        assert (logs[0].get("current") or {}).get("item") == "keystone"
+        assert logs[0]["log_len"] > 0
+
+        db = SessionLocal()
+        try:
+            row = db.get(Job, job_id)
+            assert (row.log_text or "") == ""
+        finally:
+            db.close()
+    finally:
+        events.unsubscribe(queue)
+
+
 # ---------------------------------------------------------------------------
 # Bounded jobs scan
 # ---------------------------------------------------------------------------

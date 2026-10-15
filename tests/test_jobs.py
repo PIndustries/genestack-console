@@ -457,3 +457,60 @@ def test_job_list_keeps_the_ends_of_a_long_log(client, admin_headers):
     )
     brief_row = next(item for item in short.json() if item["id"] == brief_id)
     assert brief_row["log_text"] == "only-short"
+
+
+def test_job_list_excerpt_comes_from_chunks_not_log_text(client, admin_headers):
+    """Chunk rows own the excerpt. The legacy column is not loaded or written."""
+    from app.db import SessionLocal
+    from app.models import Job, JobLogChunk, JobStatus
+
+    env_id = _create_env(client, admin_headers, "log-chunks")
+    legacy = "LEGACY-HEAD" + ("L" * 20000) + "LEGACY-TAIL"
+    head = "HEAD-START\n" + ("h" * 1000)
+    middle = ("m" * 10000) + "MIDDLE-MARKER" + ("m" * 10000)
+    tail = ("t" * 1000) + "\nTAIL-END failed"
+    full = head + middle + tail
+    db = SessionLocal()
+    try:
+        row = Job(
+            environment_id=env_id,
+            operation="genestack.deploy",
+            params={},
+            status=JobStatus.success,
+            log_text=legacy,
+            created_by="log-chunks",
+        )
+        db.add(row)
+        db.flush()
+        for body in (head, middle, tail):
+            db.add(JobLogChunk(job_id=row.id, n=len(body), body=body))
+        db.commit()
+        job_id = row.id
+    finally:
+        db.close()
+
+    listed = client.get(
+        "/api/v1/jobs",
+        headers=admin_headers,
+        params={"environment_id": env_id, "limit": 10},
+    )
+    assert listed.status_code == 200, listed.text
+    body = next(item for item in listed.json() if item["id"] == job_id)
+    assert "HEAD-START" in body["log_text"]
+    assert "TAIL-END" in body["log_text"]
+    assert "MIDDLE-MARKER" not in body["log_text"]
+    assert "LEGACY-HEAD" not in body["log_text"]
+    assert "log truncated" in body["log_text"]
+    assert len(body["log_text"]) < len(full)
+
+    detail = client.get(f"/api/v1/jobs/{job_id}", headers=admin_headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["log_text"] == full
+    assert "LEGACY-HEAD" not in detail.json()["log_text"]
+
+    db = SessionLocal()
+    try:
+        saved = db.get(Job, job_id)
+        assert saved.log_text == legacy
+    finally:
+        db.close()

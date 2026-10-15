@@ -24,8 +24,11 @@ from app.services.job_runner import (
     CANCELLED_ERROR,
     ConflictError,
     JobRunner,
+    chunk_log_edges,
+    chunk_log_totals,
     execute_operation,
     merge_confirmed_replace,
+    read_job_log,
     release_env_mutex,
 )
 
@@ -61,9 +64,7 @@ def _log_excerpt(head: str | None, tail: str | None, length: int | None) -> str:
     return head_text + _LOG_MARK + tail_text
 
 
-def _listed_job(
-    job: Job, head: str | None, tail: str | None, length: int | None
-) -> JobRead:
+def _job_read(job: Job, log_text: str) -> JobRead:
     status = job.status.value if hasattr(job.status, "value") else job.status
     return JobRead(
         id=job.id,
@@ -71,7 +72,7 @@ def _listed_job(
         operation=job.operation,
         params=job.params,
         status=status,
-        log_text=_log_excerpt(head, tail, length),
+        log_text=log_text,
         created_by=job.created_by,
         started_at=job.started_at,
         finished_at=job.finished_at,
@@ -83,6 +84,36 @@ def _listed_job(
     )
 
 
+def _listed_job(
+    job: Job, head: str | None, tail: str | None, length: int | None
+) -> JobRead:
+    return _job_read(job, _log_excerpt(head, tail, length))
+
+
+def _full_job(db: Session, job: Job) -> JobRead:
+    """One job, full log. Does not assign the text onto the ORM object."""
+    return _job_read(job, read_job_log(db, job))
+
+
+def _legacy_excerpts(
+    db: Session, job_ids: list[str]
+) -> dict[str, tuple[str, str, int]]:
+    """Head, tail, and length from jobs.log_text. Rows with chunks are excluded."""
+    if not job_ids:
+        return {}
+    log_len = func.length(Job.log_text)
+    head_expr = func.substr(Job.log_text, 1, _LOG_HEAD)
+    tail_at = case((log_len <= _LOG_TAIL, 1), else_=log_len - _LOG_TAIL + 1)
+    tail_expr = func.substr(Job.log_text, tail_at, _LOG_TAIL)
+    rows = db.execute(
+        select(Job.id, head_expr, tail_expr, log_len).where(Job.id.in_(job_ids))
+    ).all()
+    return {
+        job_id: (head or "", tail or "", int(length or 0))
+        for job_id, head, tail, length in rows
+    }
+
+
 @router.get("/jobs", response_model=list[JobRead])
 def list_jobs(
     environment_id: str | None = Query(default=None),
@@ -91,12 +122,8 @@ def list_jobs(
     db: Session = Depends(get_db),
     principal: Principal = Depends(require_viewer),
 ) -> list[JobRead]:
-    log_len = func.length(Job.log_text)
-    head_expr = func.substr(Job.log_text, 1, _LOG_HEAD)
-    tail_at = case((log_len <= _LOG_TAIL, 1), else_=log_len - _LOG_TAIL + 1)
-    tail_expr = func.substr(Job.log_text, tail_at, _LOG_TAIL)
     stmt = (
-        select(Job, head_expr, tail_expr, log_len)
+        select(Job)
         .options(defer(Job.log_text))
         .order_by(Job.created_at.desc())
         .limit(limit)
@@ -122,8 +149,21 @@ def list_jobs(
         stmt = stmt.where(Job.environment_id.in_(member_envs))
     if status_filter:
         stmt = stmt.where(Job.status == status_filter)
-    rows = db.execute(stmt).all()
-    return [_listed_job(job, head, tail, length) for job, head, tail, length in rows]
+    jobs = list(db.scalars(stmt).all())
+    totals = chunk_log_totals(db, [job.id for job in jobs])
+    legacy = _legacy_excerpts(db, [job.id for job in jobs if job.id not in totals])
+    listed: list[JobRead] = []
+    for job in jobs:
+        if job.id in totals:
+            _seq, total = totals[job.id]
+            head, tail = chunk_log_edges(
+                db, job.id, total, head=_LOG_HEAD, tail=_LOG_TAIL
+            )
+            listed.append(_listed_job(job, head, tail, total))
+        else:
+            head, tail, length = legacy.get(job.id, ("", "", 0))
+            listed.append(_listed_job(job, head, tail, length))
+    return listed
 
 
 @router.get("/jobs/{job_id}", response_model=JobRead)
@@ -150,7 +190,7 @@ def get_job(
                 "You need platform-admin privileges or the job must belong to a tenant you're a member of."
             ),
         )
-    return job
+    return _full_job(db, job)
 
 
 @router.post(
@@ -194,7 +234,7 @@ def create_environment_job(
         )
     except ConflictError as exc:
         raise _conflict_http(exc) from exc
-    return job
+    return _full_job(db, job)
 
 
 @router.post("/jobs", response_model=JobRead, status_code=status.HTTP_201_CREATED)
@@ -229,7 +269,7 @@ def create_job_global(
             raise HTTPException(status_code=400, detail=DEMO_JOB_MESSAGE)
 
     try:
-        return execute_operation(
+        job = execute_operation(
             db,
             operation=body.operation,
             params=body.params,
@@ -239,6 +279,7 @@ def create_job_global(
         )
     except ConflictError as exc:
         raise _conflict_http(exc) from exc
+    return _full_job(db, job)
 
 
 @router.post(
@@ -283,7 +324,7 @@ def retry_job(
         )
 
     try:
-        return execute_operation(
+        created = execute_operation(
             db,
             operation=job.operation,
             params=merge_confirmed_replace(job.params, job.user_step),
@@ -296,6 +337,7 @@ def retry_job(
         )
     except ConflictError as exc:
         raise _conflict_http(exc) from exc
+    return _full_job(db, created)
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobRead)
@@ -392,4 +434,4 @@ def cancel_job(
             )
     db.commit()
     db.refresh(job)
-    return job
+    return _full_job(db, job)

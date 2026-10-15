@@ -267,7 +267,7 @@ def test_run_playbook_remote_skips_local_gates(monkeypatch, genestack_root, tmp_
 
 def test_job_runner_dry_run_logs_ssh_wrapped_command(client, genestack_root):
     from app.db import SessionLocal
-    from app.services.job_runner import JobRunner
+    from app.services.job_runner import JobRunner, read_job_log
 
     db = SessionLocal()
     try:
@@ -292,7 +292,7 @@ def test_job_runner_dry_run_logs_ssh_wrapped_command(client, genestack_root):
 
         # global test config is dry_run=True -> command is logged, not executed
         assert job.status == JobStatus.success, job.error
-        log_text = job.log_text or ""
+        log_text = read_job_log(db, job)
         assert "deploy@deployer.example.com" in log_text
         assert any(
             "ssh" in line and "install-keystone.sh" in line

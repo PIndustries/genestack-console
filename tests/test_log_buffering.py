@@ -44,6 +44,19 @@ def _job_row(job_id: str):
         db.close()
 
 
+def _stored_log(job_id: str) -> str:
+    """Log as a reader sees it: chunk rows, else the legacy column."""
+    from app.db import SessionLocal
+    from app.models import Job
+    from app.services.job_runner import read_job_log
+
+    db = SessionLocal()
+    try:
+        return read_job_log(db, db.get(Job, job_id))
+    finally:
+        db.close()
+
+
 def _finalize(job_id: str, db) -> None:
     """Mark a leftover job failed so no worker test can claim it.
 
@@ -115,7 +128,8 @@ def test_single_huge_line_hits_byte_threshold():
         runner.append_log(job, "x" * (LOG_FLUSH_BYTES + 4096))
         assert commits == 1
         row = _job_row(job_id)
-        assert "x" * 1000 in (row.log_text or "")
+        assert (row.log_text or "") == ""
+        assert "x" * 1000 in _stored_log(job_id)
         _finalize(job_id, db)
     finally:
         db.close()
@@ -166,7 +180,8 @@ def test_all_lines_present_and_ordered_after_final_flush():
         db.close()
 
     row = _job_row(job_id)
-    assert _log_lines(row.log_text) == [f"line-{i:04d}" for i in range(n)]
+    assert (row.log_text or "") == ""
+    assert _log_lines(_stored_log(job_id)) == [f"line-{i:04d}" for i in range(n)]
 
 
 def test_partial_buffer_persists_only_after_flush():
@@ -182,14 +197,16 @@ def test_partial_buffer_persists_only_after_flush():
         runner.append_log(job, "pending-2")
         assert runner._log_lines[job_id] == 2
         row = _job_row(job_id)
-        assert row.log_text in (None, "")  # nothing committed yet
+        assert (row.log_text or "") == ""
+        assert _stored_log(job_id) == ""  # nothing committed yet
         runner.flush_logs(job)
         _finalize(job_id, db)
     finally:
         db.close()
 
     row = _job_row(job_id)
-    assert _log_lines(row.log_text) == ["pending-1", "pending-2"]
+    assert (row.log_text or "") == ""
+    assert _log_lines(_stored_log(job_id)) == ["pending-1", "pending-2"]
 
 
 # ------------------------------------------- (c) failure path flushes
@@ -220,7 +237,8 @@ def test_dispatch_failure_still_flushes_full_log(monkeypatch):
         db.close()
 
     row = _job_row(job_id)
-    lines = _log_lines(row.log_text)
+    assert (row.log_text or "") == ""
+    lines = _log_lines(_stored_log(job_id))
     assert lines[0] == "Starting operation=internal.health handler=internal_health"
     assert lines[1:61] == emitted
     assert any("dispatch exploded" in ln for ln in lines)
@@ -256,7 +274,43 @@ def test_external_commit_after_single_append_persists_line():
         db.close()
 
     row = _job_row(job_id)
-    lines = _log_lines(row.log_text)
+    assert (row.log_text or "") == ""
+    lines = _log_lines(_stored_log(job_id))
     assert "earlier line" in lines
     assert "cancel line" in lines
     assert lines.index("earlier line") < lines.index("cancel line")
+
+
+def test_flush_does_not_rewrite_log_text():
+    """A flush inserts chunks and leaves jobs.log_text at its previous value."""
+    from app.db import SessionLocal
+    from app.models import Job
+    from app.services.job_runner import JobRunner, read_job_log
+
+    db = SessionLocal()
+    job_id = ""
+    try:
+        runner, job = _fresh_job(db)
+        job_id = job.id
+        for i in range(10):
+            runner.append_log(job, f"line-{i}")
+        runner.flush_logs(job)
+        row = db.get(Job, job_id)
+        db.refresh(row)
+        assert (row.log_text or "") == ""
+        assert _log_lines(read_job_log(db, row)) == [f"line-{i}" for i in range(10)]
+
+        row.log_text = "already-there"
+        db.commit()
+        other = JobRunner(db)
+        other.append_log(row, "after-legacy")
+        other.flush_logs(row)
+        db.refresh(row)
+        assert row.log_text == "already-there"
+        stored = read_job_log(db, row)
+        assert "after-legacy" in stored
+        assert "already-there" not in stored
+        assert "line-0" in stored
+        _finalize(job_id, db)
+    finally:
+        db.close()

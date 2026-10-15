@@ -8,7 +8,7 @@ from app.db import SessionLocal
 from app.models import Environment, JobStatus
 from app.services import genestack_bridge as bridge
 from app.services.catalog import get_operation
-from app.services.job_runner import JobRunner
+from app.services.job_runner import JobRunner, read_job_log
 
 
 def _tempest_job(client, headers, params=None):
@@ -297,7 +297,7 @@ def test_tempest_job_threads_ssh_target(genestack_root):
         job = runner.run_job(job)
 
         assert job.status == JobStatus.success, job.error
-        log_text = job.log_text or ""
+        log_text = read_job_log(db, job)
         assert "deploy@deployer.example.com" in log_text
         lines = log_text.splitlines()
         assert any("ssh" in line and "install-tempest.sh" in line for line in lines)

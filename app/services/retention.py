@@ -39,7 +39,7 @@ def run_retention_sweep(db: Session, settings: Settings) -> dict[str, int]:
     now = _naive_utcnow()
     counts: dict[str, int] = {}
 
-    # Finished jobs older than the retention window (log_text included).
+    # Finished jobs older than the retention window. Log chunks cascade.
     cutoff = now - timedelta(days=settings.retention_jobs_days)
     counts["jobs"] = db.execute(
         delete(Job).where(

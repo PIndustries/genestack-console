@@ -170,7 +170,19 @@ def test_concurrent_submit_exactly_one_winner(monkeypatch):
     from app.services import genestack_bridge as bridge
     from app.services.job_runner import ConflictError, execute_operation
 
+    # The mutex row is committed before the playbook. An immediate return
+    # lets the winner release it before the other thread inserts, so both
+    # submits succeed. Hold the row until the loser has been rejected.
+    release = threading.Event()
+
     def slow_run_playbook(*args, **kwargs):
+        if not release.wait(5):
+            return {
+                "ok": False,
+                "returncode": 1,
+                "message": "other submitter did not arrive",
+                "dry_run": True,
+            }
         return {"ok": True, "returncode": 0, "message": "fake", "dry_run": True}
 
     monkeypatch.setattr(bridge, "run_playbook", slow_run_playbook)
@@ -197,6 +209,7 @@ def test_concurrent_submit_exactly_one_winner(monkeypatch):
             )
         except ConflictError as exc:
             outcomes.append(("conflict", exc))
+            release.set()
         finally:
             db.close()
 
@@ -204,7 +217,11 @@ def test_concurrent_submit_exactly_one_winner(monkeypatch):
     for t in threads:
         t.start()
     for t in threads:
-        t.join()
+        t.join(timeout=10)
+        if t.is_alive():
+            release.set()
+            t.join(timeout=2)
+            raise AssertionError("submit thread did not finish")
 
     assert len(outcomes) == 2
     oks = [j for kind, j in outcomes if kind == "ok"]

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.config import Settings, get_settings
 from app.models import AuditLog, Environment, Job, JobStatus
@@ -29,6 +29,7 @@ from app.services import envconfig as envconfig_service
 from app.services.envcontext import build_context
 from app.services.service_registry import PIPELINE_STAGES, filter_stage_items
 from app.services.deploy_timing import attach_stage_times, parse_timings
+from app.services.job_runner import read_job_log
 
 # Roles that must each appear on at least one host for a deployable topology
 REQUIRED_ROLES = ("k8s_control_plane", "etcd", "control")
@@ -131,6 +132,7 @@ def _latest_job(
 ) -> Job | None:
     return db.scalar(
         select(Job)
+        .options(defer(Job.log_text))
         .where(Job.environment_id == env.id, Job.operation.in_(operations))
         .order_by(Job.created_at.desc())
         .limit(1)
@@ -300,7 +302,8 @@ def pipeline_progress(
     except Exception:  # noqa: BLE001 — progress must still return stages
         components = None
 
-    activity = parse_deploy_log(job.log_text if job is not None else "")
+    log_text = read_job_log(db, job) if job is not None else ""
+    activity = parse_deploy_log(log_text)
     params = job.params if job is not None and isinstance(job.params, dict) else {}
     from_stage = str(params.get("from_stage") or "").strip()
     log_stage = str(activity.get("stage") or "").strip()
@@ -439,7 +442,7 @@ def pipeline_progress(
             "operation": job.operation if job is not None else "",
         }
 
-    parsed = parse_timings(job.log_text if job is not None else "")
+    parsed = parse_timings(log_text)
     attach_stage_times(stages, parsed)
     elapsed_s = _job_elapsed_s(job)
     if elapsed_s is not None and parsed.get("total_s") is None:

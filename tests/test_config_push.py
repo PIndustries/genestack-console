@@ -17,7 +17,7 @@ from app.db import SessionLocal
 from app.models import AgentCommand, Environment, JobStatus
 from app.services import envconfig as envconfig_service
 from app.services import genestack_bridge as bridge
-from app.services.job_runner import JobRunner
+from app.services.job_runner import JobRunner, read_job_log
 from tests.test_agent_relay import (
     _create_token,
     _fake_exec_agent_loop,
@@ -481,7 +481,7 @@ def test_push_merges_kubesecrets_ssh(monkeypatch, tmp_path):
         db.commit()
         job = runner.run_job(job)
         assert job.status == JobStatus.success, job.error
-        log_text = job.log_text or ""
+        log_text = read_job_log(db, job)
     finally:
         db.close()
 

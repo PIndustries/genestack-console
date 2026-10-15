@@ -292,6 +292,28 @@ class Job(Base):
     environment: Mapped[Optional["Environment"]] = relationship(back_populates="jobs")
 
 
+class JobLogChunk(Base):
+    """One appended piece of a job log.
+
+    Insert-only. A running job commits these rows and does not assign
+    ``jobs.log_text``, so a flush does not rewrite the accumulated log.
+    ``n`` is ``len(body)``. The ``(job_id, seq, n)`` index answers length
+    and growth without reading bodies. ``seq`` is insertion order.
+    """
+
+    __tablename__ = "job_log_chunks"
+    __table_args__ = (Index("ix_job_log_chunks_job_seq", "job_id", "seq", "n"),)
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    n: Mapped[int] = mapped_column(Integer, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class EnvMutex(Base):
     """Per-environment mutual-exclusion row for mutating job execution.
 

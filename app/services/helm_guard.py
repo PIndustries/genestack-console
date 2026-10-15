@@ -6,7 +6,11 @@ cannot schedule never becomes Ready, so one taint burns two hours. This
 wrapper is placed ahead of the real ``helm`` on PATH for a local live
 deploy. ``helm list`` and ``helm show`` pass through. An upgrade that still
 has an unschedulable pod after a short grace is stopped with the scheduler
-message.
+message. ``helm upgrade`` is not stubbed and its wait is unchanged.
+
+Install scripts each run ``helm repo update``, which re-downloads every
+repository index. The first update in a deploy still downloads. Later
+updates reuse that on-disk index instead of downloading it again.
 
 cert-manager is installed with Gateway API support before the Envoy chart
 has applied those CRDs. The same wrapper applies the CRDs from the Envoy
@@ -23,6 +27,9 @@ from pathlib import Path
 
 DEFAULT_UNSCHEDULABLE_GRACE_S = 60
 DEFAULT_GUARD_DELAY_S = 45
+# Beside the wrapper. Cleared when the wrapper is installed so each deploy
+# gets one real ``helm repo update``.
+REPO_INDEX_STAMP = ".repo-update-stamp"
 
 
 def envoy_gateway_version(versions_text: str) -> str:
@@ -301,11 +308,44 @@ def _guard_main_source() -> str:
                 payload, now=datetime.now(timezone.utc), grace_s=_grace()
             )
 
+        def _repo_stamp():
+            here = os.path.dirname(os.path.abspath(__file__))
+            return os.path.join(here, "__REPO_STAMP__")
+
+        def _reuse_repo_index(real, argv):
+            # helm repo update re-fetches every index. One success per deploy
+            # is enough; chart versions do not change mid-deploy. A failed
+            # update leaves no stamp, so the next call still downloads.
+            if len(argv) < 2 or argv[0] != "repo" or argv[1] != "update":
+                return None
+            if "--help" in argv or "-h" in argv:
+                return None
+            stamp = _repo_stamp()
+            if os.path.isfile(stamp):
+                print(
+                    "helm-guard: reusing the helm repo index from this deploy",
+                    flush=True,
+                )
+                return 0
+            proc = subprocess.run([real, *argv], check=False)
+            code = proc.returncode if proc.returncode is not None else 1
+            if code == 0:
+                try:
+                    fd = os.open(stamp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o640)
+                    os.write(fd, b"ok\\n")
+                    os.close(fd)
+                except OSError:
+                    pass
+            return code
+
         def main(argv):
             real = os.environ.get("GENESTACK_HELM_REAL", "").strip()
             if not real:
                 sys.stderr.write("helm-guard: GENESTACK_HELM_REAL is empty\\n")
                 return 127
+            reused = _reuse_repo_index(real, argv)
+            if reused is not None:
+                return reused
             if not argv or argv[0] not in ("upgrade", "install"):
                 os.execv(real, [real, *argv])
             if "cert-manager" in " ".join(argv):
@@ -342,6 +382,7 @@ def _guard_main_source() -> str:
         .replace("__VERSION__", version)
         .replace("__GUARD_DELAY__", str(DEFAULT_GUARD_DELAY_S))
         .replace("__UNSCHEDULABLE_GRACE__", str(DEFAULT_UNSCHEDULABLE_GRACE_S))
+        .replace("__REPO_STAMP__", REPO_INDEX_STAMP)
     )
 
 
@@ -351,11 +392,16 @@ def render_helm_guard() -> str:
 
 
 def install_helm_guard(dest: Path) -> Path:
-    """Write the wrapper as ``dest/helm`` and return that path."""
+    """Write the wrapper as ``dest/helm`` and return that path.
+
+    Drops a previous deploy's repo-index stamp so the next ``helm repo
+    update`` downloads once.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     path = dest / "helm"
     path.write_text(render_helm_guard(), encoding="utf-8")
     os.chmod(path, 0o750)
+    (dest / REPO_INDEX_STAMP).unlink(missing_ok=True)
     return path
 
 
@@ -369,62 +415,83 @@ bin="$here/yq.bin"
 if [ -x "$bin" ]; then
   exec "$bin" "$@"
 fi
-found=
-oldifs=$IFS
-IFS=:
-for dir in $PATH; do
-  [ -n "$dir" ] || continue
-  cand="$dir/yq"
-  if [ "$cand" = "$here/yq" ] || [ ! -x "$cand" ] || [ -d "$cand" ]; then
-    continue
+# YQ_DOWNLOAD_URL is the binary to install. Search PATH only when it is
+# unset: GitHub-hosted Ubuntu has mikefarah yq at /usr/bin/yq, which would
+# otherwise hide a python yq that is first and skip the download.
+url=${YQ_DOWNLOAD_URL:-}
+if [ -z "$url" ]; then
+  found=
+  oldifs=$IFS
+  IFS=:
+  for dir in $PATH; do
+    [ -n "$dir" ] || continue
+    cand="$dir/yq"
+    if [ "$cand" = "$here/yq" ] || [ ! -x "$cand" ] || [ -d "$cand" ]; then
+      continue
+    fi
+    ver=$("$cand" --version 2>&1 || true)
+    case "$ver" in
+      *mikefarah*|*github.com/mikefarah/yq*)
+        found=$cand
+        break
+        ;;
+    esac
+  done
+  IFS=$oldifs
+  if [ -n "$found" ]; then
+    exec "$found" "$@"
   fi
-  ver=$("$cand" --version 2>&1 || true)
-  case "$ver" in
-    *mikefarah*|*github.com/mikefarah/yq*)
-      found=$cand
-      break
+  osname=$(uname -s)
+  case "$osname" in
+    Linux) osname=linux ;;
+    Darwin) osname=darwin ;;
+    *)
+      echo "yq: unsupported OS $(uname -s)" >&2
+      exit 1
       ;;
   esac
-done
-IFS=$oldifs
-if [ -n "$found" ]; then
-  exec "$found" "$@"
+  arch=$(uname -m)
+  case "$arch" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *)
+      echo "yq: unsupported architecture $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+  url="https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_${osname}_${arch}"
 fi
-osname=$(uname -s)
-case "$osname" in
-  Linux) osname=linux ;;
-  Darwin) osname=darwin ;;
-  *)
-    echo "yq: unsupported OS $(uname -s)" >&2
-    exit 1
-    ;;
-esac
-arch=$(uname -m)
-case "$arch" in
-  x86_64|amd64) arch=amd64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  *)
-    echo "yq: unsupported architecture $(uname -m)" >&2
-    exit 1
-    ;;
-esac
-url="${YQ_DOWNLOAD_URL:-https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_${osname}_${arch}}"
 tmp="$bin.part"
 rm -f "$tmp"
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$url" -o "$tmp" || {
-    echo "yq: could not download mikefarah yq" >&2
-    exit 1
-  }
-elif command -v wget >/dev/null 2>&1; then
-  wget -q -O "$tmp" "$url" || {
-    echo "yq: could not download mikefarah yq" >&2
-    exit 1
-  }
-else
-  echo "yq: curl or wget is required to install mikefarah yq" >&2
-  exit 1
-fi
+case "$url" in
+  file://*)
+    # Local payload. curl on some Linux builds rejects the file protocol.
+    src=${url#file://}
+    case "$src" in
+      localhost/*) src="/${src#localhost/}" ;;
+    esac
+    cp "$src" "$tmp" || {
+      echo "yq: could not download mikefarah yq" >&2
+      exit 1
+    }
+    ;;
+  *)
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$url" -o "$tmp" || {
+        echo "yq: could not download mikefarah yq" >&2
+        exit 1
+      }
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q -O "$tmp" "$url" || {
+        echo "yq: could not download mikefarah yq" >&2
+        exit 1
+      }
+    else
+      echo "yq: curl or wget is required to install mikefarah yq" >&2
+      exit 1
+    fi
+    ;;
+esac
 chmod 755 "$tmp"
 ver=$("$tmp" --version 2>&1 || true)
 case "$ver" in
