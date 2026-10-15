@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.15.3
+
+The console keeps answering while a deploy is writing its log.
+
+- A running job stores the log in pieces. A flush no longer rewrites the whole log, so other pages are not stuck behind that write. Opening a job still loads the full log.
+- A deploy downloads Helm repository indexes once. Later charts in that same deploy reuse the index. Helm still waits for each release.
+- The required tests check runs the suite in six parts, so a hosted runner can finish.
+
 ## 2026.10.15.2
 
 Saved machines show up before the dial finishes.
