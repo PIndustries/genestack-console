@@ -6,10 +6,12 @@ runners, not pytest-xdist. Weight is the static test count (parametrize
 lists included) so a shard stays near the same size.
 
     python3 scripts/ci_test_shard.py SHARD TOTAL
+    python3 scripts/ci_test_shard.py --check-split TOTAL
     SHARD_RESULT=success python3 scripts/ci_test_shard.py --require-shards TOTAL
 
-SHARD is 1-based. --require-shards checks the split covers every test file
-exactly once, and exits non-zero unless SHARD_RESULT is success.
+SHARD is 1-based. --check-split checks the split covers every test file
+exactly once. --require-shards does that and also exits non-zero unless
+SHARD_RESULT is success.
 """
 
 from __future__ import annotations
@@ -127,12 +129,12 @@ def _parse_total(raw: str) -> int:
     return total
 
 
-def require_shards(total: int) -> int:
+def require_shards(total: int, *, check_result: bool) -> int:
     result = os.environ.get("SHARD_RESULT", "")
     groups = shard_groups(total)
     seen: dict[str, int] = {}
     problems: list[str] = []
-    if result != "success":
+    if check_result and result != "success":
         problems.append(f"shard job result is {result or 'missing'}, want success")
     for number, group in enumerate(groups, start=1):
         weight = 0
@@ -159,14 +161,15 @@ def require_shards(total: int) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) >= 2 and argv[1] == "--require-shards":
+    if len(argv) >= 2 and argv[1] in ("--require-shards", "--check-split"):
         if len(argv) != 3:
-            print(
-                "usage: ci_test_shard.py --require-shards TOTAL",
-                file=sys.stderr,
-            )
+            print("usage: ci_test_shard.py --require-shards TOTAL", file=sys.stderr)
+            print("       ci_test_shard.py --check-split TOTAL", file=sys.stderr)
             return 2
-        return require_shards(_parse_total(argv[2]))
+        return require_shards(
+            _parse_total(argv[2]),
+            check_result=argv[1] == "--require-shards",
+        )
     if len(argv) != 3:
         print("usage: ci_test_shard.py SHARD TOTAL", file=sys.stderr)
         return 2

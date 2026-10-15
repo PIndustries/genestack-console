@@ -20,10 +20,14 @@ jobs:
   # The suite takes about 25 minutes. Hosted runners are stopped early
   # ("runner has received a shutdown signal"), before the 30 minute job cap.
   # Each shard is its own runner and its own sqlite file. -v prints every
-  # test so a stopped runner still names the last test. Do not use
-  # pytest-xdist. Keep this matrix width equal to --require-shards.
+  # test so a stopped runner still names the last test. A shard that
+  # finishes writes an ok file. The tests job runs any shard that did not.
+  # Do not use pytest-xdist. Keep this matrix width equal to --check-split.
   test-shard:
     name: test-shard (${{ matrix.shard }}/8)
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -61,24 +65,112 @@ jobs:
           printf 'shard %s/8\n' "${{ matrix.shard }}"
           printf '  %s\n' "${files[@]}"
           uv run --extra dev pytest -v --tb=line "${files[@]}"
+          mkdir -p shard-ok
+          printf '%s\n' "${{ matrix.shard }}" > shard-ok/ok
 
-  # Branch protection requires the check name "tests". This passes only
-  # after every shard succeeded, and fails if a shard failed or the split
-  # dropped a test file. It does not re-run the suite.
+      - name: Upload shard success
+        if: success()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shard-${{ matrix.shard }}
+          path: shard-ok/ok
+          retention-days: 1
+          if-no-files-found: error
+
+  # Branch protection requires the check name "tests". A stopped runner
+  # uploads nothing, so this job runs that shard again on a new runner.
+  # A failed shard also uploads nothing, so the same failure fails this
+  # job. The split must still name every test file once.
   tests:
     name: tests
     needs: test-shard
-    if: always()
+    if: ${{ always() && !cancelled() }}
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Require every shard
+      - name: Download shard results
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: shard-*
+          path: rerun
+
+      - name: Find shards to re-run
+        id: gap
         env:
           SHARD_RESULT: ${{ needs.test-shard.result }}
-        run: python3 scripts/ci_test_shard.py --require-shards 8
+        run: |
+          set -eu
+          python3 scripts/ci_test_shard.py --check-split 8
+          if [ "$SHARD_RESULT" = "success" ]; then
+            echo "all 8 shards finished"
+            echo "missing=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ steps.download.outcome }}" != "success" ]; then
+            if [ -d rerun ] && [ -n "$(find rerun -mindepth 1 -print -quit)" ]; then
+              echo "downloading shard results failed" >&2
+              exit 1
+            fi
+            echo "no shard results were uploaded"
+          fi
+          missing=""
+          for n in 1 2 3 4 5 6 7 8; do
+            if [ ! -f "rerun/shard-${n}/ok" ]; then
+              missing="${missing}${n}"
+            fi
+          done
+          echo "missing=${missing}" >> "$GITHUB_OUTPUT"
+          if [ -z "$missing" ]; then
+            echo "all 8 shards finished"
+          else
+            echo "re-running shards: ${missing}"
+          fi
+
+      - name: Set up Python
+        if: steps.gap.outputs.missing != ''
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        if: steps.gap.outputs.missing != ''
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Re-run missing shards
+        if: steps.gap.outputs.missing != ''
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -eu
+          for n in 1 2 3 4 5 6 7 8; do
+            case "${{ steps.gap.outputs.missing }}" in
+              *"$n"*) ;;
+              *) continue ;;
+            esac
+            list="$RUNNER_TEMP/shard-${n}.txt"
+            python3 scripts/ci_test_shard.py "$n" 8 > "$list"
+            files=()
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              files+=("$line")
+            done < "$list"
+            if [ "${#files[@]}" -eq 0 ]; then
+              echo "shard ${n} has no test files" >&2
+              exit 1
+            fi
+            printf 'shard %s/8\n' "$n"
+            printf '  %s\n' "${files[@]}"
+            uv run --extra dev pytest -v --tb=line "${files[@]}"
+          done
 
   build-matrix:
     name: build-matrix
