@@ -209,6 +209,7 @@ def test_workflow_empty_env(client, admin_headers, viewer_headers, monkeypatch):
         "compute": 0,
         "network": 0,
         "storage": 0,
+        "worker": 0,
     }
 
     assert steps["config"]["state"] == "pending"
@@ -269,6 +270,7 @@ def test_workflow_full_env_connect_inventory_config_done(
         "compute": 1,
         "network": 1,
         "storage": 1,
+        "worker": 0,
     }
 
     config = steps["config"]
@@ -345,6 +347,7 @@ def test_workflow_inventory_ovh_ready(client, admin_headers, viewer_headers, tmp
         "compute": 1,
         "network": 1,
         "storage": 1,
+        "worker": 0,
     }
 
 

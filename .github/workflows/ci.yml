@@ -17,18 +17,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The suite takes about 25 minutes. Hosted runners are stopped near 10
-  # minutes ("runner has received a shutdown signal"), before the 30 minute
-  # job cap. Each shard is its own runner and its own sqlite file.
-  # Do not use pytest-xdist. Keep this matrix width equal to --require-shards.
+  # The suite takes about 25 minutes. Hosted runners are stopped early
+  # ("runner has received a shutdown signal"), before the 30 minute job cap.
+  # Each shard is its own runner and its own sqlite file. -v prints every
+  # test so a stopped runner still names the last test. Do not use
+  # pytest-xdist. Keep this matrix width equal to --require-shards.
   test-shard:
-    name: test-shard (${{ matrix.shard }}/6)
+    name: test-shard (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       PYTHONUNBUFFERED: "1"
     steps:
@@ -47,7 +48,7 @@ jobs:
         run: |
           set -eu
           list="$RUNNER_TEMP/shard-files.txt"
-          python3 scripts/ci_test_shard.py "${{ matrix.shard }}" 6 > "$list"
+          python3 scripts/ci_test_shard.py "${{ matrix.shard }}" 8 > "$list"
           files=()
           while IFS= read -r line; do
             [ -n "$line" ] || continue
@@ -57,9 +58,9 @@ jobs:
             echo "shard ${{ matrix.shard }} has no test files" >&2
             exit 1
           fi
-          printf 'shard %s/6\n' "${{ matrix.shard }}"
+          printf 'shard %s/8\n' "${{ matrix.shard }}"
           printf '  %s\n' "${files[@]}"
-          uv run --extra dev pytest -q --tb=line "${files[@]}"
+          uv run --extra dev pytest -v --tb=line "${files[@]}"
 
   # Branch protection requires the check name "tests". This passes only
   # after every shard succeeded, and fails if a shard failed or the split
@@ -77,7 +78,7 @@ jobs:
       - name: Require every shard
         env:
           SHARD_RESULT: ${{ needs.test-shard.result }}
-        run: python3 scripts/ci_test_shard.py --require-shards 6
+        run: python3 scripts/ci_test_shard.py --require-shards 8
 
   build-matrix:
     name: build-matrix

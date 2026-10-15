@@ -10,7 +10,7 @@ The console keeps answering while a deploy is writing its log.
 
 - A running job stores the log in pieces. A flush no longer rewrites the whole log, so other pages are not stuck behind that write. Opening a job still loads the full log.
 - A deploy downloads Helm repository indexes once. Later charts in that same deploy reuse the index. Helm still waits for each release.
-- The required tests check runs the suite in six parts, so a hosted runner can finish.
+- The required tests check runs the suite in eight parts, so a hosted runner can finish.
 
 ## 2026.10.15.2
 
