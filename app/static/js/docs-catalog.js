@@ -179,6 +179,7 @@
       title: "Talos",
       blurb: "The OS for the plane. API, not SSH. Health, etcd, machineconfig, disks, logs, resources, events, containers, services, reboot, shutdown, reset, upgrade.",
       routes: [
+        { m: "GET", p: "/api/v1/environments/{id}/overview", d: "One Overview read: machines, cloud, VMs, and the Kubernetes lists." },
         { m: "GET", p: "/api/v1/environments/{id}/platform", d: "Machines, versions, Ready, Talos reachability." },
         { m: "GET", p: "/api/v1/environments/{id}/platform/nodes/{name}/health", d: "talosctl health --wait=false." },
         { m: "GET", p: "/api/v1/environments/{id}/platform/nodes/{name}/etcd", d: "etcd members and status." },

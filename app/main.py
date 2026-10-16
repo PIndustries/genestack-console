@@ -62,6 +62,7 @@ from app.routers import (
     oauth,
     operations,
     overlays,
+    overview,
     ovh,
     platform,
     pxe,
@@ -364,6 +365,7 @@ def create_app() -> FastAPI:
     app.include_router(novnc.router)
     app.include_router(k8s.router)
     app.include_router(platform.router)
+    app.include_router(overview.router)
     app.include_router(apps.router)
     app.include_router(app_hooks.router)
     app.include_router(hostvms.router)

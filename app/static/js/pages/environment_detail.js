@@ -14,7 +14,7 @@ import { clusterCardHtml, wireClusterCard, loadClusterCard, destroyClusterCard }
 import { wireOpenstackCard, destroyOpenstackCard } from "./environment_openstack.js";
 import { cloudCardHtml, wireCloudCard, loadCloudCard, destroyCloudCard, openHorizon } from "./environment_cloud.js?v=ls73";
 import { progressCardHtml, wireProgressCard, loadProgressCard, destroyProgressCard } from "./environment_progress.js";
-import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap, pauseMapPoll, refreshFleetLine } from "./environment_deploy_map.js?v=ls75";
+import { deployMapHtml, imageCacheHtml, wireDeployMap, loadDeployMap, loadImageCache, destroyDeployMap, pauseMapPoll, refreshFleetLine } from "./environment_deploy_map.js?v=ls77";
 import { componentsCardHtml, wireComponentsCard, loadComponentsCard, destroyComponentsCard } from "./environment_components.js";
 import { sshKeysCardHtml, wireSshKeysCard, loadSshKeysCard } from "./environment_sshkeys.js";
 import { agentsCardHtml, wireAgentsCard, loadAgentsCard, destroyAgentsCard } from "./environment_agents.js";

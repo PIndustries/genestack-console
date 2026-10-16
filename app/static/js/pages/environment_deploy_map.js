@@ -39,7 +39,6 @@ function heavyDue() {
   const live = isLive() || (job && ACTIVE.has(String(job.status || "")));
   return Date.now() - heavyAt >= (live ? HEAVY_LIVE_MS : HEAVY_MS);
 }
-const SNAP_TIMEOUT = 8000;
 const PODS_TIMEOUT = 12000;
 const PODS_REFRESH_MS = 20000;
 const LIVE_PODS_MS = 4000;
@@ -4132,6 +4131,49 @@ function renderAll() {
   }
 }
 
+function cloudHasRows(cloudRes) {
+  return !!(
+    cloudRes &&
+    (cloudRes.available ||
+      (cloudRes.servers || []).length ||
+      (cloudRes.networks || []).length ||
+      (cloudRes.projects || []).length ||
+      (cloudRes.floating_ips || []).length)
+  );
+}
+
+function applyK8sList(rows, previous) {
+  if (!Array.isArray(rows)) return previous;
+  if (rows.length || !previous.length) return rows;
+  return previous;
+}
+
+function applyOverview(heavy) {
+  if (!heavy || typeof heavy !== "object") return;
+  applyFleetSources(heavy.platform, null);
+  const vmsRes = heavy.vms;
+  if (vmsRes && Array.isArray(vmsRes.vms) && (vmsRes.vms.length || vmsRes.source === "live")) {
+    osVms = vmsRes.vms;
+  }
+  if (cloudHasRows(heavy.cloud)) osCloud = heavy.cloud;
+  if ((!osVms || !osVms.length) && osCloud && Array.isArray(osCloud.servers) && osCloud.servers.length) {
+    osVms = osCloud.servers;
+  }
+  const ingRes = heavy.ingresses;
+  const svcRes = heavy.services;
+  const gwRes = heavy.gateways;
+  const routeRes = heavy.httproutes;
+  const poolRes = heavy.pools;
+  if (ingRes && Array.isArray(ingRes.ingresses)) k8sIngress = applyK8sList(ingRes.ingresses, k8sIngress);
+  if (svcRes && Array.isArray(svcRes.services)) k8sServices = applyK8sList(svcRes.services, k8sServices);
+  if (gwRes && Array.isArray(gwRes.gateways)) k8sGateways = applyK8sList(gwRes.gateways, k8sGateways);
+  if (routeRes && Array.isArray(routeRes.httproutes)) k8sRoutes = applyK8sList(routeRes.httproutes, k8sRoutes);
+  else if (routeRes && Array.isArray(routeRes.routes)) k8sRoutes = applyK8sList(routeRes.routes, k8sRoutes);
+  if (poolRes && Array.isArray(poolRes.pools)) k8sPools = applyK8sList(poolRes.pools, k8sPools);
+  if (heavy.workloads) applyWorkloads(heavy.workloads);
+  renderEnvHealth();
+}
+
 function refreshPods(id) {
   if (podsInflight) return;
   const minAge = isLive() ? LIVE_PODS_MS : PODS_REFRESH_MS;
@@ -4164,55 +4206,26 @@ async function fetchState() {
   try {
     const wantHeavy = heavyDue();
     if (wantHeavy) heavyAt = Date.now();
-    if (isLive() || wantHeavy) refreshPods(id);
-    const quiet = Promise.resolve(null);
-    const snapP = wantHeavy
-      ? api(`/api/v1/ops/environments/${encodeURIComponent(id)}/snapshot`, { timeout: SNAP_TIMEOUT }).catch(() => null)
-      : quiet;
+    if (isLive() && !wantHeavy) refreshPods(id);
     const pipeP = catalog.length
       ? Promise.resolve({ stages: catalog })
       : api("/api/v1/genestack/pipeline", { timeout: 5000 }).catch(() => ({ stages: [] }));
-    const vmsP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/vms`, { timeout: 12000 }).catch(() => null)
-      : quiet;
     const jobsP = api(`/api/v1/jobs?environment_id=${encodeURIComponent(id)}&limit=16`, { timeout: 4000 }).catch(() => null);
     const bmP = api(`/api/v1/environments/${encodeURIComponent(id)}/baremetal`, { timeout: 6000 }).catch(() => null);
-    const cloudP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/cloud`, { timeout: 20000 }).catch(() => null)
-      : quiet;
-    const ingP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/ingresses`, { timeout: 10000 }).catch(() => null)
-      : quiet;
-    const svcP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/services`, { timeout: 10000 }).catch(() => null)
-      : quiet;
-    const gwP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/gateways`, { timeout: 10000 }).catch(() => null)
-      : quiet;
-    const routeP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/httproutes`, { timeout: 10000 }).catch(() => null)
-      : quiet;
-    const poolP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/k8s/metallb/pools`, { timeout: 8000 }).catch(() => null)
-      : quiet;
-    const platP = wantHeavy
-      ? api(`/api/v1/environments/${encodeURIComponent(id)}/platform`, { timeout: 20000 }).catch(() => null)
-      : quiet;
     const srvP = api(`/api/v1/environments/${encodeURIComponent(id)}/servers`, { timeout: 8000 }).catch(() => null);
-    // Inventory is enough for the shared line. Cloud and VM calls can sit
-    // on their full timeout, and that must not leave the line at 0 machines.
-    Promise.all([platP, srvP]).then(([platEarly, srvEarly]) => {
+    const heavyP = wantHeavy
+      ? api(`/api/v1/environments/${encodeURIComponent(id)}/overview`, { timeout: 25000 }).catch(() => null)
+      : Promise.resolve(null);
+    // Inventory is enough for the shared line. The overview read can sit
+    // on the slowest cluster call, and that must not leave the line at 0.
+    srvP.then((srvEarly) => {
       if (id !== envId) return;
-      applyFleetSources(platEarly, srvEarly);
+      applyFleetSources(null, srvEarly);
       renderEnvHealth();
     }).catch(() => {});
-    // Cloud and VM reads can take the full timeout. Keep them off the lock
-    // so switching environments does not sit on an empty count.
-    const [snapRes, pipeCat, jobsRes, bmRes, ingRes, svcRes, gwRes, routeRes, poolRes, platRes, srvRes] = await Promise.all([
-      snapP, pipeP, jobsP, bmP, ingP, svcP, gwP, routeP, poolP, platP, srvP,
+    const [pipeCat, jobsRes, bmRes, srvRes] = await Promise.all([
+      pipeP, jobsP, bmP, srvP,
     ]);
-    let cloudRes = null;
-    let vmsRes = null;
     if (id !== envId) return;
     const merged = mergeSnapshot(
       {
@@ -4226,13 +4239,10 @@ async function fetchState() {
         catalog,
       },
       {
-        snap: snapRes || undefined,
-        pipe: snapRes && snapRes.pipeline ? snapRes.pipeline : undefined,
         workloads,
-        osVms: vmsRes && Array.isArray(vmsRes.vms) ? vmsRes.vms : undefined,
         bmLive: bmRes && Array.isArray(bmRes.nodes) ? bmRes.nodes : undefined,
         catalog: pipeCat && Array.isArray(pipeCat.stages) ? pipeCat.stages : undefined,
-        recentJobs: (jobsRes && (jobsRes.jobs || jobsRes)) || (snapRes && snapRes.recent_jobs) || undefined,
+        recentJobs: (jobsRes && (jobsRes.jobs || jobsRes)) || undefined,
       }
     );
     if (merged.snap) {
@@ -4243,36 +4253,8 @@ async function fetchState() {
     if (merged.pipe) pipe = merged.pipe;
     if (merged.osVms && merged.osVms.length) osVms = merged.osVms;
     if (merged.bmLive && merged.bmLive.length) bmLive = merged.bmLive;
-    applyFleetSources(platRes, srvRes);
+    applyFleetSources(null, srvRes);
     if (merged.catalog && merged.catalog.length) catalog = merged.catalog;
-    const cloudHas =
-      cloudRes &&
-      (cloudRes.available ||
-        (cloudRes.servers || []).length ||
-        (cloudRes.networks || []).length ||
-        (cloudRes.projects || []).length ||
-        (cloudRes.floating_ips || []).length);
-    if (cloudHas) osCloud = cloudRes;
-    if (ingRes && Array.isArray(ingRes.ingresses) && (ingRes.ingresses.length || !k8sIngress.length)) {
-      k8sIngress = ingRes.ingresses;
-    }
-    if (svcRes && Array.isArray(svcRes.services) && (svcRes.services.length || !k8sServices.length)) {
-      k8sServices = svcRes.services;
-    }
-    if (gwRes && Array.isArray(gwRes.gateways) && (gwRes.gateways.length || !k8sGateways.length)) {
-      k8sGateways = gwRes.gateways;
-    }
-    if (routeRes && Array.isArray(routeRes.httproutes) && (routeRes.httproutes.length || !k8sRoutes.length)) {
-      k8sRoutes = routeRes.httproutes;
-    } else if (routeRes && Array.isArray(routeRes.routes) && (routeRes.routes.length || !k8sRoutes.length)) {
-      k8sRoutes = routeRes.routes;
-    }
-    if (poolRes && Array.isArray(poolRes.pools) && (poolRes.pools.length || !k8sPools.length)) {
-      k8sPools = poolRes.pools;
-    }
-    if ((!osVms || !osVms.length) && osCloud && Array.isArray(osCloud.servers) && osCloud.servers.length) {
-      osVms = osCloud.servers;
-    }
     applyRecentJobs(jobsRes || (snap && snap.recent_jobs));
     bindLiveEnv(id);
     applyLive({
@@ -4306,22 +4288,28 @@ async function fetchState() {
     renderAll();
     fetchInflight = false;
     released = true;
-    const [cloudLate, vmsLate] = await Promise.all([cloudP, vmsP]);
-    if (id !== envId || fetchInflight) return;
-    cloudRes = cloudLate;
-    vmsRes = vmsLate;
-    if (vmsRes && Array.isArray(vmsRes.vms) && (vmsRes.vms.length || vmsRes.source === "live")) osVms = vmsRes.vms;
-    const cloudLateHas =
-      cloudRes &&
-      (cloudRes.available ||
-        (cloudRes.servers || []).length ||
-        (cloudRes.networks || []).length ||
-        (cloudRes.projects || []).length ||
-        (cloudRes.floating_ips || []).length);
-    if (cloudLateHas) osCloud = cloudRes;
-    if ((!osVms || !osVms.length) && osCloud && Array.isArray(osCloud.servers) && osCloud.servers.length) {
-      osVms = osCloud.servers;
+    const heavy = await heavyP;
+    if (!heavy || id !== envId || fetchInflight) {
+      if (wantHeavy && !heavy && id === envId) refreshPods(id);
+      return;
     }
+    applyOverview(heavy);
+    applyLive({
+      snap,
+      pipe,
+      job,
+      recentJobs,
+      workloads,
+      osVms,
+      bmLive,
+      catalog,
+      osCloud,
+      k8sIngress,
+      k8sServices,
+      k8sGateways,
+      k8sRoutes,
+      k8sPools,
+    });
     renderAll();
   } finally {
     if (!released) fetchInflight = false;

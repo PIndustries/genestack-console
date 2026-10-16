@@ -12,7 +12,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert 'activePtab === "kubernetes"' in text
     assert "environment_servers.js?v=ls73" in text
     assert "environment_next.js?v=ls71" in text
-    assert "environment_deploy_map.js?v=ls75" in text
+    assert "environment_deploy_map.js?v=ls77" in text
     assert 'nextStripHtml("overview")' in text
 
     servers = client.get("/static/js/pages/environment_servers.js")
@@ -56,6 +56,23 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert "export function refreshFleetLine(id)" in script
     tick = script.split("async function tick()", 1)[1].split("let fleetLineGen", 1)[0]
     assert "!overviewOpen()" in tick
+    fetch = script.split("async function fetchState()", 1)[1].split("function lerpNum", 1)[0]
+    assert "/overview" in fetch
+    assert "/servers" in fetch
+    assert "/jobs?environment_id" in fetch
+    assert "/baremetal" in fetch
+    for gone in (
+        "/k8s/ingresses",
+        "/k8s/services",
+        "/k8s/gateways",
+        "/k8s/httproutes",
+        "/metallb/pools",
+        "/ops/environments/",
+        "/cloud",
+        "/vms",
+        "/platform",
+    ):
+        assert gone not in fetch
 
     page = client.get("/ui")
     assert page.status_code == 200
@@ -79,7 +96,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     shell = client.get("/static/js/app.js")
     assert "healthMisses" in shell.text
     assert "health: slow" in shell.text
-    assert "environment_detail.js?v=ls76" in shell.text
+    assert "environment_detail.js?v=ls77" in shell.text
     assert "env_wizard.js?v=ls67" in shell.text
 
     nxt = client.get("/static/js/pages/environment_next.js")
