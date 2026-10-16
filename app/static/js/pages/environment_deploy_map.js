@@ -4148,6 +4148,43 @@ function applyK8sList(rows, previous) {
   return previous;
 }
 
+let overviewRefreshId = "";
+
+function paintOverviewLive() {
+  applyLive({
+    snap,
+    pipe,
+    job,
+    recentJobs,
+    workloads,
+    osVms,
+    bmLive,
+    catalog,
+    osCloud,
+    k8sIngress,
+    k8sServices,
+    k8sGateways,
+    k8sRoutes,
+    k8sPools,
+  });
+  renderAll();
+}
+
+function refreshOverviewBehind(id) {
+  if (!id || overviewRefreshId === id) return;
+  overviewRefreshId = id;
+  api(`/api/v1/environments/${encodeURIComponent(id)}/overview?refresh=1`, { timeout: 25000 })
+    .then((next) => {
+      if (overviewRefreshId === id) overviewRefreshId = "";
+      if (!next || envId !== id || next.remembered === true) return;
+      applyOverview(next);
+      paintOverviewLive();
+    })
+    .catch(() => {
+      if (overviewRefreshId === id) overviewRefreshId = "";
+    });
+}
+
 function applyOverview(heavy) {
   if (!heavy || typeof heavy !== "object") return;
   applyFleetSources(heavy.platform, null);
@@ -4294,23 +4331,8 @@ async function fetchState() {
       return;
     }
     applyOverview(heavy);
-    applyLive({
-      snap,
-      pipe,
-      job,
-      recentJobs,
-      workloads,
-      osVms,
-      bmLive,
-      catalog,
-      osCloud,
-      k8sIngress,
-      k8sServices,
-      k8sGateways,
-      k8sRoutes,
-      k8sPools,
-    });
-    renderAll();
+    paintOverviewLive();
+    if (heavy.remembered === true && Number(heavy.age_s) > 15) refreshOverviewBehind(id);
   } finally {
     if (!released) fetchInflight = false;
   }

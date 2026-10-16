@@ -73,9 +73,25 @@ def test_overview_is_one_read_and_reuses_each_cache(client, admin_headers, monke
     second = client.get(f"/api/v1/environments/{eid}/overview", headers=admin_headers)
     assert second.status_code == 200, second.text
     assert calls["platform"] == 1
+    assert calls["cloud"] == 1
     assert calls["ingresses"] == 1
     assert calls["workloads"] == 1
     assert calls["vms"] == 1
+    remembered = second.json()
+    assert remembered["remembered"] is True
+    assert remembered["platform"]["nodes"][0]["name"] == "n1"
+    assert isinstance(remembered["age_s"], int)
+
+    refreshed = client.get(
+        f"/api/v1/environments/{eid}/overview?refresh=1",
+        headers=admin_headers,
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["remembered"] is False
+    assert calls["platform"] == 2
+    assert calls["cloud"] == 2
+    assert calls["ingresses"] == 2
+    assert calls["vms"] == 2
 
     listed = client.get(
         f"/api/v1/environments/{eid}/k8s/ingresses",
@@ -83,7 +99,7 @@ def test_overview_is_one_read_and_reuses_each_cache(client, admin_headers, monke
     )
     assert listed.status_code == 200, listed.text
     assert listed.json()["ingresses"][0]["name"] == "ing"
-    assert calls["ingresses"] == 1
+    assert calls["ingresses"] == 2
 
 
 def test_overview_keeps_the_other_sections_when_one_fails(client, admin_headers, monkeypatch):
@@ -123,3 +139,66 @@ def test_overview_keeps_the_other_sections_when_one_fails(client, admin_headers,
     assert body["platform"]["nodes"][0]["name"] == "n1"
     assert body["ingresses"]["ok"] is False
     assert "ingress dial failed" not in str(body["ingresses"])
+
+
+def test_failed_refresh_keeps_the_last_overview(client, admin_headers, monkeypatch):
+    eid = _env(client, admin_headers)
+
+    def fake_platform(env, settings=None, db=None):
+        return {"nodes": [{"name": "n1"}], "error": None, "install_image": "img", "cluster": {}}
+
+    def fake_cloud(env, settings=None, refresh=False):
+        return {"available": True, "servers": [{"id": "s1"}]}
+
+    def fake_vms(env, settings=None):
+        return {"vms": [], "source": "live"}
+
+    def fake_ok(env, settings=None, namespace="", pods_only=False):
+        return {"ok": True, "ingresses": [], "pools": [], "pods": []}
+
+    monkeypatch.setattr(platform, "_load_platform_overview", fake_platform)
+    monkeypatch.setattr(openstack_ops, "cloud_inventory", fake_cloud)
+    monkeypatch.setattr(openstack_ops, "list_servers", fake_vms)
+    monkeypatch.setattr(k8s_ops, "list_ingresses", fake_ok)
+    monkeypatch.setattr(k8s_ops, "list_services", fake_ok)
+    monkeypatch.setattr(k8s_ops, "list_gateways", fake_ok)
+    monkeypatch.setattr(k8s_ops, "list_httproutes", fake_ok)
+    monkeypatch.setattr(k8s_ops, "list_metallb_pools", fake_ok)
+    monkeypatch.setattr(k8s_ops, "list_workloads", fake_ok)
+
+    first = client.get(f"/api/v1/environments/{eid}/overview", headers=admin_headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["remembered"] is False
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("dial failed")
+
+    monkeypatch.setattr(platform, "platform_overview", boom)
+    monkeypatch.setattr(openstack_ops, "cloud_inventory", boom)
+    monkeypatch.setattr(openstack_ops, "list_servers", boom)
+    monkeypatch.setattr(k8s_ops, "list_ingresses", boom)
+    monkeypatch.setattr(k8s_ops, "list_services", boom)
+    monkeypatch.setattr(k8s_ops, "list_gateways", boom)
+    monkeypatch.setattr(k8s_ops, "list_httproutes", boom)
+    monkeypatch.setattr(k8s_ops, "list_metallb_pools", boom)
+    monkeypatch.setattr(k8s_ops, "list_workloads", boom)
+
+    refreshed = client.get(
+        f"/api/v1/environments/{eid}/overview?refresh=1",
+        headers=admin_headers,
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    body = refreshed.json()
+    assert body["remembered"] is True
+    assert body["platform"]["nodes"][0]["name"] == "n1"
+    assert "dial failed" not in refreshed.text
+
+
+def test_overview_page_refreshes_a_remembered_answer_behind_the_paint():
+    from pathlib import Path
+
+    text = Path("app/static/js/pages/environment_deploy_map.js").read_text(encoding="utf-8")
+    fetch = text.split("async function fetchState()", 1)[1].split("function lerpNum", 1)[0]
+    assert "refreshOverviewBehind(id)" in fetch
+    assert "await refreshOverviewBehind" not in fetch
+    assert "/cloud" not in fetch

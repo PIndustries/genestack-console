@@ -286,6 +286,38 @@ def test_build_workflow_without_operate_probe(client, admin_headers):
     assert operate["details"] == {}
 
 
+def test_fleet_build_does_not_call_pipeline_progress(client, admin_headers, monkeypatch):
+    from app.db import SessionLocal
+    from app.models import Environment
+    from app.services import workflow as workflow_service
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("pipeline_progress")
+
+    monkeypatch.setattr(workflow_service, "pipeline_progress", boom)
+    env = _create_env(client, admin_headers)
+    db = SessionLocal()
+    try:
+        row = db.get(Environment, env["id"])
+        body = workflow_service.build_workflow(db, row, include_operate_probe=False)
+    finally:
+        db.close()
+    deploy = next(step for step in body["steps"] if step["id"] == "deploy")
+    assert "pipeline" not in deploy["details"]
+    operate = next(step for step in body["steps"] if step["id"] == "operate")
+    assert operate["summary"] == "not checked"
+
+
+def test_fleet_page_paints_before_live_health():
+    from pathlib import Path
+
+    text = Path("app/static/js/pages/fleet.js").read_text(encoding="utf-8")
+    body = text.split("async function loadFleet", 1)[1].split("function renderHeader", 1)[0]
+    assert "await livePromise" not in body
+    assert "livePromise.then" in body
+    assert body.index("board.innerHTML") < body.index("livePromise.then")
+
+
 # ---------------------------------------------------------------------------
 # One broken environment never breaks the board
 # ---------------------------------------------------------------------------

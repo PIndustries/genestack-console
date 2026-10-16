@@ -25,6 +25,7 @@ from typing import Any, Callable
 from app.config import Settings, get_settings
 from app.models import Environment
 from app.services import genestack_bridge as bridge
+from app.services import remembered
 from app.services.envcontext import EnvContext, build_context
 from app.services.executors import pick_executor
 from app.services.osclient import OpenStackClient, OpenStackError
@@ -962,13 +963,37 @@ def _inventory_copy(key: str, *, max_age: float | None) -> dict[str, Any] | None
     return copied
 
 
+_EPHEMERAL = ("cached", "remembered", "age_s")
+
+
+def _mark_fresh(result: dict[str, Any]) -> dict[str, Any]:
+    out = dict(result)
+    out["remembered"] = False
+    out["age_s"] = 0
+    return out
+
+
+def _disk_cloud(cache_key: str) -> dict[str, Any] | None:
+    loaded = remembered.load("cloud", cache_key)
+    if loaded is None:
+        return None
+    body = copy.deepcopy(loaded["body"])
+    body["cached"] = True
+    body["remembered"] = True
+    body["age_s"] = loaded["age_s"]
+    return body
+
+
 def _inventory_store(key: str, payload: dict[str, Any]) -> None:
     """Remember an available inventory. An unavailable result is not stored."""
     if not payload.get("available"):
         return
-    stored = copy.deepcopy({k: v for k, v in payload.items() if k != "cached"})
+    stored = copy.deepcopy(
+        {k: v for k, v in payload.items() if k not in _EPHEMERAL}
+    )
     with _inventory_lock:
         _CACHE[key] = (time.monotonic(), stored)
+    remembered.save("cloud", key, stored)
 
 
 def cloud_inventory(
@@ -980,33 +1005,51 @@ def cloud_inventory(
 ) -> dict[str, Any]:
     """Horizon-style inventory of the env's cloud. Never raises.
 
-    A recent available inventory is reused. One caller dials on a miss;
-    the others wait for that copy instead of opening another context.
+    A recent available inventory is reused. After that, the last saved
+    inventory is returned without dialing. One caller dials on a miss;
+    the others wait for that copy. ``refresh`` dials again, and a dial
+    that does not answer keeps the saved copy.
     """
     settings = settings or get_settings()
     cache_key = str(getattr(env, "id", "") or "")
     if not cache_key:
-        return _load_cloud_inventory(env, settings, log=log)
+        return _mark_fresh(_load_cloud_inventory(env, settings, log=log))
     if not refresh:
         fresh = _inventory_copy(cache_key, max_age=INVENTORY_CACHE_TTL)
         if fresh is not None:
             return fresh
+        disk = _disk_cloud(cache_key)
+        if disk is not None:
+            return disk
         leader, event = _inventory_claim(cache_key)
         if not leader:
             event.wait(_INVENTORY_WAIT_S)
             cached = _inventory_copy(cache_key, max_age=None)
             if cached is not None:
                 return cached
+            disk = _disk_cloud(cache_key)
+            if disk is not None:
+                return disk
         else:
             try:
                 result = _load_cloud_inventory(env, settings, log=log)
                 _inventory_store(cache_key, result)
-                return result
+                if result.get("available"):
+                    return _mark_fresh(result)
+                disk = _disk_cloud(cache_key)
+                if disk is not None:
+                    return disk
+                return _mark_fresh(result)
             finally:
                 _inventory_release(cache_key, event)
     result = _load_cloud_inventory(env, settings, log=log)
     _inventory_store(cache_key, result)
-    return result
+    if result.get("available"):
+        return _mark_fresh(result)
+    disk = _disk_cloud(cache_key)
+    if disk is not None:
+        return disk
+    return _mark_fresh(result)
 
 
 def _load_cloud_inventory(

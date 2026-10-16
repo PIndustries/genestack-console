@@ -1381,6 +1381,34 @@ function renderSource(data) {
   pillEl.innerHTML = sourcePillHtml(data);
 }
 
+let cloudRefreshId = "";
+
+function refreshCloudBehind(envId, data) {
+  if (!envId || !data || data.remembered !== true || !(Number(data.age_s) > 20)) return;
+  if (cloudRefreshId === envId) return;
+  cloudRefreshId = envId;
+  api(`/api/v1/environments/${encodeURIComponent(envId)}/cloud?refresh=true`, {
+    timeout: FETCH_TIMEOUT,
+  })
+    .then((fresh) => {
+      if (cloudRefreshId === envId) cloudRefreshId = "";
+      if (activeEnvId !== envId || !fresh || fresh.remembered === true) return;
+      cache = fresh;
+      const msg = document.getElementById("os-cloud-msg");
+      if (msg) msg.textContent = "";
+      renderSource(cache);
+      renderStats(cache);
+      renderError(cache.available === false ? cache.error || "OpenStack API not available" : "");
+      const cardBody = document.getElementById("os-cloud-body");
+      if (!cardBody) return;
+      cardBody.classList.remove("muted");
+      cardBody.innerHTML = bodyHtml(cache);
+    })
+    .catch(() => {
+      if (cloudRefreshId === envId) cloudRefreshId = "";
+    });
+}
+
 function fetchCloud(envId, refresh) {
   const q = refresh ? "?refresh=true" : "";
   if (inflight && inflightKey === envId) return inflight;
@@ -2025,6 +2053,7 @@ export async function loadCloudCard(envId, { silent = false, refresh = false } =
   renderError(cache.available === false ? cache.error || "OpenStack API not available" : "");
   body.classList.remove("muted");
   body.innerHTML = bodyHtml(cache);
+  if (!refresh) refreshCloudBehind(activeEnvId, cache);
 }
 
 export function destroyCloudCard() {

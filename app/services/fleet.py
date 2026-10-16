@@ -7,8 +7,8 @@ to a compact traffic-light mapping.
 Two properties matter here:
 
 - No live probes: workflow builds run with ``include_operate_probe=False``
-  so a fleet of N environments never costs N kubectl calls (each with a
-  5s timeout) — the operate step reports "not checked".
+  so a fleet of N environments never costs N kubectl or helm calls. The
+  operate step reports "not checked". The deploy step uses the job row.
 - Never raises: one broken environment degrades to an all-pending row
   with an ``error`` note instead of breaking the whole board.
 """

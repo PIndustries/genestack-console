@@ -247,9 +247,16 @@ def test_cloud_inventory_singleflight_and_hit_skips_context(monkeypatch):
     assert calls == {"api": 1, "build": 1}
 
     openstack_ops.invalidate_cloud_cache(env.id)
-    refreshed = openstack_ops.cloud_inventory(env)
+    kept = openstack_ops.cloud_inventory(env)
+    assert calls == {"api": 1, "build": 1}
+    assert kept["cached"] is True
+    assert kept["remembered"] is True
+    assert kept["servers"] == [{"name": "a"}]
+
+    refreshed = openstack_ops.cloud_inventory(env, refresh=True)
     assert calls == {"api": 2, "build": 2}
     assert refreshed["cached"] is False
+    assert refreshed["remembered"] is False
     assert refreshed["servers"] == [{"name": "a"}]
 
 
@@ -281,3 +288,44 @@ def test_cloud_inventory_does_not_cache_unavailable(monkeypatch):
     assert first["available"] is False
     assert second.get("cached") is not True
     assert calls["n"] == 2
+
+
+def test_cloud_refresh_failure_keeps_the_saved_inventory(monkeypatch):
+    calls = {"n": 0}
+
+    class Ctx:
+        def cleanup(self):
+            return None
+
+    def fake_api(ctx):  # noqa: ARG001
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {
+                "available": True,
+                "source": "openstack-api",
+                "error": None,
+                "cached": False,
+                "servers": [{"name": "a"}],
+            }
+        return {
+            "available": False,
+            "source": "unavailable",
+            "error": "down",
+            "cached": False,
+        }
+
+    monkeypatch.setattr(
+        openstack_ops, "build_context", lambda env, settings=None: Ctx()
+    )
+    monkeypatch.setattr(openstack_ops, "_inventory_via_api", fake_api)
+    env = SimpleNamespace(id=f"inv-keep-{uuid.uuid4().hex[:8]}")
+    openstack_ops.invalidate_cloud_cache(env.id)
+    first = openstack_ops.cloud_inventory(env)
+    assert first["remembered"] is False
+    assert first["available"] is True
+    openstack_ops.invalidate_cloud_cache(env.id)
+    failed = openstack_ops.cloud_inventory(env, refresh=True)
+    assert calls["n"] == 2
+    assert failed["remembered"] is True
+    assert failed["available"] is True
+    assert failed["servers"] == [{"name": "a"}]

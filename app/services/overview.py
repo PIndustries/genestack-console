@@ -14,7 +14,7 @@ from typing import Any
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Environment
-from app.services import k8s_ops, openstack_ops, platform
+from app.services import k8s_ops, openstack_ops, platform, remembered
 from app.services.demo import (
     canned_cloud_inventory,
     canned_gateways,
@@ -140,8 +140,8 @@ def _section(env_id: str, name: str, *, refresh: bool) -> dict[str, Any]:
         return {"ok": False, "error": "unknown"}
 
 
-def overview_read(env_id: str, *, refresh: bool = False) -> dict[str, Any]:
-    """Gather the slow Overview sections. Wall time follows the slowest one."""
+def _gather(env_id: str, *, refresh: bool) -> dict[str, Any]:
+    """Dial the slow sections. Wall time follows the slowest one."""
     out: dict[str, Any] = {"environment_id": env_id}
     with ThreadPoolExecutor(max_workers=len(_SECTIONS)) as pool:
         futures = {
@@ -153,4 +153,35 @@ def overview_read(env_id: str, *, refresh: bool = False) -> dict[str, Any]:
                 out[name] = future.result()
             except Exception:  # noqa: BLE001
                 out[name] = {"ok": False, "error": "unavailable"}
+    return out
+
+
+def _from_disk(env_id: str, stored: dict[str, Any]) -> dict[str, Any]:
+    body = dict(stored["body"])
+    body["environment_id"] = env_id
+    body["remembered"] = True
+    body["age_s"] = int(stored["age_s"])
+    return body
+
+
+def overview_read(env_id: str, *, refresh: bool = False) -> dict[str, Any]:
+    """Return the last good Overview, then gather when asked or when none exists.
+
+    A gather that does not answer leaves the previous copy in place.
+    """
+    if not refresh:
+        stored = remembered.load("overview", env_id)
+        if stored is not None:
+            return _from_disk(env_id, stored)
+    out = _gather(env_id, refresh=refresh)
+    if remembered.worth_saving("overview", out):
+        remembered.save("overview", env_id, out)
+        out["remembered"] = False
+        out["age_s"] = 0
+        return out
+    stored = remembered.load("overview", env_id)
+    if stored is not None:
+        return _from_disk(env_id, stored)
+    out["remembered"] = False
+    out["age_s"] = 0
     return out

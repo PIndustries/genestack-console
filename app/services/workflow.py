@@ -672,22 +672,27 @@ def _push_step(db: Session, env: Environment, settings: Settings) -> dict[str, A
     return _step("push", state, summary, details)
 
 
-def _deploy_step(db: Session, env: Environment, settings: Settings) -> dict[str, Any]:
+def _deploy_step(
+    db: Session, env: Environment, settings: Settings, *, probe: bool = True
+) -> dict[str, Any]:
     job = _latest_job(db, env, (DEPLOY_OPERATION,))
-    pipe = pipeline_progress(db, env, settings)
+    # The fleet board passes probe=False. pipeline_progress dials kubectl
+    # and helm and reads the whole deploy log, which the board does not show.
+    pipe = pipeline_progress(db, env, settings) if probe else None
     details: dict[str, Any] = {
         "job_id": job.id if job is not None else None,
         "status": job.status.value if job is not None else None,
         "finished_at": job.finished_at if job is not None else None,
         "dry_run": job.dry_run if job is not None else None,
-        "pipeline": pipe,
     }
+    if pipe is not None:
+        details["pipeline"] = pipe
     audit = _latest_audit_details(db, env, "env.deploy")
     if audit.get("stages_completed") is not None:
         details["stages_completed"] = audit["stages_completed"]
         details["stages_total"] = audit.get("stages_total")
     if job is None:
-        if pipe.get("cluster_reachable"):
+        if pipe is not None and pipe.get("cluster_reachable"):
             nxt = pipe.get("next_stage") or "infrastructure"
             summary = f"Kubernetes is up; continue from {nxt}"
             current = envconfig_service.get_current(db, env)
@@ -705,14 +710,15 @@ def _deploy_step(db: Session, env: Environment, settings: Settings) -> dict[str,
             )
         return _step("deploy", "pending", "not deployed yet", details)
     state, summary = _job_state_and_summary(job, kind="deploy")
-    nxt = pipe.get("next_stage")
-    if job.status == JobStatus.failed and nxt:
-        summary = "last deploy failed"
-    elif job.status == JobStatus.success and nxt and nxt != "hosts":
-        # Job reported success but live helm/cluster shows later stages missing
-        # (e.g. Talos is up, OpenStack not). Offer Continue instead of "done".
-        state = "attention"
-        summary = f"deployed through earlier stages; continue from {nxt}"
+    if pipe is not None:
+        nxt = pipe.get("next_stage")
+        if job.status == JobStatus.failed and nxt:
+            summary = "last deploy failed"
+        elif job.status == JobStatus.success and nxt and nxt != "hosts":
+            # Job reported success but live helm/cluster shows later stages missing
+            # (e.g. Talos is up, OpenStack not). Offer Continue instead of "done".
+            state = "attention"
+            summary = f"deployed through earlier stages; continue from {nxt}"
     return _step("deploy", state, summary, details)
 
 
@@ -789,8 +795,9 @@ def build_workflow(
 ) -> dict[str, Any]:
     """Assemble the read-only lifecycle workflow view for one environment.
 
-    With ``include_operate_probe=False`` the operate step skips the live
-    cluster probes and reports "not checked" instead.
+    With ``include_operate_probe=False`` the fleet board skips live cluster
+    probes. The operate step reports "not checked". The deploy step uses the
+    job row and does not call :func:`pipeline_progress`.
     """
     settings = settings or get_settings()
     operate = (
@@ -812,7 +819,12 @@ def build_workflow(
             _safe_step("inventory", lambda: _inventory_step(db, env)),
             _safe_step("config", lambda: _config_step(db, env)),
             _safe_step("push", lambda: _push_step(db, env, settings)),
-            _safe_step("deploy", lambda: _deploy_step(db, env, settings)),
+            _safe_step(
+                "deploy",
+                lambda: _deploy_step(
+                    db, env, settings, probe=include_operate_probe
+                ),
+            ),
             _safe_step("operate", lambda: operate(db, env, settings)),
         ],
     }

@@ -224,7 +224,7 @@ async function loadFleet({ background = false } = {}) {
   if (!list || !err) return; // page was unloaded mid-flight
   if (!background) err.innerHTML = "";
 
-  // Live telemetry rides along but never blocks the board.
+  // Live health fills the pills after the cards are on the page.
   const livePromise = api("/api/v1/fleet/live").catch(() => null);
 
   let data;
@@ -247,14 +247,7 @@ async function loadFleet({ background = false } = {}) {
     return;
   }
 
-  const live = await livePromise;
   if (seq !== fleetSeq) return;
-  liveMap = new Map(
-    (Array.isArray(live) ? live : [])
-      .filter((e) => e && e.environment_id)
-      .map((e) => [e.environment_id, e])
-  );
-
   const allEnvs = Array.isArray(data && data.environments) ? data.environments : [];
   reconcileEnvs(allEnvs);
   if (seq !== fleetSeq) return;
@@ -276,24 +269,28 @@ async function loadFleet({ background = false } = {}) {
     const showTenant = !currentTenantId();
     const consoleLogs = await consoleDefaultLogs();
     if (seq !== fleetSeq) return;
-    // Render cards immediately without waiting for workflow step fetches.
-    // Fire-and-forget the workflow calls so the page renders fast, then update
-    // individual CTA labels when each response arrives.
-    const cardPromises = envs.map((env) => renderFleetCard(env, showTenant, consoleLogs));
-    const list = document.getElementById("fl-list");
-    if (!list) return;
-    list.innerHTML = (await Promise.all(cardPromises)).join("");
-    // Update CTA labels from the current_step already present on each /fleet row.
+    const board = document.getElementById("fl-list");
+    if (!board) return;
+    board.innerHTML = envs.map((env) => renderFleetCard(env, showTenant, consoleLogs)).join("");
     envs.forEach((env) => {
-      updateActionLabel(env, list);
+      updateActionLabel(env, board);
     });
   }
 
   const updated = document.getElementById("fl-updated");
   if (updated) updated.textContent = "updated " + new Date().toLocaleTimeString();
-
-  // Refresh stats bar once fleet data is loaded (liveMap is now populated)
   loadStatsBar();
+
+  livePromise.then((live) => {
+    if (seq !== fleetSeq) return;
+    liveMap = new Map(
+      (Array.isArray(live) ? live : [])
+        .filter((e) => e && e.environment_id)
+        .map((e) => [e.environment_id, e])
+    );
+    applyLivePills(envs);
+    loadStatsBar();
+  });
 }
 
 function renderHeader(data, count) {
@@ -474,12 +471,26 @@ function isStale(takenAt) {
   return !Number.isNaN(ts) && Date.now() - ts > STALE_MS;
 }
 
+function applyLivePills(envs) {
+  const board = document.getElementById("fl-list");
+  if (!board || !Array.isArray(envs)) return;
+  for (const env of envs) {
+    const id = env && env.id ? String(env.id) : "";
+    if (!id || typeof CSS === "undefined" || !CSS.escape) continue;
+    const card = board.querySelector(`.fl-env-card[data-env="${CSS.escape(id)}"]`);
+    if (!card) continue;
+    const cur = env && STEPS.includes(env.current_step) ? env.current_step : null;
+    const pill = card.querySelector("[data-fl-health]");
+    if (pill) pill.outerHTML = healthPillHtml(liveMap.get(id), cur);
+  }
+}
+
 function healthPillHtml(live, curStep) {
   if (!live || !live.health) {
     if (curStep === "connect") {
-      return '<span class="pill">not deployed</span>';
+      return '<span class="pill" data-fl-health="1">not deployed</span>';
     }
-    return '<span class="pill fl-health" title="no telemetry yet">health: unknown</span>';
+    return '<span class="pill fl-health" data-fl-health="1" title="no telemetry yet">health: unknown</span>';
   }
   const health = String(live.health || "unknown").toLowerCase();
   const cls = health === "healthy" ? "ok" : health === "degraded" ? "warn" : health === "down" ? "bad" : "";
@@ -496,7 +507,7 @@ function healthPillHtml(live, curStep) {
   if (stale) tip.push("(stale)");
   if (live.drifted === true) tip.push("drift");
   if (live.probe_ok === false && live.error) tip.push(String(live.error));
-  return `<span class="pill ${cls} fl-health" title="${esc(tip.join(" · "))}">health: ${esc(health)}${stale ? " ⚠" : ""}</span>`;
+  return `<span class="pill ${cls} fl-health" data-fl-health="1" title="${esc(tip.join(" · "))}">health: ${esc(health)}${stale ? " ⚠" : ""}</span>`;
 }
 
 // SSE fleet events: merge into liveMap and re-render the pill on the card.
@@ -507,7 +518,7 @@ function onFleetEvent(payload) {
   liveMap.set(id, next);
   const card = document.querySelector(`.fl-env-card[data-env="${CSS.escape(id)}"]`);
   if (!card) return;
-  const pill = card.querySelector(".fl-health");
+  const pill = card.querySelector("[data-fl-health]");
   if (pill) pill.outerHTML = healthPillHtml(next);
   // Also update stats bar counts reactively
   if (statsCache) loadStatsBar();
