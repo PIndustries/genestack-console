@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.16.2
+
+The update note lists what changed.
+
+- After an update, the note names the version and the changes in that build.
+- The install instructions stay on the release page.
+
 ## 2026.10.16.1
 
 Overview asks the cluster once.
