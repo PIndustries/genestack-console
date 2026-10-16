@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.16.5
+
+Control-plane chart hooks land on a node.
+
+- Before each chart, control-plane nodes are labeled openstack-control-plane=enabled and the NoSchedule taint is removed.
+- A hook pod that is waiting on that label or taint is placed, and the chart keeps installing.
+- A pod that cannot schedule for another reason stops the chart.
+- Keystone registration jobs run one after another. Each job needs the one before it.
+
 ## 2026.10.16.4
 
 The board and Overview open from the last answer.
