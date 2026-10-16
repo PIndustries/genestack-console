@@ -608,31 +608,33 @@ def _kubeconfig_for(ctx: EnvContext) -> str:
     return kubeconfig
 
 
-def _ensure_control_planes_schedulable(
+def _patch_talos_control_plane_schedule(
     doc: dict[str, Any],
     ctx: EnvContext,
     log: LogFn,
-) -> None:
+) -> bool:
     """Tell Talos to leave the control-plane NoSchedule taint off.
 
     A cluster that already accepted its machine config does not re-apply
     the hosts patch. This updates the running control planes in place.
-    The etcd subnet block is not part of this patch.
+    The etcd subnet block is not part of this patch. Returns True when a
+    control plane accepted the patch.
     """
     if ctx.config_dir is None:
-        return
+        return False
     targets = talos_service.control_plane_schedule_targets(doc)
     talosconfig = ctx.config_dir / "talos" / "talosconfig"
     if not targets or not talosconfig.is_file():
         log(
-            "[deploy] control-plane taint left in place; "
+            "[deploy] Talos scheduling patch skipped; "
             "this run has no talosconfig or control-plane address"
         )
-        return
+        return False
     log(
         "[deploy] Talos control planes stay schedulable so "
         "openstack-control-plane pods are not held by the NoSchedule taint"
     )
+    accepted = False
     for name, ip in targets:
         result = bridge.run_command(
             talos_service.control_plane_schedule_patch_argv(str(talosconfig), ip),
@@ -643,12 +645,65 @@ def _ensure_control_planes_schedulable(
         if result.get("returncode") not in (0, None):
             log(
                 f"[deploy] could not patch {name}; "
-                "helm stops if those pods stay unschedulable"
+                "the chart hook clears the taint if it is still there"
             )
+            continue
+        accepted = True
+    return accepted
+
+
+def _place_control_plane_nodes(ctx: EnvContext, log: LogFn) -> None:
+    """Label control-plane nodes and clear the NoSchedule taint now.
+
+    Chart hooks select ``openstack-control-plane=enabled`` and do not
+    tolerate that taint. kubectl applies both before the charts run. A
+    taint that is already gone is a successful clear.
+    """
     kubeconfig = _kubeconfig_for(ctx)
     if not kubeconfig:
+        log(
+            "[deploy] control-plane label was not applied; "
+            "this run has no kubeconfig"
+        )
         return
-    time.sleep(8)
+    log(
+        "[deploy] control-plane nodes take openstack-control-plane=enabled "
+        "and the NoSchedule taint stays off"
+    )
+    labeled = bridge.run_command(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "label",
+            "node",
+            "-l",
+            "node-role.kubernetes.io/control-plane",
+            "openstack-control-plane=enabled",
+            "--overwrite",
+        ],
+        timeout=60,
+        dry_run=False,
+        log=log,
+    )
+    if labeled.get("returncode") not in (0, None):
+        message = str(labeled.get("stderr") or labeled.get("message") or "").strip()
+        log(f"[deploy] could not label control planes: {message[:200]}")
+    bridge.run_command(
+        [
+            "kubectl",
+            "--kubeconfig",
+            kubeconfig,
+            "taint",
+            "nodes",
+            "-l",
+            "node-role.kubernetes.io/control-plane",
+            "node-role.kubernetes.io/control-plane:NoSchedule-",
+        ],
+        timeout=60,
+        dry_run=False,
+        log=log,
+    )
     listed = bridge.run_command(
         [
             "kubectl",
@@ -673,6 +728,22 @@ def _ensure_control_planes_schedulable(
         log("[deploy] control-plane NoSchedule taint is still present")
         return
     log("[deploy] control-plane NoSchedule taint is off")
+
+
+def _ensure_control_planes_schedulable(
+    doc: dict[str, Any],
+    ctx: EnvContext,
+    log: LogFn,
+) -> None:
+    """Label control planes and take the NoSchedule taint off before charts.
+
+    Talos puts that taint back while allowSchedulingOnControlPlanes is off.
+    The machine-config patch keeps it off. kubectl labels the nodes and
+    clears the taint now, so a chart hook does not sit Pending.
+    """
+    if _patch_talos_control_plane_schedule(doc, ctx, log):
+        time.sleep(8)
+    _place_control_plane_nodes(ctx, log)
 
 
 def run_deploy(
@@ -872,7 +943,11 @@ def run_deploy(
         )
         if guarded.get("GENESTACK_HELM_REAL"):
             extra_env = guarded
-            log("[deploy] helm stops when a pod stays unschedulable")
+            log(
+                "[deploy] helm places a control-plane hook that is waiting "
+                "on the label or taint"
+            )
+            log("[deploy] helm stops when a pod stays unschedulable for another reason")
             log("[deploy] helm repo update runs once; later installs reuse that index")
             log("[deploy] install scripts use mikefarah yq")
 

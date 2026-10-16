@@ -14,6 +14,7 @@ import shlex
 from app.services.helm_guard import (
     REPO_INDEX_STAMP,
     arm_helm_guard,
+    control_plane_pin_pods,
     envoy_gateway_version,
     install_helm_guard,
     install_yq_shim,
@@ -76,6 +77,35 @@ def test_envoy_version_comes_from_the_chart_file():
     assert envoy_gateway_version("kube-ovn: v1.14.10\n") == "v1.7.0"
 
 
+def test_control_plane_pin_is_the_label_or_the_taint():
+    labeled = _pod("keystone-credential-setup", reason="Unschedulable", age_s=30)
+    labeled["spec"] = {"nodeSelector": {"openstack-control-plane": "enabled"}}
+    tainted = _pod(
+        "glance-api",
+        reason="Unschedulable",
+        age_s=30,
+        message=(
+            "0/3 nodes are available: 3 node(s) had untolerated taint "
+            "{node-role.kubernetes.io/control-plane: }"
+        ),
+    )
+    busy = _pod("nova-api", reason="Unschedulable", age_s=120, message="insufficient cpu")
+    pulling = _pod(
+        "keystone-api",
+        reason="ContainerCreating",
+        age_s=600,
+        message="pulling image",
+    )
+    pulling["spec"] = {"nodeSelector": {"openstack-control-plane": "enabled"}}
+    found = control_plane_pin_pods(
+        {"items": [labeled, tainted, busy, pulling]}
+    )
+    assert found == [
+        "openstack/keystone-credential-setup",
+        "openstack/glance-api",
+    ]
+
+
 def test_frozen_helpers_match_the_checkout():
     import inspect
 
@@ -85,6 +115,7 @@ def test_frozen_helpers_match_the_checkout():
         ("envoy_gateway_version", helm_guard.envoy_gateway_version),
         ("_parse_rfc3339", helm_guard._parse_rfc3339),
         ("unschedulable_messages", helm_guard.unschedulable_messages),
+        ("control_plane_pin_pods", helm_guard.control_plane_pin_pods),
     ):
         assert helm_guard._FROZEN_HELPERS[name] == textwrap.dedent(inspect.getsource(fn))
 
@@ -99,6 +130,7 @@ def test_compiled_binary_still_renders_the_wrapper(monkeypatch):
     script = render_helm_guard()
     compile(script, "<helm-guard>", "exec")
     assert "def unschedulable_messages" in script
+    assert "def control_plane_pin_pods" in script
     assert "def envoy_gateway_version" in script
     assert "could not get source code" not in script
 
@@ -123,7 +155,7 @@ def test_wrapper_stops_a_held_upgrade(tmp_path):
                 "admission",
                 reason="Unschedulable",
                 age_s=180,
-                message="untolerated taint node-role.kubernetes.io/control-plane",
+                message="insufficient cpu",
             )
         ]
     }
@@ -148,8 +180,164 @@ def test_wrapper_stops_a_held_upgrade(tmp_path):
         timeout=20,
     )
     assert result.returncode == 2, result.stderr
-    assert "untolerated taint" in result.stdout
+    assert "insufficient cpu" in result.stdout
+    assert "placing " not in result.stdout
     assert stat.S_IMODE(guard.stat().st_mode) & 0o111
+
+
+def _credential_pin() -> dict:
+    pod = _pod(
+        "keystone-credential-setup",
+        reason="Unschedulable",
+        age_s=120,
+        message=(
+            "0/3 nodes are available: 3 node(s) had untolerated taint "
+            "{node-role.kubernetes.io/control-plane: }"
+        ),
+    )
+    pod["spec"] = {"nodeSelector": {"openstack-control-plane": "enabled"}}
+    return pod
+
+
+def test_wrapper_places_control_planes_before_the_chart(tmp_path):
+    calls = tmp_path / "kubectl-calls"
+    real = tmp_path / "real-helm"
+    real.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    real.chmod(0o755)
+    kubectl = tmp_path / "kubectl"
+    kubectl.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> {shlex.quote(str(calls))}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
+    guard = install_helm_guard(tmp_path / "guard")
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+    env["GENESTACK_HELM_REAL"] = str(real)
+    env["GENESTACK_HELM_GUARD_DELAY"] = "0"
+    env["GENESTACK_HELM_GUARD_POLL"] = "0"
+    result = subprocess.run(
+        [str(guard), "upgrade", "--install", "keystone", "chart", "-n", "openstack"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "openstack-control-plane=enabled" in result.stdout
+    recorded = calls.read_text(encoding="utf-8").splitlines()
+    assert any(
+        line.startswith("label node ") and "openstack-control-plane=enabled" in line
+        for line in recorded
+    )
+    assert any(
+        "control-plane:NoSchedule-" in line and line.startswith("taint nodes ")
+        for line in recorded
+    )
+
+
+def test_wrapper_keeps_helm_after_the_pin_is_placed(tmp_path):
+    pin_path = tmp_path / "pin.json"
+    pin_path.write_text(json.dumps({"items": [_credential_pin()]}), encoding="utf-8")
+    count = tmp_path / "taints"
+    real = tmp_path / "real-helm"
+    real.write_text("#!/bin/sh\nsleep 2\nexit 0\n", encoding="utf-8")
+    real.chmod(0o755)
+    kubectl = tmp_path / "kubectl"
+    kubectl.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import os
+            import sys
+
+            args = sys.argv[1:]
+            count = os.environ["GSC_TAINT_COUNT"]
+            if args[:2] == ["taint", "nodes"]:
+                seen = 0
+                if os.path.exists(count):
+                    seen = int(open(count, encoding="utf-8").read() or "0")
+                open(count, "w", encoding="utf-8").write(str(seen + 1))
+                raise SystemExit(0)
+            if "get" in args and "pods" in args:
+                seen = 0
+                if os.path.exists(count):
+                    seen = int(open(count, encoding="utf-8").read() or "0")
+                if seen >= 2:
+                    print('{"items": []}')
+                else:
+                    print(open(os.environ["GSC_PIN_JSON"], encoding="utf-8").read())
+                raise SystemExit(0)
+            raise SystemExit(0)
+            """
+        ),
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
+    guard = install_helm_guard(tmp_path / "guard")
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+    env["GENESTACK_HELM_REAL"] = str(real)
+    env["GENESTACK_HELM_GUARD_DELAY"] = "0"
+    env["GENESTACK_HELM_GUARD_POLL"] = "0"
+    env["GSC_TAINT_COUNT"] = str(count)
+    env["GSC_PIN_JSON"] = str(pin_path)
+    result = subprocess.run(
+        [str(guard), "upgrade", "--install", "keystone", "chart", "-n", "openstack"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "placing openstack/keystone-credential-setup" in result.stdout
+    assert "0/3 nodes" not in result.stdout
+    assert int(count.read_text(encoding="utf-8")) >= 2
+
+
+def test_wrapper_stops_when_the_control_plane_pin_stays(tmp_path):
+    payload = {"items": [_credential_pin()]}
+    real = tmp_path / "real-helm"
+    real.write_text(
+        "#!/bin/sh\n"
+        "i=0\n"
+        "while [ \"$i\" -lt 30 ]; do\n"
+        "  i=$((i + 1))\n"
+        "  sleep 1\n"
+        "done\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    real.chmod(0o755)
+    kubectl = tmp_path / "kubectl"
+    kubectl.write_text(
+        "#!/bin/sh\nprintf '%s\\n' " + json.dumps(json.dumps(payload)) + "\n",
+        encoding="utf-8",
+    )
+    kubectl.chmod(0o755)
+    guard = install_helm_guard(tmp_path / "guard")
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+    env["GENESTACK_HELM_REAL"] = str(real)
+    env["GENESTACK_HELM_GUARD_DELAY"] = "0"
+    env["GENESTACK_HELM_GUARD_POLL"] = "0"
+    env["GENESTACK_HELM_UNSCHEDULABLE_GRACE"] = "0"
+    env["GENESTACK_HELM_CONTROL_PLANE_REPAIRS"] = "2"
+    result = subprocess.run(
+        [str(guard), "upgrade", "--install", "keystone", "chart", "--namespace=openstack"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+        timeout=20,
+    )
+    assert result.returncode == 2, result.stderr + result.stdout
+    assert "placing openstack/keystone-credential-setup" in result.stdout
+    assert "untolerated taint" in result.stdout
 
 
 def test_wrapper_leaves_helm_show_alone(tmp_path):

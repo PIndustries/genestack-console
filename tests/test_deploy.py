@@ -1439,3 +1439,42 @@ def test_horizon_post_start_drops_the_apache_reload(tmp_path):
     assert notes
     deploy_service._quiet_horizon_reload(tmp_path, notes.append)
     assert len(notes) == 1
+
+
+def test_place_control_plane_nodes_labels_and_clears_the_taint(monkeypatch, tmp_path):
+    calls: list[list[str]] = []
+
+    def fake_run_command(cmd, **kwargs):  # noqa: ARG001
+        argv = [str(part) for part in cmd]
+        calls.append(argv)
+        text = ""
+        if "jsonpath" in " ".join(argv):
+            text = "cp1:\n"
+        return {"returncode": 0, "stdout": text, "stderr": "", "dry_run": False}
+
+    monkeypatch.setattr(bridge, "run_command", fake_run_command)
+    ctx = type(
+        "Ctx",
+        (),
+        {"kubeconfig": str(tmp_path / "kubeconfig"), "config_dir": tmp_path},
+    )()
+    notes: list[str] = []
+    deploy_service._place_control_plane_nodes(ctx, notes.append)
+    assert any(
+        "label" in argv
+        and "openstack-control-plane=enabled" in argv
+        and "node-role.kubernetes.io/control-plane" in argv
+        for argv in calls
+    )
+    assert any(
+        "taint" in argv and "node-role.kubernetes.io/control-plane:NoSchedule-" in argv
+        for argv in calls
+    )
+    assert any("taint is off" in line for line in notes)
+
+    calls.clear()
+    notes.clear()
+    empty = type("Ctx", (), {"kubeconfig": "", "config_dir": tmp_path})()
+    deploy_service._place_control_plane_nodes(empty, notes.append)
+    assert calls == []
+    assert any("no kubeconfig" in line for line in notes)

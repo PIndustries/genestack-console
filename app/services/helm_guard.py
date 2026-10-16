@@ -1,12 +1,15 @@
-"""Stop a Helm install that is waiting on a pod Kubernetes cannot schedule.
+"""Place control-plane hooks, and stop a Helm install that cannot schedule.
 
 Genestack charts pin control-plane services to ``openstack-control-plane``
-and pass ``--timeout 120m``. Helm waits that long for hook jobs. A pod that
-cannot schedule never becomes Ready, so one taint burns two hours. This
-wrapper is placed ahead of the real ``helm`` on PATH for a local live
-deploy. ``helm list`` and ``helm show`` pass through. An upgrade that still
-has an unschedulable pod after a short grace is stopped with the scheduler
-message. ``helm upgrade`` is not stubbed and its wait is unchanged.
+and pass ``--timeout 120m``. Those pods do not tolerate the control-plane
+NoSchedule taint, so one missing label holds Helm for that whole timeout.
+This wrapper is placed ahead of the real ``helm`` on PATH for a local live
+deploy. ``helm list`` and ``helm show`` pass through. Before each upgrade
+it labels control-plane nodes and removes that taint. A hook that is still
+pending for that pin is placed again, and Helm keeps waiting. A pod that
+stays unschedulable for another reason after a short grace is stopped with
+the scheduler message. ``helm upgrade`` is not stubbed. Hook jobs still run
+one after another.
 
 Install scripts each run ``helm repo update``, which re-downloads every
 repository index. The first update in a deploy still downloads. Later
@@ -99,6 +102,51 @@ def unschedulable_messages(
     return found
 
 
+def control_plane_pin_pods(pod_list: dict) -> list[str]:
+    """Unschedulable pods pinned to the OpenStack control-plane label.
+
+    The chart selects ``openstack-control-plane=enabled`` and does not
+    tolerate the control-plane NoSchedule taint. Those pods are placed by
+    labeling and untainting. A pod that is pulling an image, or that cannot
+    schedule for another reason, is left out.
+    """
+    found: list[str] = []
+    items = pod_list.get("items") if isinstance(pod_list, dict) else None
+    if not isinstance(items, list):
+        return found
+    for pod in items:
+        if not isinstance(pod, dict):
+            continue
+        meta = pod.get("metadata") if isinstance(pod.get("metadata"), dict) else {}
+        spec = pod.get("spec") if isinstance(pod.get("spec"), dict) else {}
+        status = pod.get("status") if isinstance(pod.get("status"), dict) else {}
+        selector = (
+            spec.get("nodeSelector")
+            if isinstance(spec.get("nodeSelector"), dict)
+            else {}
+        )
+        pinned = selector.get("openstack-control-plane") == "enabled"
+        conditions = status.get("conditions") if isinstance(status, dict) else None
+        if not isinstance(conditions, list):
+            continue
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            if cond.get("type") != "PodScheduled" or cond.get("status") != "False":
+                continue
+            if cond.get("reason") != "Unschedulable":
+                continue
+            message = str(cond.get("message") or "")
+            taint = "node-role.kubernetes.io/control-plane" in message
+            if not pinned and not taint:
+                continue
+            name = str(meta.get("name") or "")
+            namespace = str(meta.get("namespace") or "")
+            found.append(f"{namespace}/{name}")
+            break
+    return found
+
+
 # A compiled console has no .py files, so inspect.getsource raises OSError
 # ("could not get source code") and the deploy dies before the first stage.
 # These copies are what the wrapper uses then. tests/test_helm_guard.py
@@ -171,6 +219,51 @@ def unschedulable_messages(
             found.append(f"{namespace}/{name}: {message}")
     return found
 ''',
+    "control_plane_pin_pods": '''\
+def control_plane_pin_pods(pod_list: dict) -> list[str]:
+    """Unschedulable pods pinned to the OpenStack control-plane label.
+
+    The chart selects ``openstack-control-plane=enabled`` and does not
+    tolerate the control-plane NoSchedule taint. Those pods are placed by
+    labeling and untainting. A pod that is pulling an image, or that cannot
+    schedule for another reason, is left out.
+    """
+    found: list[str] = []
+    items = pod_list.get("items") if isinstance(pod_list, dict) else None
+    if not isinstance(items, list):
+        return found
+    for pod in items:
+        if not isinstance(pod, dict):
+            continue
+        meta = pod.get("metadata") if isinstance(pod.get("metadata"), dict) else {}
+        spec = pod.get("spec") if isinstance(pod.get("spec"), dict) else {}
+        status = pod.get("status") if isinstance(pod.get("status"), dict) else {}
+        selector = (
+            spec.get("nodeSelector")
+            if isinstance(spec.get("nodeSelector"), dict)
+            else {}
+        )
+        pinned = selector.get("openstack-control-plane") == "enabled"
+        conditions = status.get("conditions") if isinstance(status, dict) else None
+        if not isinstance(conditions, list):
+            continue
+        for cond in conditions:
+            if not isinstance(cond, dict):
+                continue
+            if cond.get("type") != "PodScheduled" or cond.get("status") != "False":
+                continue
+            if cond.get("reason") != "Unschedulable":
+                continue
+            message = str(cond.get("message") or "")
+            taint = "node-role.kubernetes.io/control-plane" in message
+            if not pinned and not taint:
+                continue
+            name = str(meta.get("name") or "")
+            namespace = str(meta.get("namespace") or "")
+            found.append(f"{namespace}/{name}")
+            break
+    return found
+''',
 }
 
 
@@ -185,6 +278,7 @@ def _helper_source(fn) -> str:
 def _guard_main_source() -> str:
     detect = _helper_source(unschedulable_messages)
     parse = _helper_source(_parse_rfc3339)
+    pin = _helper_source(control_plane_pin_pods)
     version = _helper_source(envoy_gateway_version)
     # Function bodies contain braces. Replace markers instead of formatting.
     template = textwrap.dedent(
@@ -201,6 +295,8 @@ def _guard_main_source() -> str:
         __PARSE__
 
         __DETECT__
+
+        __PIN__
 
         __VERSION__
 
@@ -229,6 +325,20 @@ def _guard_main_source() -> str:
                 return max(0.0, float(raw))
             except ValueError:
                 return __UNSCHEDULABLE_GRACE__
+
+        def _poll():
+            raw = os.environ.get("GENESTACK_HELM_GUARD_POLL", "15")
+            try:
+                return max(0.0, float(raw))
+            except ValueError:
+                return 15.0
+
+        def _repairs_allowed():
+            raw = os.environ.get("GENESTACK_HELM_CONTROL_PLANE_REPAIRS", "4")
+            try:
+                return max(1, int(raw))
+            except ValueError:
+                return 4
 
         def _versions_text():
             root = os.environ.get("GENESTACK_OVERRIDES_DIR") or os.environ.get(
@@ -291,22 +401,72 @@ def _guard_main_source() -> str:
             )
             return applied.returncode
 
-        def _stuck(namespace):
-            listed = subprocess.run(
-                ["kubectl", "get", "pods", "-n", namespace, "-o", "json"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+        def _pod_payload(namespace):
+            try:
+                listed = subprocess.run(
+                    ["kubectl", "get", "pods", "-n", namespace, "-o", "json"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=20,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return None
             if listed.returncode != 0 or not listed.stdout.strip():
-                return []
+                return None
             try:
                 payload = json.loads(listed.stdout)
             except json.JSONDecodeError:
-                return []
-            return unschedulable_messages(
-                payload, now=datetime.now(timezone.utc), grace_s=_grace()
+                return None
+            if not isinstance(payload, dict):
+                return None
+            return payload
+
+        def _place_control_plane():
+            print(
+                "helm-guard: control-plane nodes take "
+                "openstack-control-plane=enabled and the NoSchedule taint stays off",
+                flush=True,
             )
+            argv_sets = (
+                [
+                    "kubectl",
+                    "label",
+                    "node",
+                    "-l",
+                    "node-role.kubernetes.io/control-plane",
+                    "openstack-control-plane=enabled",
+                    "--overwrite",
+                ],
+                [
+                    "kubectl",
+                    "taint",
+                    "nodes",
+                    "-l",
+                    "node-role.kubernetes.io/control-plane",
+                    "node-role.kubernetes.io/control-plane:NoSchedule-",
+                ],
+            )
+            for argv in argv_sets:
+                try:
+                    subprocess.run(
+                        argv,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=20,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    return
+
+        def _stop(proc):
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=10)
+            return 2
 
         def _repo_stamp():
             here = os.path.dirname(os.path.abspath(__file__))
@@ -348,6 +508,9 @@ def _guard_main_source() -> str:
                 return reused
             if not argv or argv[0] not in ("upgrade", "install"):
                 os.execv(real, [real, *argv])
+            if "--help" in argv or "-h" in argv:
+                os.execv(real, [real, *argv])
+            _place_control_plane()
             if "cert-manager" in " ".join(argv):
                 crd_rc = _apply_gateway_crds(real)
                 if crd_rc != 0:
@@ -357,19 +520,36 @@ def _guard_main_source() -> str:
             )
             time.sleep(_delay())
             namespace = _namespace(argv)
+            repairs = 0
             while proc.poll() is None:
                 if namespace:
-                    stuck = _stuck(namespace)
+                    payload = _pod_payload(namespace)
+                    pins = control_plane_pin_pods(payload) if payload else []
+                    if pins:
+                        print("helm-guard: placing " + pins[0], flush=True)
+                        _place_control_plane()
+                        repairs += 1
+                        if repairs >= _repairs_allowed():
+                            held = unschedulable_messages(
+                                payload,
+                                now=datetime.now(timezone.utc),
+                                grace_s=_grace(),
+                            )
+                            if held:
+                                print("helm-guard: " + held[0], flush=True)
+                                return _stop(proc)
+                        time.sleep(_poll())
+                        continue
+                    repairs = 0
+                    stuck = unschedulable_messages(
+                        payload or {},
+                        now=datetime.now(timezone.utc),
+                        grace_s=_grace(),
+                    )
                     if stuck:
                         print("helm-guard: " + stuck[0], flush=True)
-                        os.killpg(proc.pid, signal.SIGTERM)
-                        try:
-                            proc.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            os.killpg(proc.pid, signal.SIGKILL)
-                            proc.wait(timeout=10)
-                        return 2
-                time.sleep(15)
+                        return _stop(proc)
+                time.sleep(_poll())
             return proc.returncode or 0
 
         if __name__ == "__main__":
@@ -379,6 +559,7 @@ def _guard_main_source() -> str:
     return (
         template.replace("__PARSE__", parse)
         .replace("__DETECT__", detect)
+        .replace("__PIN__", pin)
         .replace("__VERSION__", version)
         .replace("__GUARD_DELAY__", str(DEFAULT_GUARD_DELAY_S))
         .replace("__UNSCHEDULABLE_GRACE__", str(DEFAULT_UNSCHEDULABLE_GRACE_S))
