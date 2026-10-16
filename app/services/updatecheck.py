@@ -458,6 +458,30 @@ def _plain(text: str) -> str:
     return cleaned.replace("`", "").replace("**", "").strip()
 
 
+# The GitHub release repeats which file to download. That list stays on the
+# release page. The console note is the changelog.
+_GUIDE_MARKERS = (
+    "on a machine you already have",
+    "get.genestack.dev",
+    "genestack-console-linux-amd64",
+    "which program to download",
+    "virtual machine disk",
+    "is a cd image",
+    "console.sh",
+    "console.ps1",
+    "genestack-console-appliance-",
+)
+
+
+def _download_guide(line: str) -> bool:
+    import re
+
+    low = line.lower()
+    if re.fullmatch(r"genestack console \d{4}\.\d{1,2}\.\d{1,2}(?:\.\d+)?\.", low):
+        return True
+    return any(marker in low for marker in _GUIDE_MARKERS)
+
+
 def notes_from_body(body: str) -> dict[str, Any]:
     """Split a release body into a summary and its bullet lines."""
     summary: list[str] = []
@@ -480,6 +504,8 @@ def notes_from_body(body: str) -> dict[str, Any]:
                 if item:
                     items.append(item)
                 continue
+        if _download_guide(line):
+            continue
         summary.append(line)
     return {"summary": _clip(" ".join(summary), 600), "items": items[:40]}
 

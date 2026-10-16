@@ -25,7 +25,7 @@ A new install opens on a welcome. It says this machine stays outside the cluster
 
 The API docs link in the sidebar is `/docs` on the console. That is a catalog of the routes, with a curl for each one. The curls point at the console you are signed in to.
 
-Changelog is the button under that link. It lists the public pipeline and the release notes. The bullets in a release are the changes in that build. After this console installs a newer build, the page reloads and shows those notes until they are acknowledged.
+Changelog is the button under that link. It lists the public pipeline and the release notes. The bullets in a release are the changes in that build. After this console installs a newer build, the page reloads and shows the version and those bullets until they are acknowledged. The list of which file to download stays on the release page.
 
 ## One environment
 

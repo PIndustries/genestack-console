@@ -62,7 +62,7 @@ Update downloads the Linux binary named in that file, replaces
 prints the installed version and the latest version and does not replace the file.
 The running console checks the same file on its own. When a newer build is
 published and no job is queued or running, it installs that build and restarts.
-The page then reloads and shows the release notes until they are acknowledged.
+The page then reloads and shows the version and the changes in that build until they are acknowledged. The list of which file to download stays on the release page.
 Changelog, at the bottom of the sidebar, lists those notes and the public
 pipeline. `update.watch: false` in `config.yaml` leaves the install to this
 command. `genestack-console update` also waits while a job is queued or running.

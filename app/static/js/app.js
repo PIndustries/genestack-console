@@ -278,13 +278,17 @@ function pipeKind(row) {
   return "";
 }
 
-function notesHtml(release) {
+function notesHtml(release, opts) {
   if (!release) {
     return '<p class="muted">Release notes for this build are not listed yet.</p>';
   }
+  const changesOnly = Boolean(opts && opts.changesOnly);
   const parts = [];
-  if (release.summary) parts.push(`<p>${esc(release.summary)}</p>`);
   const items = Array.isArray(release.items) ? release.items : [];
+  // The update note is the bullets. The download list stays on the release page.
+  if (release.summary && !(changesOnly && items.length)) {
+    parts.push(`<p>${esc(release.summary)}</p>`);
+  }
   if (items.length) {
     const lines = items.map((item) => `<li>${esc(item)}</li>`).join("");
     parts.push(`<ul class="gsc-notes-list">${lines}</ul>`);
@@ -309,7 +313,7 @@ function showUpdated(version, release) {
     <div class="gsc-notes-card" role="dialog" aria-modal="true" aria-label="Console updated">
       <h2>Updated to ${esc(version)}</h2>
       <p class="muted">This console is on that build.</p>
-      ${notesHtml(release)}
+      ${notesHtml(release, { changesOnly: true })}
       <div class="gsc-notes-actions">
         <button type="button" class="btn-sm" data-gsc-ack>Acknowledge</button>
       </div>

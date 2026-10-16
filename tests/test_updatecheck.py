@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.services import updatecheck
@@ -37,6 +38,42 @@ def test_notes_from_body_bullets_are_the_changes():
         "Talos and Ubuntu are tabs on Machines.",
         "Image cache sits above the map.",
     ]
+
+
+def test_notes_drop_the_download_guide():
+    notes = notes_from_body(
+        "Genestack Console 2026.10.16.1.\n\n"
+        "On a machine you already have, run `console.sh` on Linux or "
+        "`console.ps1` on Windows. "
+        "https://get.genestack.dev/console.sh and "
+        "https://get.genestack.dev/console.ps1 open those files. "
+        "`genestack-console-linux-amd64` is the program the Linux installer downloads. "
+        "`version.json` tells a running Console which program to download when it updates.\n\n"
+        "`genestack-console-appliance-2026.10.16.1-amd64.qcow2.xz` is a virtual machine disk "
+        "with Console already installed. Decompress it and boot it.\n\n"
+        "`genestack-console-appliance-2026.10.16.1-amd64.iso` is a CD image. "
+        "Boot it, then type the name of the disk to install onto.\n\n"
+        "Overview asks the cluster once.\n"
+        "- A heavy Overview refresh loads machines in one read.\n"
+        "- A section that does not answer leaves the others on the page.\n"
+    )
+    assert notes["summary"] == "Overview asks the cluster once."
+    assert "machine you already have" not in notes["summary"].lower()
+    assert "qcow2" not in notes["summary"].lower()
+    assert notes["items"] == [
+        "A heavy Overview refresh loads machines in one read.",
+        "A section that does not answer leaves the others on the page.",
+    ]
+
+
+def test_update_note_lists_the_bullets():
+    script = Path("app/static/js/app.js").read_text(encoding="utf-8")
+    start = script.index("function showUpdated")
+    card = script[start:script.index("async function maybeAnnounceUpdate")]
+    assert "Updated to" in card
+    assert "This console is on that build." in card
+    assert "notesHtml(release, { changesOnly: true })" in card
+    assert "data-gsc-ack" in card
 
 
 def test_source_checkout_does_not_apply():
