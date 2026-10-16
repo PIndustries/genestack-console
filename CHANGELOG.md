@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.16.4
+
+The board and Overview open from the last answer.
+
+- Environments lists each cloud from the saved job. It does not dial the cluster to draw the rows. Health fills in after the rows are on the page.
+- Overview and OpenStack show the last answer immediately, then replace it when a new read returns. A section that does not answer keeps the previous one.
+- Helm still waits on each chart. That wait is the install, not this page.
+
 ## 2026.10.16.3
 
 Opening the console again uses the scripts it already has.
