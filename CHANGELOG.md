@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.16.1
+
+Overview asks the cluster once.
+
+- A heavy Overview refresh loads machines, the cloud, VMs, and the Kubernetes lists in one read. Inventory and job status stay on the shorter timer.
+- A section that does not answer leaves the others on the page.
+
 ## 2026.10.15.3
 
 The console keeps answering while a deploy is writing its log.
