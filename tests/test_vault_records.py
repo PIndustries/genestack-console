@@ -11,6 +11,7 @@ import uuid
 from sqlalchemy import func, select
 
 from app.db import SessionLocal
+from app.services.static_assets import asset_stamp
 from app.models import BaremetalNode, Environment, VaultItem
 from app.services.crypto import encrypt_secret
 from app.services.ssh_keys import generate_ed25519_key
@@ -385,8 +386,8 @@ def test_note_round_trip_and_unreadable_secret(client, admin_headers):
 def test_vault_page_offers_record_actions(client):
     page = client.get("/ui")
     assert page.status_code == 200
-    assert "/static/js/app.js?v=" in page.text
-    assert "v=ls69" in page.text
+    assert f"/static/js/app.js?v={asset_stamp()}" in page.text
+    assert "v=ls69" not in page.text
     detail = client.get("/static/js/pages/environment_detail.js")
     assert 'environment_vault.js?v=ls63' in detail.text
     card = client.get("/static/js/pages/environment_vault.js")

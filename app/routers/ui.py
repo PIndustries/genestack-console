@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
+from app.services.static_assets import stamp_html
+
 router = APIRouter(tags=["ui"])
 
 _TEMPLATE = Path(__file__).resolve().parents[1] / "templates" / "ui.html"
@@ -20,14 +22,9 @@ def ui_page():
         return {"error": "UI template missing", "path": str(_TEMPLATE)}
     from fastapi.responses import HTMLResponse
 
-    from app.version import BUILD, VERSION
-
-    html = _TEMPLATE.read_text(encoding="utf-8")
-    stamp = f"?v={VERSION}-{BUILD}"
-    html = html.replace("/static/css/portal.css", f"/static/css/portal.css{stamp}")
-    html = html.replace("/static/css/theme.css", f"/static/css/theme.css{stamp}")
-    html = html.replace("/static/js/app.js", f"/static/js/app.js{stamp}")
-    # Browsers must always revalidate the shell so new builds ship instantly.
+    html = stamp_html(_TEMPLATE.read_text(encoding="utf-8"))
+    # The shell is revalidated. Its script URLs name the build, and those
+    # files stay in the browser until the next build.
     return HTMLResponse(
         html,
         headers={"Cache-Control": "no-cache, must-revalidate"},
@@ -46,16 +43,7 @@ def docs_catalog():
         return {"error": "docs template missing", "path": str(_DOCS)}
     from fastapi.responses import HTMLResponse
 
-    from app.version import BUILD, VERSION
-
-    html = _DOCS.read_text(encoding="utf-8")
-    stamp = f"?v={VERSION}-{BUILD}"
-    html = html.replace("/static/css/portal.css", f"/static/css/portal.css{stamp}")
-    html = html.replace("/static/css/theme.css", f"/static/css/theme.css{stamp}")
-    html = html.replace("/static/css/docs.css", f"/static/css/docs.css{stamp}")
-    html = html.replace(
-        "/static/js/docs-catalog.js", f"/static/js/docs-catalog.js{stamp}"
-    )
+    html = stamp_html(_DOCS.read_text(encoding="utf-8"))
     return HTMLResponse(
         html,
         headers={"Cache-Control": "no-cache, must-revalidate"},

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -28,7 +29,7 @@ from app.config import (
 )
 from app.db import init_db
 from app.deps import require_viewer
-from fastapi.responses import RedirectResponse
+from app.services.static_assets import asset_stamp, rewritten_module
 
 from app.routers import (
     agents,
@@ -384,14 +385,29 @@ def create_app() -> FastAPI:
         name="static",
     )
 
-    # No-cache headers on static assets so browser never serves stale JS/CSS
+    # A URL that names this build stays in the browser. An unversioned URL
+    # is revalidated. The shell at /ui is revalidated on its own.
     @app.middleware("http")
-    async def _no_cache_static(request: Request, call_next):
+    async def _cache_static(request: Request, call_next):
+        path = request.url.path
+        stamp = asset_stamp()
+        versioned = request.query_params.get("v") == stamp
+        if path.startswith("/static/") and path.endswith(".js") and versioned:
+            body = rewritten_module(path, stamp)
+            if body is not None:
+                return Response(
+                    content=body,
+                    media_type="text/javascript",
+                    headers={
+                        "Cache-Control": "public, max-age=31536000, immutable",
+                    },
+                )
         response = await call_next(request)
-        if request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
+        if path.startswith("/static/"):
+            if versioned:
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "no-cache"
         return response
 
     # Genestack convenience endpoints (read-only)

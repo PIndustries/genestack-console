@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.services.static_assets import asset_stamp
+
 
 def test_machines_tab_does_not_run_the_overview_poll(client):
     detail = client.get("/static/js/pages/environment_detail.js")
@@ -76,8 +78,8 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
 
     page = client.get("/ui")
     assert page.status_code == 200
-    assert "app.js?v=" in page.text
-    assert "v=ls69" in page.text
+    assert f"/static/js/app.js?v={asset_stamp()}" in page.text
+    assert "v=ls69" not in page.text
 
     assert "The console took too long to answer" in body
     assert "No answer" in body
