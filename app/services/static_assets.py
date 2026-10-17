@@ -1,9 +1,9 @@
 """Keep one build's scripts in the browser.
 
-The page is many modules. HTTPS in front of the console is one request at a
-time, so a reload that fetches every file again spends several seconds before
-the first API call. A URL that names this build can stay cached. The shell
-itself stays revalidated, so the next build points at new URLs.
+The page's modules are served as one script. A URL that names this build
+can stay cached, so opening the console again does not download it a second
+time. The shell itself stays revalidated, so the next build points at a new
+URL.
 """
 
 from __future__ import annotations
@@ -73,7 +73,12 @@ def rewritten_module(url_path: str, stamp: str | None = None) -> bytes | None:
     cached = _rewritten.get(key)
     if cached is not None:
         return cached
-    text = file.read_text(encoding="utf-8")
-    data = pin_module(text, version).encode("utf-8")
+    if file.name == "app.js" and file.parent.name == "js":
+        from app.services.js_bundle import bundle_source
+
+        data = bundle_source().encode("utf-8")
+    else:
+        text = file.read_text(encoding="utf-8")
+        data = pin_module(text, version).encode("utf-8")
     _rewritten[key] = data
     return data

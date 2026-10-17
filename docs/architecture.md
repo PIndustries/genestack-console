@@ -705,8 +705,9 @@ unavailable:
 
 ## Web UI map
 
-`GET /ui` serves `app/templates/ui.html` — a hash-routed single-page UI
-of plain ES modules under `app/static/js/` (no build step).
+`GET /ui` serves `app/templates/ui.html` — a hash-routed single-page UI.
+The source under `app/static/js/` is one module per screen. The page
+receives those modules as one script.
 
 | Module | Renders |
 |--------|---------|

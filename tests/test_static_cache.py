@@ -27,7 +27,8 @@ def test_versioned_script_stays_cached(client):
     fresh = client.get(f"/static/js/app.js?v={stamp}")
     assert fresh.status_code == 200
     assert fresh.headers["cache-control"] == "public, max-age=31536000, immutable"
-    assert f'from "./api.js?v={stamp}"' in fresh.text
+    assert "const __gsc" in fresh.text
+    assert 'from "./api.js' not in fresh.text
     assert "environment_detail.js?v=ls77" not in fresh.text
 
     stored = client.get("/static/js/app.js")
