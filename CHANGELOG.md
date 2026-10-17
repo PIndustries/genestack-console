@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.17.1
+
+The console page arrives as one script.
+
+- Opening the console downloads the screens in one file.
+- Opening that same build again uses the copy the browser kept.
+
 ## 2026.10.16.5
 
 Control-plane chart hooks land on a node.
