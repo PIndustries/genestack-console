@@ -1022,3 +1022,20 @@ def test_optional_services_probe_catalog(os_client):
     assert inv["dns_zones_available"] is True
     assert inv["secrets_available"] is True
     assert inv["load_balancers"][0]["id"] == "lb-1"
+
+
+def test_server_startup_encoded_once_and_delivered_by_config_drive(os_client):
+    import base64
+    client, transport = os_client
+    script = '#!/bin/sh\nprintf "héllo"\n'
+    client.server_create(name="web", image="i1", flavor="f1", network="n1", user_data=script)
+    posted = next(b["server"] for b in transport.bodies if isinstance(b, dict) and "imageRef" in b.get("server", {}))
+    assert base64.b64decode(posted["user_data"]).decode() == script
+    assert posted["config_drive"] is True
+
+
+def test_server_without_startup_keeps_existing_payload(os_client):
+    client, transport = os_client
+    client.server_create(name="web", image="i1", flavor="f1", network="n1")
+    posted = next(b["server"] for b in transport.bodies if isinstance(b, dict) and "imageRef" in b.get("server", {}))
+    assert "user_data" not in posted and "config_drive" not in posted
