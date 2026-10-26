@@ -269,7 +269,11 @@ def _run_services_parallel(
                     f"[deploy] FAILED at {stage['id']}/{item['name']} rc={rc} "
                     "— stopping pipeline"
                 )
-                pool.shutdown(wait=False, cancel_futures=True)
+                # Keep queued work in the pool so workers notify as_completed
+                # when they observe cancellation. Draining the queue during
+                # shutdown can leave cancelled futures unobserved forever.
+                for pending in futures:
+                    pending.cancel()
     if failures:
         _, first_item, first_rc = min(failures, key=lambda f: f[0])
         return failure_dict(first_item, first_rc)
