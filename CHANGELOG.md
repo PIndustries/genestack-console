@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.26.1-rc2
+
+First-use and deployment-failure fixes verified during the private-cloud acceptance work.
+
+- Empty environments that have never had a cluster connection require setup instead of raising a critical probe-failed alert. Existing clouds retain failure alerting when their configuration is removed.
+- Failed parallel service installation cancels queued work without hanging; the pipeline returns the failed stage and stops before later stages.
+- This candidate does not add automatic installation-plan application or perform a greenfield rebuild. Native first-use and workload acceptance continue separately.
+
 ## 2026.10.26.1-rc1
 
 Readiness candidate for native cloud operations and measured hardware setup.
