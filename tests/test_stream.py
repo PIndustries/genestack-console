@@ -158,6 +158,43 @@ def test_stream_endpoint_returns_sse_response(client, member_setup):
     assert resp.headers["cache-control"] == "no-cache"
 
 
+def test_open_member_stream_leaves_database_available(member_setup):
+    """A long-lived stream must not reserve a connection needed by later requests."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    engine = create_engine(
+        get_settings().database_url,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.1,
+        connect_args={"check_same_thread": False},
+    )
+
+    async def run():
+        with Session(engine) as db:
+            request = _FakeRequest(false_count=10)
+            request.headers = {"Authorization": "Bearer " + member_setup["token"]}
+            principal = stream._stream_principal(request, db, ticket=None)
+            response = await stream.stream_events(
+                request, "fleet,alerts", db, principal, protocol=2
+            )
+            try:
+                connected = await response.body_iterator.__anext__()
+                assert "connected" in connected
+                # The first stream is still open. A separate request must be
+                # able to use even the last connection in the pool.
+                with engine.connect() as other:
+                    assert other.execute(text("SELECT 1")).scalar_one() == 1
+            finally:
+                await response.body_iterator.aclose()
+
+    try:
+        asyncio.run(run())
+    finally:
+        engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # Topic parsing / validation
 # ---------------------------------------------------------------------------
