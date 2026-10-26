@@ -273,6 +273,10 @@ async def stream_events(
 
     visible = _visible_env_ids(db, principal)
     visible_tenants = _visible_tenant_ids(db, principal)
+    # Yield dependencies live for the whole StreamingResponse. Only the
+    # materialized visibility sets are needed below; do not hold a pooled
+    # database connection while a phone or browser stays subscribed.
+    db.close()
 
     def _refresh() -> set[str] | None:
         # Runs off the event loop via asyncio.to_thread; use a fresh session.
