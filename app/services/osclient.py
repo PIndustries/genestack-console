@@ -81,6 +81,20 @@ class OpenStackError(RuntimeError):
     """OpenStack or Kubernetes API call failed."""
 
 
+def startup_bytes(text: str) -> bytes:
+    """Validate without including potentially sensitive startup text in errors."""
+    message = "Startup configuration must be valid text up to 16384 UTF-8 bytes"
+    if not isinstance(text, str) or "\x00" in text:
+        raise ValueError(message)
+    try:
+        raw = text.encode("utf-8")
+    except UnicodeError:
+        raise ValueError(message) from None
+    if len(raw) > 16384:
+        raise ValueError(message)
+    return raw
+
+
 def _b64file(data: str, suffix: str) -> str:
     raw = base64.b64decode(data)
     fd, name = tempfile.mkstemp(prefix="gsc-os-", suffix=suffix)
@@ -673,6 +687,7 @@ class OpenStackClient:
         flavor: str,
         network: str,
         key_name: str | None = None,
+        user_data: str | None = None,
     ) -> dict[str, Any]:
         server: dict[str, Any] = {
             "name": name,
@@ -682,6 +697,10 @@ class OpenStackClient:
         }
         if key_name:
             server["key_name"] = key_name
+        if user_data:
+            raw = startup_bytes(user_data)
+            server["user_data"] = base64.b64encode(raw).decode("ascii")
+            server["config_drive"] = True
         data = self.json(
             "POST",
             "compute",
