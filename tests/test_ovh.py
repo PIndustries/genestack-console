@@ -649,6 +649,7 @@ def test_seed_default_ovh_account(monkeypatch, tmp_path):
 
     from app import db as dbmod
     from app.models import Base, OvhAccount
+    from app.services.crypto import decrypt_secret
 
     eng = create_engine(f"sqlite:///{tmp_path}/seed.db")
     Base.metadata.create_all(eng)
@@ -670,7 +671,7 @@ def test_seed_default_ovh_account(monkeypatch, tmp_path):
         assert acc.name == "default"
         assert acc.app_key == "AK"
         assert acc.app_secret_encrypted.startswith("fernet:")
-        assert "AS" not in acc.app_secret_encrypted
+        assert decrypt_secret(acc.app_secret_encrypted, Settings()) == "AS"
 
     # Idempotent: a second run never duplicates.
     dbmod._seed_default_ovh_account()
