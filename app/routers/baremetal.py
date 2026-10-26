@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_env_scoped
 from app.models import Environment
 from app.services import baremetal as baremetal_service
+from app.services import capacity
 
 router = APIRouter(prefix="/api/v1/environments/{environment_id}", tags=["baremetal"])
 
@@ -26,3 +27,12 @@ def list_baremetal_nodes(
     """List the environment's registered bare-metal nodes (BMC password never included)."""
     nodes = baremetal_service.list_nodes(db, env)
     return {"count": len(nodes), "nodes": nodes}
+
+
+@router.get("/baremetal/capacity-plan")
+def get_capacity_plan(
+    db: Session = Depends(get_db),
+    env: Environment = Depends(get_env_scoped("viewer")),
+) -> dict[str, Any]:
+    """Propose roles from fresh hardware evidence, without changing configuration."""
+    return capacity.for_environment(db, env)

@@ -30,6 +30,45 @@ LOG_TIMEOUT = 15
 LOG_TAIL_DEFAULT = 200
 LOG_TAIL_MAX = 2000
 
+
+def _unknown_health(error: str) -> dict[str, Any]:
+    """Unavailable setup is an explicit state, not invented health or HTTP 500."""
+    from datetime import UTC, datetime
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "error": error,
+        "chips": [
+            {"id": key, "label": label, "state": "unknown"}
+            for key, label in [
+                ("k8s", "Kubernetes"),
+                ("identity", "Identity"),
+                ("proof", "Workload verification"),
+            ]
+        ],
+        "services": [],
+        "job": None,
+    }
+
+
+def environment_health(ctx: EnvContext, db, environment_id: str) -> dict[str, Any]:
+    """Report measured cluster health; API/workload proof remains separate.
+
+    This GET never creates the OpenStack admin-client pod or a test workload.
+    A deployed Helm release is not evidence of working identity or a VM.
+    """
+    overview = cluster_overview(ctx)
+    result = _unknown_health(overview.get("error") or "")
+    result["error"] = overview.get("error")
+    result["chips"][0].update(
+        state=overview.get("health") or "unknown", detail=overview.get("health_reason") or None
+    )
+    result["chips"][1]["detail"] = "Authenticated OpenStack API verification has not been run"
+    result["chips"][2]["detail"] = "A successful VM/network/workload acceptance run is required"
+    return result
+
+
+
 # Observability extras (and tempest). Failed status must not flip cluster health.
 OPTIONAL_HELM = frozenset(
     {

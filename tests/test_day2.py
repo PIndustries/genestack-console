@@ -104,7 +104,7 @@ def test_k8s_upgrade_dry_run_logs_ansible_command(
     log_text = _job_log(client, admin_headers, job["id"])
     cmd = f"ansible-playbook upgrade-cluster.yml --become -i {config_dir}/inventory"
     assert cmd in log_text
-    assert f"cwd={kubespray_dir}" in log_text
+    assert f"cwd={kubespray_dir.resolve()}" in log_text
     assert "[dry-run] command not executed" in log_text
 
     audit = client.get(
@@ -395,7 +395,7 @@ def test_backup_mariadb_dry_run_logs_script_command(
 
     log_text = _job_log(client, operator_headers, job["id"])
     assert "bash scripts/backup-mariadb.sh" in log_text
-    assert f"cwd={genestack_root}" in log_text
+    assert f"cwd={genestack_root.resolve()}" in log_text
     assert "[dry-run] command not executed" in log_text
     # Result message notes where the script writes the dumps
     assert "$HOME/backup/mariadb" in log_text

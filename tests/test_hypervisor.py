@@ -242,6 +242,7 @@ def test_discover_disabled_returns_zero(db, root, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="requires Linux procfs live process metrics")
 def test_vm_status_running_merges_live_stats(
     db, settings, root, sleep_proc, monkeypatch
 ):
@@ -371,6 +372,7 @@ def test_vm_action_dry_run_touches_nothing(db, settings, root, sleep_proc, monke
     assert sleep_proc.poll() is None  # process untouched
 
 
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="requires Linux procfs process ownership")
 def test_vm_action_stop_real_process(db, settings, root, sleep_proc, monkeypatch):
     argv = _qemu_argv()
     row = _action_row(db, root, cmdline=argv, name="node-t1")

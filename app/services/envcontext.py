@@ -24,6 +24,7 @@ from app.config import Settings, get_settings
 from app.models import Environment
 from app.services import genestack_bridge as bridge
 from app.services.crypto import decrypt_secret
+from app.services.request_safety import configured_path
 
 log = logging.getLogger(__name__)
 
@@ -72,8 +73,9 @@ class EnvContext:
             env["GENESTACK_CONFIG"] = str(self.config_dir)
             env["GENESTACK_OVERRIDES_DIR"] = str(self.config_dir)
             inventory = self.config_dir / "inventory"
-            if inventory.is_dir():
-                env["ANSIBLE_INVENTORY"] = str(inventory)
+            # The inventory exists on the deployer, not necessarily this host.
+            # Send the configured path; the remote command validates its files.
+            env["ANSIBLE_INVENTORY"] = str(inventory)
         if self.kubeconfig and self._staged_kubeconfig is None:
             env["KUBECONFIG"] = self.kubeconfig
         return env
@@ -188,7 +190,9 @@ def build_context(
     if env.dry_run is not None:
         ctx.dry_run = bool(env.dry_run)
     if env.genestack_config_dir:
-        ctx.config_dir = Path(env.genestack_config_dir).expanduser().resolve()
+        ctx.config_dir = configured_path(
+            env.genestack_config_dir, remote=bool(env.deployer_ssh_host)
+        )
     # Remote execution: commands for this env run over ssh on its deploy host
     host = (env.deployer_ssh_host or "").strip()
     user = (env.deployer_ssh_user or "").strip()

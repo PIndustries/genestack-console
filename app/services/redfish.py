@@ -1,7 +1,7 @@
 """Generic Redfish client for BMC power/boot control.
 
-Works against any Redfish-conformant BMC (iLO, iDRAC, …) over the standard
-``/redfish/v1/Systems/1`` resource paths — no vendor extensions. TLS
+Power and boot use standard Redfish resource paths. Read-only hardware
+discovery also follows advertised legacy HPE inventory links. TLS
 verification is disabled because BMCs ship self-signed certificates (a note
 is logged once per process). All functions raise :class:`RedfishError` with
 clean messages; the service layer (app.services.baremetal) converts those
@@ -11,7 +11,10 @@ into never-raise result dicts.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from datetime import UTC
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -132,6 +135,249 @@ def power_state(host: str, username: str, password: str) -> str:
     if not state:
         raise RedfishError("redfish Systems/1 response carries no PowerState")
     return str(state)
+
+
+def hardware_inventory(
+    host: str, username: str, password: str, *, check: Callable[[], None] | None = None
+) -> dict[str, Any]:
+    """Read hardware before provisioning, using one bounded BMC session.
+
+    No power, boot, storage or configuration actions are sent. Follow only
+    same-origin Redfish resource paths so a compromised link cannot forward
+    BMC credentials elsewhere. Unknown measurements stay unknown.
+    """
+    from datetime import datetime
+
+    origin = urlsplit(_base_url(host))
+
+    def origin_tuple(url):
+        return url.scheme.lower(), url.hostname, url.port or (443 if url.scheme == "https" else 80)
+
+    def safe_path(value: Any) -> str:
+        path = value.get("@odata.id") if isinstance(value, dict) else value
+        parsed = urlsplit(str(path or ""))
+        decoded = unquote(parsed.path)
+        if (
+            ((parsed.scheme or parsed.netloc) and origin_tuple(parsed) != origin_tuple(origin))
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or not decoded.startswith("/redfish/v1/")
+            or ".." in decoded.split("/")
+            or "\\" in decoded
+        ):
+            raise RedfishError("BMC returned an unsafe hardware resource link")
+        return parsed.path
+
+    def positive(value: Any) -> float | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if 0 < result < float("inf") else None
+
+    issues: list[str] = []
+
+    def resource(system: dict[str, Any], name: str):
+        """iLO 4 exposes some resources in legacy links beside summaries."""
+        value = system.get(name)
+        if isinstance(value, dict) and value.get("@odata.id"):
+            return value
+        legacy = (system.get("links") or {}).get(name)
+        if isinstance(legacy, dict) and legacy.get("href"):
+            return {"@odata.id": legacy["href"]}
+        for vendor in ("Hp", "Hpe"):
+            legacy = (((system.get("Oem") or {}).get(vendor) or {}).get("links") or {}).get(name)
+            if isinstance(legacy, dict) and legacy.get("href"):
+                return {"@odata.id": legacy["href"]}
+        return None
+
+    session_path = None
+    reads = 0
+    with _client(host, username, password) as client:
+        # Older iLO firmware closes connections without correctly announcing it.
+        # Keep the authentication session, but don't reuse TCP connections.
+        client.headers["Connection"] = "close"
+        client.follow_redirects = False
+
+        def read(path: str) -> httpx.Response:
+            nonlocal reads
+            for _ in range(5):
+                if check:
+                    check()
+                reads += 1
+                if reads > 256:
+                    raise RedfishError("Hardware inventory exceeded its resource limit")
+                response = client.get(path)
+                if not response.has_redirect_location:
+                    return response
+                path = safe_path(response.headers["Location"])
+            raise RedfishError("Hardware inventory exceeded its redirect limit")
+
+        def get(link: Any, *, optional: bool = False) -> dict[str, Any]:
+            path = safe_path(link)
+            response = read(path)
+            if optional and response.status_code == 404:
+                return {}
+            if not response.is_success:
+                raise RedfishError(
+                    "Hardware inventory read failed", status_code=response.status_code
+                )
+            return _decode(response) or {}
+
+        def members(link: Any) -> list[dict[str, Any]]:
+            collection = get(link)
+            if collection.get("Members@odata.nextLink"):
+                raise RedfishError("Paginated hardware inventory is not yet supported")
+            refs = collection.get("Members") or []
+            if len(refs) > 128:
+                raise RedfishError("Hardware collection exceeded its member limit")
+            return [get(ref) for ref in refs]
+
+        try:
+            if check:
+                check()
+            # iLO 4 can return HTTP 200 with anonymous, incomplete inventory.
+            # Establish a session first rather than waiting for a 401 challenge.
+            login = client.post(SESSION_PATH, json={"UserName": username, "Password": password})
+            if login.status_code not in (404, 405):
+                token = login.headers.get("X-Auth-Token")
+                if not login.is_success or not token:
+                    raise RedfishError(
+                        "BMC did not authorize hardware inventory", status_code=login.status_code
+                    )
+                if login.headers.get("Location"):
+                    session_path = safe_path(login.headers["Location"])
+                client.headers["X-Auth-Token"] = token
+                client.auth = None
+            systems = members("/redfish/v1/Systems")
+            if len(systems) != 1:
+                raise RedfishError("Select a single physical system before hardware discovery")
+            system = systems[0]
+            processors = resource(system, "Processors")
+            cpus = members(processors) if processors else []
+            active = [
+                p
+                for p in cpus
+                if (p.get("Status") or {}).get("State")
+                not in ("Absent", "Disabled", "UnavailableOffline")
+            ]
+            threads = [positive(p.get("TotalThreads")) for p in active]
+            cores = [positive(p.get("TotalEnabledCores") or p.get("TotalCores")) for p in active]
+            cpu_threads = (
+                int(sum(threads)) if threads and all(t is not None for t in threads) else None
+            )
+            cpu_cores = int(sum(cores)) if cores and all(c is not None for c in cores) else None
+            memory = positive((system.get("MemorySummary") or {}).get("TotalSystemMemoryGiB"))
+            if cpu_threads is None:
+                issues.append("CPU thread count is unavailable")
+            if memory is None:
+                issues.append("Installed memory is unavailable")
+            drives: dict[str, dict[str, Any]] = {}
+            storage = resource(system, "Storage")
+            if storage:
+                for controller in members(storage):
+                    for ref in controller.get("Drives") or []:
+                        path = safe_path(ref)
+                        drive = get(path)
+                        drives[path] = {
+                            "id": path,
+                            "serial": drive.get("SerialNumber"),
+                            "capacity_bytes": positive(drive.get("CapacityBytes")),
+                            "media_type": drive.get("MediaType"),
+                            "protocol": drive.get("Protocol"),
+                            "health": (drive.get("Status") or {}).get("Health"),
+                            "state": (drive.get("Status") or {}).get("State"),
+                        }
+            else:
+                # HPE iLO 4's physical-drive schema predates standard Storage.
+                # Follow its advertised links; CapacityGB is decimal GB.
+                # https://hewlettpackard.github.io/ilo-rest-api-docs/ilo4/
+                smart = resource(system, "SmartStorage")
+                if smart:
+                    root = get(smart)
+                    for kind in ("ArrayControllers", "HostBusAdapters"):
+                        controllers = resource(root, kind)
+                        if not controllers:
+                            continue
+                        for controller in members(controllers):
+                            physical = resource(controller, "PhysicalDrives") or resource(
+                                controller, "DiskDrives"
+                            )
+                            if not physical:
+                                continue
+                            for drive in members(physical):
+                                capacity = positive(drive.get("CapacityMiB"))
+                                size = capacity * 1024**2 if capacity else None
+                                if size is None:
+                                    capacity = positive(drive.get("CapacityGB"))
+                                    size = capacity * 1000**3 if capacity else None
+                                path = safe_path(drive)
+                                drives[path] = {
+                                    "id": path,
+                                    "serial": drive.get("SerialNumber"),
+                                    "capacity_bytes": size,
+                                    "media_type": drive.get("MediaType"),
+                                    "protocol": drive.get("InterfaceType"),
+                                    "health": (drive.get("Status") or {}).get("Health"),
+                                    "state": (drive.get("Status") or {}).get("State"),
+                                }
+                if not drives:
+                    issues.append("Physical drive inventory is unavailable")
+            nics = []
+            interfaces = resource(system, "EthernetInterfaces")
+            if interfaces:
+                for nic in members(interfaces):
+                    nics.append(
+                        {
+                            "id": nic.get("Id"),
+                            "mac": nic.get("MACAddress") or nic.get("MacAddress"),
+                            "link_status": nic.get("LinkStatus"),
+                            "speed_mbps": positive(nic.get("SpeedMbps")),
+                        }
+                    )
+            else:
+                issues.append("Network interface inventory is unavailable")
+            adapters = resource(system, "NetworkAdapters")
+            if adapters:
+                for adapter in members(adapters):
+                    for port in adapter.get("PhysicalPorts") or []:
+                        mac = port.get("MACAddress") or port.get("MacAddress")
+                        if mac:
+                            nics.append(
+                                {
+                                    "id": port.get("Name") or mac,
+                                    "mac": mac,
+                                    "link_status": port.get("LinkStatus"),
+                                    "speed_mbps": positive(port.get("SpeedMbps")),
+                                }
+                            )
+            return {
+                "source": "redfish",
+                "observed_at": datetime.now(UTC).isoformat(),
+                "system_uuid": system.get("UUID"),
+                "serial": system.get("SerialNumber"),
+                "model": system.get("Model"),
+                "power_state": system.get("PowerState"),
+                "cpu_threads": cpu_threads,
+                "cpu_cores": cpu_cores,
+                "memory_gib": memory,
+                "drives": list(drives.values()),
+                "nics": nics,
+                "issues": issues,
+                "hardware_modified": False,
+            }
+        except httpx.HTTPError as exc:
+            raise RedfishError("Hardware inventory transport failed") from exc
+        finally:
+            if session_path:
+                try:
+                    client.delete(session_path)
+                except httpx.HTTPError:
+                    log.warning("Hardware discovery could not close its BMC session")
 
 
 def set_pxe_boot(host: str, username: str, password: str) -> None:

@@ -13,6 +13,7 @@ decrypted in memory for the Redfish call — never logged.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import secrets
@@ -74,6 +75,7 @@ def node_payload(node: BaremetalNode) -> dict[str, Any]:
             node.talos_served_at.isoformat() if node.talos_served_at else None
         ),
         "commission": commission_summary(node.commission_report),
+        "hardware": node.hardware_report,
         "boot_log": list(node.boot_log or [])[-5:],
         "last_seen": node.last_seen.isoformat() if node.last_seen else None,
         "created_at": node.created_at.isoformat() if node.created_at else None,
@@ -107,6 +109,7 @@ def register_node(
     bmc_username: str,
     bmc_password: str,
     pxe_mac: str | None = None,
+    expected_ip: str | None = None,
     dry_run: bool,
     log: LogFn,
     settings: Settings | None = None,
@@ -122,6 +125,15 @@ def register_node(
     name = name.strip()
     bmc_host = bmc_host.strip()
     bmc_username = bmc_username.strip()
+    if pxe_mac:
+        pxe_mac = normalize_mac(pxe_mac)
+        if not pxe_mac:
+            return {"ok": False, "error": "PXE MAC must be a valid hardware address", "returncode": 2}
+    if expected_ip:
+        try:
+            expected_ip = str(ipaddress.ip_address(expected_ip.strip()))
+        except ValueError:
+            return {"ok": False, "error": "Provisioning IP must be a valid IP address", "returncode": 2}
     if not NODE_NAME_RE.match(name):
         return {
             "ok": False,
@@ -169,6 +181,8 @@ def register_node(
     node.bmc_username = bmc_username
     # Idempotent: already-encrypted values pass through unchanged
     node.bmc_password = encrypt_secret(bmc_password, settings)
+    if expected_ip:
+        node.expected_ip = expected_ip
     if pxe_mac:
         node.pxe_mac = pxe_mac
     elif not node.pxe_mac:

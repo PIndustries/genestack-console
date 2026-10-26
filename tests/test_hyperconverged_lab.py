@@ -221,7 +221,7 @@ def test_hcl_non_dry_run_executes_via_bridge(
         "cinder-volume",
         "-x",
     ]
-    assert str(call["kwargs"]["cwd"]) == str(genestack_root)
+    assert str(call["kwargs"]["cwd"]) == str(genestack_root.resolve())
     assert call["kwargs"]["dry_run"] is False
     assert call["kwargs"]["ssh_target"] is None
     assert call["kwargs"]["timeout"] == 14400
