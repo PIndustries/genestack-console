@@ -128,6 +128,8 @@ def _measure(rule: AlertRule, snapshot: ClusterSnapshot) -> tuple[bool, dict[str
     threshold = rule.threshold if rule.threshold is not None else 1.0
 
     if rule.condition == "probe_failed":
+        if summary.get("setup_required") is True:
+            return False, {"setup_required": True}
         measured = 0.0 if snapshot.probe_ok else 1.0
         details: dict[str, Any] = {"error": snapshot.error}
     elif rule.condition == "node_not_ready":

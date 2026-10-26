@@ -215,6 +215,23 @@ def test_probe_failed_fires_and_healthy_does_not():
     assert _evaluate(_make_env(), _healthy_snapshot(env.id)) == []
 
 
+def test_first_time_setup_does_not_fire_probe_failure():
+    env = _make_env()
+    db = SessionLocal()
+    try:
+        _make_rule(db, condition="probe_failed", severity="critical")
+    finally:
+        db.close()
+    snap = _healthy_snapshot(
+        env.id,
+        probe_ok=False,
+        error="No kubeconfig is configured for this environment.",
+        health="unknown",
+        summary={"setup_required": True},
+    )
+    assert _evaluate(env, snap) == []
+
+
 def test_node_not_ready_fires_with_node_names():
     env = _make_env()
     db = SessionLocal()
