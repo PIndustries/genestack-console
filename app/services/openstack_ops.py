@@ -28,7 +28,7 @@ from app.services import genestack_bridge as bridge
 from app.services import remembered
 from app.services.envcontext import EnvContext, build_context
 from app.services.executors import pick_executor
-from app.services.osclient import OpenStackClient, OpenStackError
+from app.services.osclient import OpenStackClient, OpenStackError, startup_bytes
 
 LogFn = Callable[[str], None]
 
@@ -1171,6 +1171,7 @@ def server_create(
     flavor: str,
     network: str,
     key_name: str | None = None,
+    user_data: str | None = None,
     dry_run: bool | None = None,
     timeout: int = 600,
     log: LogFn | None = None,
@@ -1185,6 +1186,11 @@ def server_create(
     )
     if key_name:
         err = err or validate_ref(key_name, field="key_name")
+    if user_data is not None:
+        try:
+            startup_bytes(user_data)
+        except ValueError as exc:
+            err = err or str(exc)
     if err:
         _log(log, f"[denied] {err}")
         return _denied(err, action="create")
@@ -1205,6 +1211,10 @@ def server_create(
     args.append(str(name).strip())
     ctx = build_context(env, settings)
     try:
+        if user_data and dry_run:
+            return {"ok": True, "returncode": 0, "dry_run": True, "action": "create",
+                    "name": str(name).strip(), "user_data_bytes": len(user_data.encode("utf-8")),
+                    "config_drive": True, "message": "create rehearsal; no instance requested"}
         if not dry_run:
             native = _api_call(
                 ctx,
@@ -1215,15 +1225,21 @@ def server_create(
                         flavor=str(flavor).strip(),
                         network=str(network).strip(),
                         key_name=str(key_name).strip() if key_name else None,
+                        **({"user_data": user_data} if user_data else {}),
                     )
                 },
             )
             if native is not None:
                 native["action"] = "create"
                 native["name"] = str(name).strip()
+                if user_data and not native.get("ok"):
+                    native["error"] = "Cloud rejected the instance or startup configuration"
+                    native["message"] = native["error"]
                 if native.get("ok"):
                     native["message"] = "create accepted"
                 return native
+        if user_data:
+            return _denied("Startup configuration requires the native OpenStack API; no instance was requested", action="create")
         result = _run_openstack(ctx, args, dry_run=dry_run, timeout=timeout, log=log)
     finally:
         ctx.cleanup()

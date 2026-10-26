@@ -23,6 +23,7 @@ class ServerCreateBody(BaseModel):
     flavor: str = Field(min_length=1, max_length=81)
     network: str = Field(min_length=1, max_length=81)
     key_name: str | None = Field(default=None, max_length=81)
+    user_data: str | None = Field(default=None, max_length=16384)
 
 
 class VolumeCreateBody(BaseModel):
@@ -261,6 +262,7 @@ def create_environment_server(
         flavor=body.flavor,
         network=body.network,
         key_name=body.key_name,
+        user_data=body.user_data,
         dry_run=_dry_run(env, settings),
     )
     return _result(env, result)
