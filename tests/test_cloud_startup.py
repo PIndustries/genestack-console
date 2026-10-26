@@ -94,3 +94,18 @@ def test_viewer_cannot_supply_startup(client, admin_headers, viewer_headers):
         )
     assert r.status_code == 403
     create.assert_not_called()
+
+
+def test_live_native_inventory_advertises_startup_support():
+    with patch.object(openstack_ops, "_inventory_via_api", return_value={"available": True}):
+        inventory = openstack_ops._load_cloud_inventory(_env())
+    assert inventory["startup_config_supported"] is True
+
+
+def test_cli_fallback_does_not_advertise_startup_support():
+    with (
+        patch.object(openstack_ops, "_inventory_via_api", return_value=None),
+        patch.object(openstack_ops, "_run_admin", return_value={"returncode": 1}),
+    ):
+        inventory = openstack_ops._load_cloud_inventory(_env())
+    assert inventory.get("startup_config_supported") is not True

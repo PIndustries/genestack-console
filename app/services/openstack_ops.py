@@ -1084,6 +1084,7 @@ def _load_cloud_inventory(
     try:
         native = _inventory_via_api(ctx)
         if native is not None:
+            native["startup_config_supported"] = True
             return native
         errors: list[str] = []
         bundled = _run_admin(
