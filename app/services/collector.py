@@ -425,6 +425,27 @@ def probe_environment(
 ) -> ClusterSnapshot:
     """Probe one environment, persist the snapshot, publish events, run hooks."""
     timeout = settings.collector_probe_timeout_seconds
+    # Remember a real cluster connection across snapshot retention. Removing
+    # credentials from an existing cloud must not quietly turn an outage into
+    # first-time setup. Backfill from older successful probes on upgrade.
+    metadata = dict(env.metadata_json or {})
+    connection_seen = bool(metadata.get("cluster_connection_seen"))
+    if env.kubeconfig_path or env.kubeconfig_data:
+        connection_seen = True
+    elif not connection_seen:
+        connection_seen = (
+            db.scalar(
+                select(ClusterSnapshot.id)
+                .where(
+                    ClusterSnapshot.environment_id == env.id,
+                    ClusterSnapshot.probe_ok.is_(True),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+    if connection_seen and not metadata.get("cluster_connection_seen"):
+        env.metadata_json = {**metadata, "cluster_connection_seen": True}
     if not (env.kubeconfig_path or env.kubeconfig_data):
         # No kubeconfig: skip the kubectl/helm spawn entirely. Without
         # KUBECONFIG kubectl's legacy default target is
@@ -432,6 +453,9 @@ def probe_environment(
         snapshot = _failed_snapshot(
             env, "No kubeconfig is configured for this environment."
         )
+        if not connection_seen:
+            snapshot.health = "unknown"
+            snapshot.summary = {**(snapshot.summary or {}), "setup_required": True}
     else:
         ctx = build_context(env, settings)
         try:

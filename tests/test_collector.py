@@ -350,7 +350,7 @@ def test_probe_unreachable_cluster_is_down(monkeypatch):
         db.close()
 
 
-def test_probe_without_kubeconfig_is_down_without_spawn(monkeypatch):
+def test_new_environment_without_kubeconfig_requires_setup_without_spawn(monkeypatch):
     # An env with no kubeconfig must not spawn kubectl/helm at all —
     # without KUBECONFIG kubectl defaults to http://127.0.0.1:8080,
     # which inside the container is the console itself.
@@ -364,9 +364,43 @@ def test_probe_without_kubeconfig_is_down_without_spawn(monkeypatch):
         snap = collector.probe_environment(db, env, _settings())
         assert snap.probe_ok is False
         assert "kubeconfig" in (snap.error or "")
-        assert snap.health == "down"
+        assert snap.health == "unknown"
+        assert snap.summary["setup_required"] is True
         loaded = db.get(ClusterSnapshot, snap.id)
         assert loaded is not None and loaded.probe_ok is False
+    finally:
+        db.close()
+
+
+def test_existing_cloud_losing_configuration_still_reports_down_after_retention(monkeypatch):
+    _patch_run_probe(monkeypatch, _healthy_responses())
+    db = SessionLocal()
+    try:
+        env = _make_env(db, "lost-configuration")
+        assert collector.probe_environment(db, env, _settings()).probe_ok is True
+        # Snapshot retention must not erase the distinction from first setup.
+        db.query(ClusterSnapshot).filter(ClusterSnapshot.environment_id == env.id).delete()
+        env.kubeconfig_path = None
+        env.kubeconfig_data = None
+        db.commit()
+        snapshot = collector.probe_environment(db, env, _settings())
+        assert snapshot.health == "down"
+        assert snapshot.summary.get("setup_required") is not True
+        assert env.metadata_json["cluster_connection_seen"] is True
+    finally:
+        db.close()
+
+
+def test_existing_successful_probe_backfills_connection_history(monkeypatch):
+    db = SessionLocal()
+    try:
+        env = _make_env(db, "existing-without-marker", kubeconfig=None)
+        db.add(ClusterSnapshot(environment_id=env.id, probe_ok=True, health="healthy", summary={}))
+        db.commit()
+        snapshot = collector.probe_environment(db, env, _settings())
+        assert snapshot.health == "down"
+        assert snapshot.summary.get("setup_required") is not True
+        assert env.metadata_json["cluster_connection_seen"] is True
     finally:
         db.close()
 

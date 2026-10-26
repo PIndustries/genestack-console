@@ -385,6 +385,9 @@ def test_drift_check_never_fails_a_probe(monkeypatch):
     db = SessionLocal()
     try:
         env = _make_env(db)
+        # Exercise a configured cluster probe, independently of first-use setup.
+        env.kubeconfig_path = "/tmp/fixture-kubeconfig"
+        db.commit()
         snap = collector.probe_environment(db, env, _settings())
         assert snap.probe_ok is False
         assert snap.health == "down"
