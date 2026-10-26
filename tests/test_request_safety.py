@@ -56,6 +56,21 @@ def test_configured_path_resolves_an_operator_path(tmp_path: Path):
     assert configured_path(str(target)) == target.resolve()
 
 
+def test_remote_path_does_not_resolve_console_symlinks(tmp_path: Path):
+    local_target = tmp_path / "local"
+    local_target.mkdir()
+    alias = tmp_path / "remote-directory"
+    alias.symlink_to(local_target)
+    assert configured_path(str(alias), remote=True) == alias
+    assert configured_path("/etc/genestack", remote=True) == Path("/etc/genestack")
+
+
+@pytest.mark.parametrize("value", ["~/genestack", "relative/path", "../escape", ""])
+def test_remote_path_requires_an_absolute_path(value: str):
+    with pytest.raises(ValueError):
+        configured_path(value, remote=True)
+
+
 @pytest.mark.parametrize("value", ["../etc/passwd", "/tmp/../etc/passwd", "a\x00b"])
 def test_configured_path_rejects_escape(value: str):
     with pytest.raises(ValueError):

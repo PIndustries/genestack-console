@@ -63,6 +63,27 @@ def test_no_inventory_dir_means_no_ansible_inventory(tmp_path):
     assert env.get("ANSIBLE_INVENTORY") == os.environ.get("ANSIBLE_INVENTORY")
 
 
+def test_remote_context_keeps_deployer_paths_and_inventory(tmp_path):
+    target = tmp_path / "console-local"
+    target.mkdir()
+    alias = tmp_path / "deployer-path"
+    alias.symlink_to(target)
+    ctx = build_context(
+        _env(
+            deployer_ssh_host="deployer.example.com",
+            deployer_ssh_user="deploy",
+            genestack_path=str(alias),
+            genestack_config_dir="/etc/genestack",
+        )
+    )
+    assert ctx.ssh_target == "deploy@deployer.example.com"
+    assert ctx.genestack_root == alias
+    assert ctx.config_dir == Path("/etc/genestack")
+    assert ctx.remote_env()["GENESTACK_BASE_DIR"] == str(alias)
+    assert ctx.remote_env()["GENESTACK_CONFIG"] == "/etc/genestack"
+    assert ctx.remote_env()["ANSIBLE_INVENTORY"] == "/etc/genestack/inventory"
+
+
 def test_kubeconfig_blob_staged_0600_and_cleaned_up(tmp_path, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "data_dir", tmp_path)

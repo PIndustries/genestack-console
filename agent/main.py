@@ -668,12 +668,14 @@ async def _load_config_with_retry(env: dict | None = None) -> AgentConfig:
     provisioning file.  Poll the file until it appears (5 s between attempts).
     """
     max_attempts = 72
+    source = os.environ if env is None else env
+    provisioning = bool(source.get("GSC_AGENT_TOKEN_FILE")) and not source.get("GSC_AGENT_TOKEN")
     for i in range(max_attempts):
         try:
             return load_config(env)
         except ConfigError as exc:
             msg = str(exc)
-            if ("TOKEN" in msg or "not readable" in msg) and i < max_attempts - 1:
+            if provisioning and ("TOKEN" in msg or "not readable" in msg) and i < max_attempts - 1:
                 log(f"token not yet available, retrying in 5s ({i+1}/{max_attempts})")
                 await asyncio.sleep(5)
             else:

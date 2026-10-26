@@ -157,9 +157,8 @@ def test_scrub_marker_runs_once(tmp_path, monkeypatch):
 # ------------------------------------------------------------- metrics prune (M1)
 
 
-def test_worker_prune_no_op_without_data(monkeypatch):
-    """CollectorScheduler._prune requires actual data to prune."""
-    import time
+def test_worker_prune_delegates_and_respects_interval(monkeypatch):
+    """The scheduler delegates empty-data handling and throttles subsequent runs."""
     import types
 
     from app.config import get_settings
@@ -186,10 +185,13 @@ def test_worker_prune_no_op_without_data(monkeypatch):
 
     sched = wr.CollectorScheduler(settings=get_settings(), db_factory=_FakeDb)
     sched._last_prune = 0.0
-    sched._prune(time.monotonic())
-    # Product: prune methods are called, but test setup needs real DB
-    # Renamed test to reflect current behavior
-    assert calls == {"snap": 0, "met": 0}  # _FakeDb doesn't support queries
+    now = wr._PRUNE_INTERVAL_SECONDS + 1
+    sched._prune(now)
+    assert calls == {"snap": 1, "met": 1}
+    sched._prune(now + 1)
+    assert calls == {"snap": 1, "met": 1}
+    sched._prune(now + wr._PRUNE_INTERVAL_SECONDS)
+    assert calls == {"snap": 2, "met": 2}
 
 
 # ------------------------------------------------------------- catalog + schemas

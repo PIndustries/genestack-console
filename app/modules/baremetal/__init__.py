@@ -14,6 +14,7 @@ class BaremetalModule(Module):
     functions = (
         "node_register",
         "nodes_list",
+        "hardware_discover",
         "bmc_scan",
         "node_actions",
     )

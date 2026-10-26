@@ -41,7 +41,7 @@ def under_root(root: Path, name: str) -> Path:
     return Path(candidate)
 
 
-def configured_path(value: str) -> Path:
+def configured_path(value: str, *, remote: bool = False) -> Path:
     """Resolve an operator-configured path. Reject NUL and ``..`` parts.
 
     The path stays wherever the operator configured it. This does not force
@@ -52,4 +52,10 @@ def configured_path(value: str) -> Path:
     text = value.strip()
     if ".." in Path(text).parts:
         raise ValueError("invalid path")
+    if remote:
+        # A deployer's /etc or symlinks must never be resolved on this host.
+        # Absolute paths also avoid expanding '~' as the console's user.
+        if not text.startswith("/"):
+            raise ValueError("remote path must be absolute")
+        return Path(text)
     return Path(text).expanduser().resolve()

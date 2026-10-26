@@ -107,14 +107,19 @@ def get_environment_health(
     """
     if is_demo_env(env):
         return canned_environment_health()
-    ctx = build_context(env, get_settings())
+    ctx = None
     try:
+        ctx = build_context(env, get_settings())
         return livestate.environment_health(ctx, db, env.id)
     except Exception as exc:  # noqa: BLE001
         log.warning("%s", log_field(exc))
         return livestate._unknown_health(client_detail(exc))
     finally:
-        ctx.cleanup()
+        if ctx is not None:
+            try:
+                ctx.cleanup()
+            except Exception as exc:  # noqa: BLE001 — cleanup must not erase probe results
+                log.warning("Health context cleanup: %s", log_field(exc))
 
 
 @router.get("/environments/{environment_id}/cluster/logs")

@@ -41,7 +41,7 @@ def resolve_genestack_root(
 ) -> Path:
     settings = settings or get_settings()
     if env and env.genestack_path:
-        return configured_path(env.genestack_path)
+        return configured_path(env.genestack_path, remote=bool(env.deployer_ssh_host))
     return configured_path(str(settings.genestack_root))
 
 
@@ -60,7 +60,9 @@ def resolve_components_path(
     (scope "global", legacy behavior). Reads and writes share this rule.
     """
     if env and env.genestack_config_dir:
-        config_dir = configured_path(env.genestack_config_dir)
+        config_dir = configured_path(
+            env.genestack_config_dir, remote=bool(env.deployer_ssh_host)
+        )
         return config_dir / "openstack-components.yaml", "environment"
     return resolve_genestack_root(settings, env) / "openstack-components.yaml", "global"
 
