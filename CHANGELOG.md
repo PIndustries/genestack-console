@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.26.1-rc1
+
+Readiness candidate for native cloud operations and measured hardware setup.
+
+- Instance startup scripts/cloud-init are validated and delivered through config drives; older execution paths refuse unsupported delivery.
+- Registered machines expose measured CPU, memory, disks and network inventory, with a read-only capacity proposal.
+- Remote environment inventory paths, unavailable health responses and provisioning-agent startup retries are corrected.
+- This candidate does not automatically apply an installation plan or authorize disk changes. Full greenfield and native workload acceptance remain in progress.
+
 ## 2026.10.17.1
 
 The console page arrives as one script.
