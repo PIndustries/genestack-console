@@ -243,7 +243,7 @@ async def _event_stream(
 
 
 @router.get("/stream")
-async def stream_events(
+def stream_events(
     request: Request,
     topics: str = Query(default="fleet"),
     db: Session = Depends(get_db),
@@ -260,6 +260,9 @@ async def stream_events(
     is refreshed every ``_VISIBILITY_REFRESH_SECONDS`` so membership changes
     apply mid-stream.
     """
+    # Authorization uses synchronous SQLAlchemy. Let FastAPI run this setup
+    # in its worker pool so a busy DB cannot freeze every async request.
+    # StreamingResponse still runs the async event generator on the loop.
     requested = [t.strip() for t in topics.split(",") if t.strip()]
     if not requested:
         raise HTTPException(status_code=400, detail="No topics requested")

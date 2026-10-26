@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.26.1-rc3
+
+- Live event stream authorization runs outside the main event loop, so a busy database pool does not freeze health checks and other async requests during app startup.
+- Keeps the earlier connection-release fix: a connected event stream does not reserve a database connection for its lifetime.
+- This candidate continues private-cloud acceptance; it does not establish a completed greenfield deployment.
+
 ## 2026.10.26.1-rc2
 
 First-use and deployment-failure fixes verified during the private-cloud acceptance work.

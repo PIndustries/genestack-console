@@ -144,7 +144,7 @@ def test_stream_endpoint_returns_sse_response(client, member_setup):
     async def run():
         with SessionLocal() as db:
             principal = stream._stream_principal(_FakeRequest(), db, ticket=ticket)
-            resp = await stream.stream_events(
+            resp = await asyncio.to_thread(stream.stream_events,
                 _FakeRequest(false_count=0), "fleet,alerts", db, principal
             )
             # Client already gone: first poll disconnects, finally unsubscribes.
@@ -176,7 +176,7 @@ def test_open_member_stream_leaves_database_available(member_setup):
             request = _FakeRequest(false_count=10)
             request.headers = {"Authorization": "Bearer " + member_setup["token"]}
             principal = stream._stream_principal(request, db, ticket=None)
-            response = await stream.stream_events(
+            response = await asyncio.to_thread(stream.stream_events,
                 request, "fleet,alerts", db, principal, protocol=2
             )
             try:
@@ -192,6 +192,88 @@ def test_open_member_stream_leaves_database_available(member_setup):
     try:
         asyncio.run(run())
     finally:
+        engine.dispose()
+
+
+def test_stream_waiting_for_database_does_not_block_health(member_setup, monkeypatch):
+    """Exercise ASGI dispatch with a busy DB pool, as during native bootstrap."""
+    import threading
+
+    import httpx
+    from fastapi import FastAPI
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    engine = create_engine(
+        get_settings().database_url,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=4,
+        connect_args={"check_same_thread": False},
+    )
+    with SessionLocal() as db:
+        principal = stream._stream_principal(
+            _FakeRequest(headers={"Authorization": "Bearer " + member_setup["token"]}),
+            db,
+            ticket=None,
+        )
+    entered, released = threading.Event(), threading.Event()
+    held = engine.connect()
+    original = stream._visible_env_ids
+
+    def visible(db, principal):
+        entered.set()
+        timer.start()
+        return original(db, principal)
+
+    def session():
+        with Session(engine) as db:
+            yield db
+
+    async def finite_stream(request, queue, *args, **kwargs):
+        try:
+            yield "data: connected\n\n"
+        finally:
+            events.unsubscribe(queue)
+
+    def release():
+        if not released.is_set():
+            released.set()
+            held.close()
+
+    monkeypatch.setattr(stream, "_visible_env_ids", visible)
+    monkeypatch.setattr(stream, "_event_stream", finite_stream)
+    app = FastAPI()
+    app.include_router(stream.router)
+    app.dependency_overrides[stream.get_db] = session
+    app.dependency_overrides[stream._stream_principal] = lambda: principal
+
+    @app.get("/health")
+    async def health():
+        return {"ok": True}
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            pending = asyncio.create_task(client.get("/api/v1/stream"))
+            try:
+                assert await asyncio.to_thread(entered.wait, 5)
+                response = await client.get("/health")
+                assert response.status_code == 200
+                assert not released.is_set(), "Live stream DB wait blocked the event loop"
+            finally:
+                release()
+                assert (await pending).status_code == 200
+
+    timer = threading.Timer(2, release)
+    try:
+        asyncio.run(run())
+    finally:
+        timer.cancel()
+        if timer.ident is not None:
+            timer.join()
+        release()
         engine.dispose()
 
 
@@ -213,7 +295,7 @@ def test_environments_topic_is_accepted(client, admin_headers):
     async def run():
         with SessionLocal() as db:
             principal = stream._stream_principal(_FakeRequest(), db, ticket=ticket)
-            resp = await stream.stream_events(
+            resp = await asyncio.to_thread(stream.stream_events,
                 _FakeRequest(false_count=0), "environments", db, principal
             )
             with pytest.raises(StopAsyncIteration):
@@ -269,7 +351,7 @@ def test_stream_env_topic_tenant_gating(client, admin_headers, member_setup):
     async def run():
         with SessionLocal() as db:
             principal = stream._stream_principal(_FakeRequest(), db, ticket=ticket)
-            resp = await stream.stream_events(
+            resp = await asyncio.to_thread(stream.stream_events,
                 _FakeRequest(false_count=0),
                 f"env:{member_setup['env']['id']}",
                 db,
@@ -464,7 +546,7 @@ def test_stream_handler_filters_shared_topics_for_member(
     async def run():
         with SessionLocal() as db:
             principal = stream._stream_principal(_FakeRequest(), db, ticket=ticket)
-            resp = await stream.stream_events(
+            resp = await asyncio.to_thread(stream.stream_events,
                 _FakeRequest(false_count=4), "fleet,jobs,alerts", db, principal
             )
         it = resp.body_iterator
@@ -503,7 +585,7 @@ def test_stream_handler_admin_receives_all_tenants(client, admin_headers):
             principal = stream._stream_principal(
                 _FakeRequest(headers={"X-API-Key": "dev-admin-key"}), db, ticket=None
             )
-            resp = await stream.stream_events(
+            resp = await asyncio.to_thread(stream.stream_events,
                 _FakeRequest(false_count=1), "fleet", db, principal
             )
         it = resp.body_iterator
