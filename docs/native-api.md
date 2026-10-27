@@ -174,3 +174,21 @@ accepted. A missing marker must never be treated as proof that a real reboot
 or inspection occurred. Native completion waits for this job's terminal result,
 then refreshes the hardware plan; an older verification badge is not completion
 of a newly requested inspection.
+
+### Read-only installation review
+
+`GET /api/v1/environments/{id}/baremetal/installation-plan` uses the existing
+viewer and tenant-scope dependencies. Schema 1 returns a configuration version,
+fingerprint, machine addresses and automatically proposed roles, exact OS disk
+WWIDs with system/storage purposes and measured capacities, provisioning network,
+warnings and blockers. The capacity-plan endpoint advertises
+`supports_installation_review: true` when this endpoint is available.
+
+Each target requires fresh management and read-only OS inventory. Physical drive
+serials or RAID logical identifiers must reconcile to exactly one local writable
+OS disk with a persistent WWID. Unmatched local disks, remote/read-only targets,
+duplicate identities, stale evidence and unusable provisioning addresses block
+installation. Credentials and raw configuration are never returned. The
+fingerprint covers the returned evidence and current configuration version.
+This endpoint does not save configuration, submit a job, reboot, erase or install
+anything. Saving and executing a reviewed installation are separate operations.

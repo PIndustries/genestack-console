@@ -6,7 +6,7 @@ the job queue (baremetal.node.* catalog ops).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, get_env_scoped
 from app.models import Environment
 from app.services import baremetal as baremetal_service
-from app.services import capacity
+from app.services import capacity, hardware_installation
 
 router = APIRouter(prefix="/api/v1/environments/{environment_id}", tags=["baremetal"])
 
@@ -35,4 +35,13 @@ def get_capacity_plan(
     env: Environment = Depends(get_env_scoped("viewer")),
 ) -> dict[str, Any]:
     """Propose roles from fresh hardware evidence, without changing configuration."""
-    return capacity.for_environment(db, env)
+    return {**capacity.for_environment(db, env), "supports_installation_review": True}
+
+
+@router.get("/baremetal/installation-plan")
+def get_installation_plan(
+    db: Annotated[Session, Depends(get_db)],
+    env: Annotated[Environment, Depends(get_env_scoped("viewer"))],
+) -> dict[str, Any]:
+    """Review exact measured targets without changing configuration or hardware."""
+    return hardware_installation.for_environment(db, env)
