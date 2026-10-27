@@ -163,7 +163,7 @@ def for_environment(db, env) -> dict[str, Any]:
         .order_by(BaremetalNode.id)
     ).all()
     current = envconfig.get_current(db, env)
-    return preview(
+    result = preview(
         [
             {
                 "id": n.id,
@@ -178,3 +178,79 @@ def for_environment(db, env) -> dict[str, Any]:
         current[0] if current else {},
         current[1].version if current else 0,
     )
+    result["supports_plan_save"] = True
+    result["saved_plan_matches"] = _saved_matches(current, result)
+    return result
+
+
+def _saved_matches(current, result) -> bool:
+    if current is None:
+        return False
+    record = current[0].get("hardware_installation") or {}
+    if (
+        not isinstance(record, dict)
+        or record.get("schema_version") != 1
+        or record.get("execution_authorized") is not False
+    ):
+        return False
+    original = record.get("reviewed_plan") or {}
+    if not isinstance(original, dict):
+        return False
+    if record.get("saved_version") != current[1].version or not isinstance(
+        original.get("config_version"), int
+    ):
+        return False
+    candidate = {
+        k: v
+        for k, v in result.items()
+        if k not in ("supports_plan_save", "saved_plan_matches", "fingerprint")
+    }
+    candidate["config_version"] = original["config_version"]
+    digest = hashlib.sha256(
+        json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return not result["blockers"] and digest == record.get("reviewed_fingerprint")
+
+
+def save_review(db, env, actor: str, fingerprint: str, expected_version: int):
+    """Persist the reviewed proposal only; installation needs a separate action."""
+    import yaml
+
+    from app.services import envconfig
+
+    current = envconfig.get_current(db, env)
+    result = for_environment(db, env)
+    version = current[1].version if current else 0
+    record = (current[0].get("hardware_installation") or {}) if current else {}
+    if not isinstance(record, dict):
+        record = {}
+    if (
+        version == expected_version + 1
+        and record.get("reviewed_fingerprint") == fingerprint
+        and result["saved_plan_matches"]
+    ):
+        return current[1]
+    if version != expected_version or result["fingerprint"] != fingerprint:
+        raise envconfig.ConfigConflictError(
+            "The configuration or hardware changed; review the plan again"
+        )
+    if result["blockers"]:
+        raise envconfig.ConfigValidationError(
+            "Resolve the installation plan blockers before saving"
+        )
+    doc = dict(current[0]) if current else {}
+    doc["hardware_installation"] = {
+        "schema_version": 1,
+        "saved_version": expected_version + 1,
+        "reviewed_fingerprint": fingerprint,
+        "reviewed_plan": {
+            k: v for k, v in result.items() if k not in ("supports_plan_save", "saved_plan_matches")
+        },
+        "reviewed_by": actor,
+        "reviewed_at": datetime.now(UTC).isoformat(),
+        "execution_authorized": False,
+    }
+    row, _ = envconfig.put_version(
+        db, env, yaml.safe_dump(doc, sort_keys=False), actor, expected_version=expected_version
+    )
+    return row
