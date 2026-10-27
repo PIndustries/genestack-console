@@ -61,9 +61,17 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
         ]
         if not up_nics:
             blockers.append(f"{name}: a verified connected network interface is required")
+        logical = report.get("logical_volumes") or []
+        if logical:
+            # A RAID member's serial is not an installable OS disk. Only whole
+            # logical volumes may contribute, and OS discovery must reconcile them.
+            disk_inventory = [dict(d, serial=d.get("unique_identifier")) for d in logical]
+            blockers.append(f"{name}: verify logical-volume identifiers against OS-visible disks before installation")
+        else:
+            disk_inventory = report.get("drives", [])
         healthy = [
             d
-            for d in report.get("drives", [])
+            for d in disk_inventory
             if d.get("health") == "OK"
             and d.get("state") == "Enabled"
             and d.get("serial")
@@ -88,6 +96,7 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
                 "memory_gib": ram,
                 "observed_at": report["observed_at"],
                 "disks": healthy,
+                "logical_storage": bool(logical),
                 "connected_nics": up_nics,
             }
         )
@@ -129,9 +138,13 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
                 "system_reserved_memory_gib": reserved_ram,
                 "candidate_vm_threads": node["cpu_threads"] - reserved_cpu,
                 "candidate_vm_memory_gib": node["memory_gib"] - reserved_ram,
-                "proposed_boot_disk_serial": boot["serial"] if boot else None,
+                "proposed_boot_disk_serial": boot["serial"] if boot and not node["logical_storage"] else None,
+                "proposed_boot_disk_identifier": boot["serial"] if boot and node["logical_storage"] else None,
+                "disk_identity_kind": "logical_volume" if node["logical_storage"] else "physical_drive",
                 "candidate_data_disks": [
-                    {"serial": d["serial"], "capacity_bytes": d["capacity_bytes"]} for d in data
+                    {"serial": None if node["logical_storage"] else d["serial"],
+                     "unique_identifier": d["serial"] if node["logical_storage"] else None,
+                     "capacity_bytes": d["capacity_bytes"]} for d in data
                 ],
                 "measurement_time": node["observed_at"],
             }
