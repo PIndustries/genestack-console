@@ -40,6 +40,7 @@ python3 -m nuitka \
   --include-package=h11 \
   --include-data-dir="$ROOT/app/static=app/static" \
   --include-data-dir="$ROOT/app/templates=app/templates" \
+  --include-data-dir="$ROOT/app/assets=app/assets" \
   --include-data-dir="$ROOT/ansible=ansible" \
   --include-data-dir="$ROOT/agent=agent" \
   --include-data-dir="$ROOT/terraform=terraform" \

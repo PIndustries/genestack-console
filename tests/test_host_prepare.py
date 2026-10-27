@@ -6,6 +6,7 @@ import uuid
 
 from app.services import genestack_bridge as bridge
 from app.services.catalog import get_operation
+from app.services.host_prepare import bootstrap_command
 
 
 def _suffix() -> str:
@@ -81,7 +82,7 @@ def test_host_prepare_dry_run_logs_plan_in_order_executes_nothing(
 ):
     """Global test config is dry_run=True: full plan logged, nothing executed."""
 
-    def boom(*args, **kwargs):  # noqa: ARG001
+    def boom(*args, **kwargs):
         raise AssertionError("subprocess.run must not be called in dry-run")
 
     monkeypatch.setattr(bridge.subprocess, "run", boom)
@@ -95,7 +96,7 @@ def test_host_prepare_dry_run_logs_plan_in_order_executes_nothing(
     log_text = _job_log(client, admin_headers, job["id"])
     clone = "git clone --recurse-submodules https://github.com/rackerlabs/genestack /opt/genestack"
     checkout = "git -C /opt/genestack checkout main"
-    bootstrap = "sudo -n -E bash /opt/genestack/bootstrap.sh"
+    bootstrap = "managed deployer bootstrap sha256="
     assert clone in log_text
     assert checkout in log_text
     assert bootstrap in log_text
@@ -124,7 +125,7 @@ def test_host_prepare_missing_ansible_warns_but_continues(
     client, admin_headers, monkeypatch
 ):
     env = _create_env(client, admin_headers, dry_run=False)
-    _capture_commands(monkeypatch, rc_rules={"command -v ansible-playbook": 1})
+    captured = _capture_commands(monkeypatch, rc_rules={"command -v ansible-playbook": 1})
 
     resp = _prepare_job(client, admin_headers, env["id"])
     job = resp.json()
@@ -132,7 +133,8 @@ def test_host_prepare_missing_ansible_warns_but_continues(
 
     log_text = _job_log(client, admin_headers, job["id"])
     assert "WARNING ansible-playbook not found" in log_text
-    assert "bootstrap.sh" in log_text
+    assert any(line.endswith(": bootstrap") for line in log_text.splitlines())
+    assert any("base64.b64decode" in script for script in _scripts(captured))
 
 
 def test_host_prepare_existing_repo_fetches_not_clones(
@@ -172,7 +174,7 @@ def test_host_prepare_fresh_clone_checks_out_ref_then_bootstraps(
     scripts = _scripts(captured)
     clone = "git clone --recurse-submodules https://git.example.com/genestack.git /srv/genestack"
     checkout = "git -C /srv/genestack checkout stable/2026.1"
-    bootstrap = "sudo -n -E bash /srv/genestack/bootstrap.sh"
+    bootstrap = bootstrap_command("/srv/genestack", "/etc/genestack-lab")[0]
     verify = (
         "test -f /etc/genestack-lab/provider && test -d /etc/genestack-lab/inventory "
         "&& test -d /etc/genestack-lab/helm-configs"
@@ -220,15 +222,15 @@ def test_host_prepare_repo_url_defaults_from_env_metadata(client, admin_headers)
 
 def test_host_prepare_stops_on_first_failure(client, admin_headers, monkeypatch):
     env = _create_env(client, admin_headers, dry_run=False)
-    captured = _capture_commands(monkeypatch, rc_rules={"bootstrap.sh": 1})
+    captured = _capture_commands(monkeypatch, rc_rules={"base64.b64decode": 1})
 
     resp = _prepare_job(client, admin_headers, env["id"])
     job = resp.json()
     assert job["status"] == "failed"
-    assert "bootstrap.sh failed" in job["error"]
+    assert "Managed deployer bootstrap failed" in job["error"]
 
     scripts = _scripts(captured)
-    assert any("bootstrap.sh" in s for s in scripts)
+    assert any("base64.b64decode" in s for s in scripts)
     # Verify step never ran after the bootstrap failure
     assert not any("helm-configs" in s for s in scripts)
 
@@ -279,3 +281,13 @@ def test_host_prepare_requires_environment(client, admin_headers):
     job = resp.json()
     assert job["status"] == "failed"
     assert "requires an environment" in job["error"]
+
+
+def test_installed_source_archive_is_not_fetched_or_replaced(client, admin_headers, monkeypatch):
+    env = _create_env(client, admin_headers, dry_run=False)
+    captured = _capture_commands(monkeypatch, rc_rules={"test -e /opt/genestack/.git": 1})
+    job = _prepare_job(client, admin_headers, env["id"]).json()
+    assert job["status"] == "success", job["error"]
+    scripts = _scripts(captured)
+    assert not any("git clone" in script or "git -C" in script for script in scripts)
+    assert any("base64.b64decode" in script for script in scripts)

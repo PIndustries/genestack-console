@@ -4,15 +4,16 @@ Takes a fresh deploy host to "ready for push + deploy", mirroring exactly
 what docs/genestack-getting-started.md tells operators to do by hand:
 
   1. preflight — git must be present (fatal); ansible-playbook may be absent
-     (warning only — bootstrap.sh installs ansible into ~/.venvs/genestack).
+     (warning only — managed bootstrap installs Ansible into the deployer account virtual environment).
   2. repo — ``git clone --recurse-submodules <repo_url> <genestack_path>``
      when absent; when a checkout already exists only ``git -C <path> fetch``
      runs (never a pull — an existing checkout's branch is left as-is).
   3. checkout — ``git -C <path> checkout <repo_ref>`` only on a fresh clone.
-  4. bootstrap — ``sudo -n -E bash <genestack_path>/bootstrap.sh`` with
-     GENESTACK_CONFIG set to the env's config dir (bootstrap.sh sources
-     scripts/genestack.rc, which honors GENESTACK_CONFIG, defaulting to
-     /etc/genestack). ``sudo -n`` because ssh runs BatchMode (no tty).
+  4. managed bootstrap — seed pristine repository defaults into this cloud's
+     config directory and install verified tools with a real account HOME.
+     Upstream bootstrap.sh hard-codes global /etc/genestack paths; do not run
+     it against an isolated environment. The bundled script uses the same
+     command transport for local, SSH and agent execution.
   5. verify — provider file + inventory dir + helm-configs dir exist under
      the config dir.
 
@@ -25,10 +26,14 @@ ctx/params and writes the audit entry.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import shlex
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from app.models import Environment
+from app.paths import package_root
 from app.services import genestack_bridge as bridge
 from app.services.envcontext import EnvContext
 
@@ -58,9 +63,18 @@ def _resolve_params(env: Environment | None, params: dict[str, Any]) -> dict[str
     }
 
 
+def bootstrap_command(genestack_path: str, config_dir: str) -> tuple[str, str]:
+    """Send the same reviewed stdlib script through local, SSH and agent execution."""
+    source = (package_root() / "app/assets/deployer-bootstrap.py.in").read_bytes()
+    digest = hashlib.sha256(source).hexdigest()
+    code = "import base64;exec(compile(base64.b64decode(" + repr(base64.b64encode(source).decode()) + "), '<genestack-bootstrap>', 'exec'))"
+    command = shlex.join(["sudo", "-n", "-E", "env", "-u", "PYTHONHOME", "-u", "PYTHONPATH", "-u", "LD_LIBRARY_PATH", "-u", "LD_PRELOAD", "python3", "-c", code, genestack_path, config_dir, "auto", "/usr/local/bin"])
+    return command, digest
+
+
 def run_host_prepare(
     env: Environment | None,
-    ctx: EnvContext,  # noqa: ARG001 — paths resolve from params/env, not ctx
+    ctx: EnvContext,  # Paths resolve from params/env, not ctx.
     log: LogFn,
     *,
     params: dict[str, Any],
@@ -101,6 +115,7 @@ def run_host_prepare(
         *,
         step_extra_env: dict[str, str] | None = None,
         step_remote_env: dict[str, str] | None = None,
+        command_label: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Run one bash step; returns (result, failed)."""
         log(f"[prepare] step {len(steps) + 1}: {name}")
@@ -112,7 +127,7 @@ def run_host_prepare(
             ssh_target=ssh_target,
             remote_env=step_remote_env if step_remote_env is not None else remote_env,
             agent_env_id=agent_env_id,
-            log=log,
+            log=(lambda line: log("$ " + command_label) if line.startswith("$ ") else log(line)) if command_label else log,
         )
         rc = result.get("returncode")
         steps.append(
@@ -137,7 +152,7 @@ def run_host_prepare(
     if failed:
         log(
             "[prepare] WARNING ansible-playbook not found — "
-            "bootstrap.sh installs ansible into ~/.venvs/genestack"
+            "managed bootstrap installs Ansible into the deployer account virtual environment"
         )
 
     # Step: repo — clone when absent (checkout the ref only on a fresh
@@ -167,26 +182,28 @@ def run_host_prepare(
                 f"git checkout of ref '{repo_ref}' failed", result.get("returncode")
             )
     else:
-        log(
-            f"[prepare] existing checkout at {genestack_path} — fetch only, branch untouched"
-        )
-        result, failed = _step("repo-fetch", f"git -C {quoted_path} fetch")
-        if failed:
-            log(
-                "[prepare] WARNING git fetch failed — continuing with the existing checkout"
-            )
+        vcs, _ = _step("repo-vcs-probe", f"test -e {quoted_path}/.git")
+        if vcs.get("returncode") == 0:
+            log(f"[prepare] existing checkout at {genestack_path} — fetch only, branch untouched")
+            result, failed = _step("repo-fetch", f"git -C {quoted_path} fetch")
+            if failed:
+                log("[prepare] WARNING git fetch failed — continuing with the existing checkout")
+        else:
+            log(f"[prepare] existing source archive at {genestack_path} — preserving installed source")
 
     # Step: bootstrap — GENESTACK_CONFIG points bootstrap.sh at the env's
     # config dir (honored via scripts/genestack.rc; defaults to /etc/genestack).
     log(f"[prepare] bootstrap env: GENESTACK_CONFIG={config_dir}")
+    command, script_digest = bootstrap_command(genestack_path, config_dir)
     result, failed = _step(
         "bootstrap",
-        f"sudo -n -E bash {quoted_path}/bootstrap.sh",
+        command,
+        command_label=f"managed deployer bootstrap sha256={script_digest}",
         step_extra_env={**extra_env, "GENESTACK_CONFIG": config_dir},
         step_remote_env={**remote_env, "GENESTACK_CONFIG": config_dir},
     )
     if failed:
-        return _fail("bootstrap.sh failed — see log", result.get("returncode"))
+        return _fail("Managed deployer bootstrap failed — see log", result.get("returncode"))
 
     # Step: verify the config-dir skeleton bootstrap.sh should have built
     quoted_config = shlex.quote(config_dir)

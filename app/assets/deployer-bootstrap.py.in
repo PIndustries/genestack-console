@@ -1,0 +1,184 @@
+"""Headless deployer bootstrap without upstream's global /etc/genestack writes.
+
+This module's stdlib-only source is sent to the selected command executor. It
+also runs independently in integration tests; it never imports the Console DB.
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+from pathlib import Path
+import platform
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+KUBECTL_VERSION = "v1.35.0"
+
+
+def copy_missing(source: Path, target: Path) -> None:
+    """Seed pristine repository defaults without copying another cloud's data."""
+    if target.is_symlink():
+        raise RuntimeError(f"Refusing configuration symlink: {target}")
+    if source.is_dir():
+        target.mkdir(parents=True, exist_ok=True)
+        for child in source.iterdir():
+            copy_missing(child, target / child.name)
+    elif not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with source.open("rb") as src, target.open("xb") as dst:
+            shutil.copyfileobj(src, dst)
+        shutil.copymode(source, target)
+
+
+def initialize_layout(root: Path, config: Path, provider: str) -> None:
+    if provider not in ("talos", "kubespray"):
+        raise RuntimeError("Unsupported Kubernetes provider")
+    if config.is_symlink():
+        raise RuntimeError("Refusing a symlinked cloud configuration directory")
+    config.mkdir(parents=True, exist_ok=True)
+    provider_file = config / "provider"
+    if provider_file.is_symlink():
+        raise RuntimeError("Refusing a symlinked provider file")
+    existing = provider_file.read_text().strip() if provider_file.exists() else ""
+    if existing and existing != provider:
+        raise RuntimeError("Existing provider differs; configuration was preserved")
+    if not existing:
+        provider_file.write_text(provider + "\n")
+    for relative, destination in [
+        ("ansible/inventory/genestack", "inventory"),
+        ("etc/gateway-api", "gateway-api"),
+        ("manifests", "manifests"),
+        ("helm-chart-versions.yaml", "helm-chart-versions.yaml"),
+    ]:
+        source = root / relative
+        if not source.exists():
+            raise RuntimeError(f"Genestack source is incomplete: {relative}")
+        copy_missing(source, config / destination)
+    def directory(path: Path, mode: int = 0o755) -> None:
+        for relative in (path, *path.parents):
+            if relative == config.parent:
+                break
+            if relative.is_symlink():
+                raise RuntimeError(f"Refusing a writable configuration symlink: {relative}")
+        path.mkdir(parents=True, mode=mode, exist_ok=True)
+    directory(config / "inventory/credentials", 0o700)
+    directory(config / "inventory/group_vars")
+    directory(config / "helm-configs/global_overrides")
+    for service in (root / "base-helm-configs").iterdir():
+        if service.is_dir():
+            directory(config / "helm-configs" / service.name)
+    # Copy overlays so editing one cloud never edits the shared repository.
+    # Base manifests remain shared, read-only inputs to each cloud's overlay.
+    for service in (root / "base-kustomize").iterdir():
+        target = config / "kustomize" / service.name
+        if not service.is_dir():
+            if not target.exists() and not target.is_symlink():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.symlink_to(service)
+            continue
+        directory(target)
+        for item in service.iterdir():
+            dest = target / item.name
+            if item.name == "overlay":
+                copy_missing(item, dest)
+            elif not dest.exists() and not dest.is_symlink():
+                dest.symlink_to(item, target_is_directory=item.is_dir())
+        if (target / "base").is_dir():
+            overlay = target / "overlay"
+            directory(overlay)
+            document = overlay / "kustomization.yaml"
+            if not document.exists():
+                document.write_text("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../base\n")
+
+
+def execution_environment(home: Path, root: Path, config: Path, provider: str) -> dict[str, str]:
+    env = dict(os.environ)
+    # Frozen application loader paths must not leak into system Python/pip.
+    for key in ("PYTHONHOME", "PYTHONPATH", "LD_LIBRARY_PATH", "LD_PRELOAD"):
+        env.pop(key, None)
+    env.update(HOME=str(home), BASEDIR=str(root), GENESTACK_CONFIG=str(config),
+               GENESTACK_BASE_DIR=str(root), GENESTACK_OVERRIDES_DIR=str(config),
+               K8S_PROVIDER=provider, SKIP_PROMPTS="true", DEBIAN_FRONTEND="noninteractive",
+               ANSIBLE_INVENTORY=str(config / "inventory"))
+    env["PATH"] = str(home / ".venvs/genestack/bin") + os.pathsep + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    return env
+
+
+def install_kubectl(directory: Path, version: str) -> None:
+    if not re.fullmatch(r"v1\.[0-9]+\.[0-9]+", version):
+        raise RuntimeError("Invalid kubectl release version")
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine())
+    if arch is None:
+        raise RuntimeError("Unsupported deployer architecture")
+    url = f"https://dl.k8s.io/release/{version}/bin/linux/{arch}/kubectl"
+    def fetch(address: str) -> bytes:
+        req = urllib.request.Request(address, headers={"User-Agent": "Genestack-Bootstrap/1.0"})
+        with urllib.request.urlopen(req, timeout=90) as response:
+            return response.read()
+    expected = fetch(url + ".sha256").decode().strip()
+    data = fetch(url)
+    if not re.fullmatch(r"[a-f0-9]{64}", expected) or hashlib.sha256(data).hexdigest() != expected:
+        raise RuntimeError("kubectl checksum verification failed")
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=directory, delete=False) as temporary:
+        name = Path(temporary.name)
+        temporary.write(data)
+        os.fchmod(temporary.fileno(), 0o755)
+    try:
+        os.replace(name, directory / "kubectl")
+    finally:
+        name.unlink(missing_ok=True)
+
+
+def prepare(root: Path, config: Path, provider: str, tools: Path) -> None:
+    if os.geteuid() != 0:
+        raise RuntimeError("Deploy-host preparation requires root on the deployer")
+    if provider == "auto":
+        file = config / "provider"
+        provider = file.read_text().strip() if file.is_file() else ""
+        provider = provider or "talos"
+    home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
+    env = execution_environment(home, root, config, provider)
+    def run(argv: list[str]) -> None:
+        subprocess.run(argv, cwd=root, env=env, check=True)
+    if shutil.which("apt-get"):
+        run(["apt-get", "update", "-qq"])
+        run(["apt-get", "install", "-y", "python3-pip", "python3-venv", "python3-dev", "build-essential", "jq", "curl", "wget", "git"])
+    elif shutil.which("dnf"):
+        run(["dnf", "install", "-y", "python3-pip", "python3-devel", "gcc", "gcc-c++", "make", "jq", "curl", "wget", "git"])
+    else:
+        raise RuntimeError("Automatic bootstrap supports apt or dnf Linux deployers")
+    initialize_layout(root, config, provider)
+    # Use upstream tool installers, not its bootstrap's hard-coded config paths
+    # or its blanket environment dump (which can include operator secrets).
+    run(["bash", "-ec", 'source scripts/lib/functions.sh; ensureYq; ensureHelm; ensureCmctl'])
+    venv = home / ".venvs/genestack"
+    run(["python3", "-m", "venv", str(venv)])
+    run([str(venv / "bin/python"), "-m", "pip", "install", "--upgrade", "pip"])
+    run([str(venv / "bin/python"), "-m", "pip", "install", "-r", str(root / "requirements.txt")])
+    run([str(venv / "bin/ansible-playbook"), str(root / "scripts/get-ansible-collection-requirements.yml"),
+         "-e", "collections_file=" + str(root / "ansible-collection-requirements.yml"),
+         "-e", "user_collections_file=" + str(root / "user-collection-requirements.yml")])
+    tools.mkdir(parents=True, exist_ok=True)
+    service_path = str(tools) + os.pathsep + "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    for tool in ("ansible", "ansible-playbook", "ansible-galaxy"):
+        if not shutil.which(tool, path=service_path):
+            target = tools / tool
+            if target.exists() or target.is_symlink():
+                raise RuntimeError(f"Existing tool is not executable: {tool}")
+            target.symlink_to(venv / "bin" / tool)
+    if not shutil.which("kubectl", path=service_path):
+        install_kubectl(tools, KUBECTL_VERSION)
+    env["PATH"] = service_path
+    for argv in (["ansible-playbook", "--version"], ["kubectl", "version", "--client=true"], ["helm", "version", "--short"]):
+        run(list(argv))
+    print("[prepare] Isolated cloud configuration and deployment tools verified", flush=True)
+
+
+if __name__ == "__main__":
+    prepare(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]))
