@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.2
+
+Consistent Talos installation configuration for mixed-disk fleets.
+
+- Accept exact per-machine WWID selectors only when every configured machine has a unique target; incomplete maps and a conflicting global disk are rejected before saving.
+- Selector-based templates match no disk until each node's exact selector is applied. The generated installation document carries the pinned installer image explicitly.
+- Generate the current Talos control-plane scheduling document instead of conflicting legacy fields.
+- Align fresh boot images, installer images and the generated configuration contract with the pinned Talos 1.14.2 client. Existing explicit image configuration is preserved.
+- These configuration changes do not start an installation or authorize disk erasure.
+
 ## 2026.10.27.1
 
 Measured RAID inventory for first-cloud setup.

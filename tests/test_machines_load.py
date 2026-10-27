@@ -109,7 +109,7 @@ def test_machines_tab_does_not_run_the_overview_poll(client):
     assert "Boot the Talos ISO on each machine yourself." in nxt.text
     assert "This button does not boot it." in nxt.text
     assert "The boot image default is" in nxt.text
-    assert "v1.13.9" in nxt.text
+    assert "v1.14.2" in nxt.text
     assert "The install disk defaults to /dev/sda." in nxt.text
     assert "When the machine is waiting for a config, use Talos is already installed." in nxt.text
     assert "A machine already running Talos is replaced only after that machine is named." in nxt.text
