@@ -10,6 +10,7 @@ Native app setup and connection stability, validated during private-cloud accept
 
 - New deployer installations include measured hardware discovery and the read-only capacity-planning API used by the Apple apps.
 - Instance startup configuration is validated and delivered through config drives.
+- Factory ISO extraction recognizes extensionless ISO9660 kernel names and includes its ISO reader in source installs and the compiled program, with an executable ISO extraction regression.
 - Event streams release their database connection and run synchronous authorization outside the main event loop.
 - Empty environments ask for setup instead of raising a false cluster-failure alert. Previously connected clouds retain failure alerting.
 - Failed parallel service installation returns its failed stage without hanging while queued work is canceled.

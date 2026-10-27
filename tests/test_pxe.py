@@ -171,17 +171,20 @@ def test_fetch_talos_assets_unusable_image(tmp_path, monkeypatch):
 
 def test_fetch_talos_assets_extracts_iso(tmp_path, monkeypatch):
     """Factory ISO layout (/boot/vmlinuz + /boot/initramfs.xz) via pycdlib."""
-    pycdlib = pytest.importorskip("pycdlib")
+    import pycdlib
+
     iso = pycdlib.PyCdlib()
     iso.new(interchange_level=3, joliet=True)
     iso.add_directory(iso_path="/BOOT", joliet_path="/boot")
-    iso.add_file(
+    iso.add_fp(
         io.BytesIO(b"iso-kernel"),
+        len(b"iso-kernel"),
         iso_path="/BOOT/VMLINUZ.;1",
         joliet_path="/boot/vmlinuz",
     )
-    iso.add_file(
+    iso.add_fp(
         io.BytesIO(b"iso-initramfs"),
+        len(b"iso-initramfs"),
         iso_path="/BOOT/INITRAMFS.XZ;1",
         joliet_path="/boot/initramfs.xz",
     )
@@ -191,6 +194,7 @@ def test_fetch_talos_assets_extracts_iso(tmp_path, monkeypatch):
     monkeypatch.setattr(pxe, "download_factory_image", _fake_download(buf.getvalue()))
     result = pxe.fetch_talos_assets("https://factory.example/talos.iso", tmp_path)
     assert (tmp_path / "assets" / "vmlinuz").read_bytes() == b"iso-kernel"
+    assert (tmp_path / "assets" / "initramfs.xz").read_bytes() == b"iso-initramfs"
     assert result["changed"] is True
 
 

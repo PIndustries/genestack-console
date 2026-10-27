@@ -24,6 +24,7 @@ python3 -m nuitka \
   --output-dir="$OUT_DIR" \
   --output-filename="$NAME" \
   --include-package=app \
+  --include-package=pycdlib \
   --include-package=uvicorn \
   --include-package=fastapi \
   --include-package=starlette \
