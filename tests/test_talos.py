@@ -308,7 +308,9 @@ def test_dual_nic_uses_private_cluster_ip_and_public_apply(tmp_path):
     etcd = etcd_patch_yaml(doc)
     assert "advertisedSubnets" in etcd
     assert "10.0.0.0/8" in etcd
-    assert "allowSchedulingOnControlPlanes: true" in etcd
+    assert "allowSchedulingOnControlPlanes" not in etcd
+    assert "KubeNodeConfig" in etcd
+    assert "$patch: delete" in etcd
     fw = firewall_yaml(doc)
     assert fw.lstrip().startswith("---")
     assert "NetworkDefaultActionConfig" in fw
@@ -325,7 +327,9 @@ def test_control_plane_schedule_patch_targets_control_planes_only():
     assert argv[1:3] == ["patch", "machineconfig"]
     assert "10.0.0.11" in argv
     patch = argv[-1]
-    assert "allowSchedulingOnControlPlanes: true" in patch
+    assert "allowSchedulingOnControlPlanes" not in patch
+    assert "KubeNodeConfig" in patch
+    assert "$patch: delete" in patch
     assert "etcd" not in patch
 
 
@@ -1377,7 +1381,7 @@ def test_install_check_names_the_image_and_the_kubeconfig(
     assert first.status_code == 200, first.text
     body = first.json()
     assert body["client_pin"] == "v1.14.2"
-    assert body["boot_image"] == "v1.13.9"
+    assert body["boot_image"] == "v1.14.2"
     assert body["extensions_present"] is True
     assert body["kubeconfig_readable"] is False
     assert body["talosconfig_saved"] is False

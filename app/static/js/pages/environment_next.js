@@ -160,7 +160,7 @@ function serverIp(server) {
 
 function bootImage(model) {
   const image = model && model.facts && model.facts.boot_image;
-  return image ? String(image) : "v1.13.9";
+  return image ? String(image) : "v1.14.2";
 }
 
 function outsideCluster(model) {

@@ -250,6 +250,7 @@ KNOWN_TALOS_KEYS = frozenset(
     {
         "cluster_name",
         "install_disk",
+        "install_disk_selectors",
         "image_url",
         "install_image",
         "efi_bootloader_path",
@@ -596,8 +597,15 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
             for key in talos
             if key not in KNOWN_TALOS_KEYS
         )
+        if "install_disk_selectors" in talos:
+            from app.services.install_disks import install_disk_selectors
+
+            try:
+                install_disk_selectors(talos, data.get("servers") or {})
+            except ValueError as exc:
+                raise ConfigValidationError(str(exc)) from exc
         for key in KNOWN_TALOS_KEYS:
-            if talos.get(key) is None:
+            if talos.get(key) is None or key == "install_disk_selectors":
                 continue
             if key in TALOS_LIST_KEYS:
                 if not isinstance(talos[key], list):

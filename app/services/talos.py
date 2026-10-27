@@ -67,7 +67,7 @@ FACTORY_IMAGE_EXTENSIONS = ("siderolabs/iscsi-tools", "siderolabs/util-linux-too
 
 # Image Factory schematic: official iscsi-tools + util-linux-tools (Longhorn).
 # metal-amd64.qcow2 is what OVH BYOI expects (not the raw.xz installer).
-DEFAULT_TALOS_VERSION = "v1.13.9"
+DEFAULT_TALOS_VERSION = "v1.14.2"
 DEFAULT_FACTORY_SCHEMATIC = (
     "613e1592b2da41ae5e265e8789429f22e121aab91cb4deb6bc3c0b6262961245"
 )
@@ -683,14 +683,19 @@ def etcd_patch_yaml(doc: dict[str, Any]) -> str:
     cidrs = cluster_cidrs_from_doc(doc)
     patch = {
         "cluster": {
-            "allowSchedulingOnControlPlanes": True,
             "etcd": {
                 "advertisedSubnets": cidrs,
                 "listenSubnets": cidrs,
             },
         },
     }
-    return yaml.safe_dump(patch, sort_keys=False)
+    # Talos 1.14 moves this setting into KubeNodeConfig. A legacy cluster
+    # setting beside the generated document fails Talos's own validation.
+    scheduling = {
+        "apiVersion": "v1alpha1", "kind": "KubeNodeConfig",
+        "taints": {"node-role.kubernetes.io/control-plane": {"$patch": "delete"}},
+    }
+    return yaml.safe_dump_all([patch, scheduling], sort_keys=False)
 
 
 def control_plane_schedule_targets(doc: dict[str, Any]) -> list[tuple[str, str]]:
@@ -712,7 +717,10 @@ def control_plane_schedule_targets(doc: dict[str, Any]) -> list[tuple[str, str]]
 
 def control_plane_schedule_patch_argv(talosconfig: str, node_ip: str) -> list[str]:
     """Live patch. It does not resend the etcd subnet block."""
-    patch = "cluster:\n  allowSchedulingOnControlPlanes: true\n"
+    patch = yaml.safe_dump({
+        "apiVersion": "v1alpha1", "kind": "KubeNodeConfig",
+        "taints": {"node-role.kubernetes.io/control-plane": {"$patch": "delete"}},
+    }, sort_keys=False)
     return [
         talosctl_command(),
         "patch",
@@ -898,16 +906,25 @@ def build_talos_plan(
     if not _CLUSTER_NAME_RE.match(cluster_name):
         raise ConfigValidationError("talos.cluster_name is invalid")
 
+    from app.services.install_disks import install_disk_selectors
+
+    try:
+        selectors = install_disk_selectors(talos_cfg, _doc_servers(doc))
+    except ValueError as exc:
+        raise ConfigValidationError(str(exc)) from exc
     install_disk = talos_cfg.get("install_disk")
     if install_disk is None:
         install_disk = DEFAULT_INSTALL_DISK
     install_disk = str(install_disk).strip()
-    if not install_disk:
+    if not install_disk and selectors is None:
         raise ConfigValidationError(
             "talos.install_disk must not be empty "
             f"(omit it to use the default {DEFAULT_INSTALL_DISK})"
         )
-    if ".." in install_disk or not _DISK_RE.match(install_disk):
+    if selectors is not None:
+        # The shared template has no device fallback; each apply requires its exact selector.
+        install_disk = ""
+    elif ".." in install_disk or not _DISK_RE.match(install_disk):
         raise ConfigValidationError("talos.install_disk is invalid")
 
     control_planes: list[dict[str, str]] = []
@@ -974,10 +991,18 @@ def build_talos_plan(
     # talosctl v1.13+ only accepts --nodes/--insecure/--talosconfig AFTER the
     # subcommand (flags before the verb are treated as unknown commands).
     ctl = talosctl_command()
+    network_patch = network_patch_yaml(doc)
+    network_patch += yaml.safe_dump_all([{
+        "apiVersion": "v1alpha1", "kind": "UnattendedInstallConfig",
+        "installer": {"image": install_image},
+        "provisioning": {"diskSelector": {
+            "match": "false" if selectors is not None else f'disk.dev_path == "{install_disk}"'
+        }},
+    }], sort_keys=False, explicit_start=True)
     commands: list[dict[str, Any]] = [
         {
             "phase": "write-network-patch",
-            "argv": _write_file_argv(NETWORK_PATCH_FILENAME, network_patch_yaml(doc)),
+            "argv": _write_file_argv(NETWORK_PATCH_FILENAME, network_patch),
         },
         {
             "phase": "write-etcd-patch",
@@ -995,6 +1020,8 @@ def build_talos_plan(
                 install_disk,
                 "--install-image",
                 install_image,
+                "--talos-version",
+                DEFAULT_TALOS_VERSION,
                 "--config-patch",
                 f"@{NETWORK_PATCH_FILENAME}",
                 "--config-patch-control-plane",
@@ -1063,6 +1090,16 @@ def build_talos_plan(
         entry = servers_doc.get(node["hostname"])
         entry = entry if isinstance(entry, dict) else {}
         patch = node_vlan_patch_yaml(node["hostname"], entry, doc)
+        if selectors is not None:
+            documents = list(yaml.safe_load_all(patch)) if patch else []
+            documents.append({
+                "apiVersion": "v1alpha1", "kind": "UnattendedInstallConfig",
+                "installer": {"image": install_image},
+                "provisioning": {"diskSelector": {
+                    "match": f'disk.wwid == "{selectors[node["hostname"]]}"'
+                }},
+            })
+            patch = yaml.safe_dump_all(documents, sort_keys=False)
         argv = [
             ctl,
             "apply-config",
@@ -1148,6 +1185,7 @@ def build_talos_plan(
     return {
         "cluster_name": cluster_name,
         "install_disk": install_disk,
+        "install_disk_selectors": selectors,
         "workdir": workdir,
         "kubeconfig": kubeconfig,
         "control_planes": control_planes,

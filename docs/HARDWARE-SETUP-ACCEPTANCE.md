@@ -43,3 +43,27 @@ receipts, provision machines or turn simulated results into deployment proof.
 Keep private addresses, credentials and site-specific rebuild plans out of this
 public repository. Obtain review of the exact target/data-disposition plan before
 any destructive rebuild.
+
+## Tested setup increments
+
+A clean published deployer installation and native iPhone account/link/empty-cloud
+creation have passed normal authentication and independent isolation checks.
+Real deployer preparation passed, including a deliberate tunnel interruption and
+recovery of the same job. Published 2026.10.27.1 updated the test deployer without
+customer action; native registration and discovery then passed independent
+physical and logical disk checks. This is software onboarding and read-only
+hardware acceptance, not a completed cluster reinstall.
+
+For a mixed-disk installation, `talos.install_disk_selectors` maps every configured
+hostname to its exact OS-reconciled WWID. Wildcards, missing/extra machines,
+duplicate identities and a conflicting global `install_disk` are rejected. The
+shared template matches no disk; each per-node patch sets its exact selector and
+installer image in `UnattendedInstallConfig`. This is separate from obtaining
+fresh OS inventory and approving existing-data disposition.
+
+The pinned Talos tool generated and validated control-plane and worker configs
+offline. The initial control-plane config failed validation because a legacy
+scheduling field conflicted with `KubeNodeConfig`; the replacement patch removes
+only the control-plane scheduling taint. Fresh boot/installer and config versions
+are aligned. Real hardware boot, permanent VM storage and full app-driven
+OpenStack/LAMP acceptance remain required.
