@@ -85,3 +85,23 @@ read failure in the first run led to bounded read retries; writes are not blindl
 retried. These are component proofs on the existing cluster. They do not certify
 fresh physical installation, automatic storage sizing, native deployment approval,
 or the complete app-driven LAMP journey.
+
+## Actual RAM-image boot evidence (2026-10-27)
+
+Booting the previous Alpine image on a disposable blank machine exposed a
+missing-base-package failure: DHCP and overlay retrieval worked, but the image
+entered a recovery shell because `/sbin/init` was absent. This had not been
+exercised by running the inspection script inside an installed Ubuntu VM.
+
+The corrected payload uses one SHA256-pinned standard ISO, with its signed
+package repository served over the deployer's PXE HTTP service. Its overlay
+starts modloop and hardware discovery, and is deterministic across retries.
+An actual BIOS DHCP/iPXE test retrieved the profile, kernel, initramfs and local
+packages, reported both fixture disks, preserved all disk bytes and powered off.
+Two further real network boots verified missing-target rejection (zero writes)
+and selected-disk front/end metadata clearing, with the middle canary and the
+unselected disk preserved. The full module image loaded before hardware probing.
+
+These are real network-boot and disk-I/O component checks using explicitly owned
+64 MiB virtual disks. They do not certify native app/BMC submission, UEFI boot,
+Talos/OpenStack bootstrap or the final physical DFW deployment.

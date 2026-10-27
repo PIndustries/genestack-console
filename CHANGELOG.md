@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.7
+
+Make the first RAM inspection boot self-contained.
+
+- Supply Alpine's signed base packages as well as its kernel, initramfs and modules. Previously a blank machine could reach a recovery shell before sending its hardware report because no package repository was provided.
+- Prepare all boot files and packages from the SHA256-pinned Alpine 3.24.3 standard ISO, serve them from the deployer, and start the full hardware-driver services before inspection. The boot node needs no external package repository.
+- Verify cached assets and publish a complete versioned payload, preserving the previous payload if preparation fails. Make the inspection overlay deterministic across retries.
+- Actual disposable-machine DHCP/iPXE tests passed read-only inspection, rejection of a missing wipe target without any disk writes, and the exact selected front/end metadata wipe while retaining the middle canary and unselected disk. No physical DFW node was modified. Native app-driven inspection remains a separate acceptance step.
+
 ## 2026.10.27.6
 
 Prepare retained block storage for a fresh cloud installation.

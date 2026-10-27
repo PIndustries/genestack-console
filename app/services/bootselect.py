@@ -12,6 +12,7 @@ port. Talos is served only after that report is accepted.
 
 from __future__ import annotations
 
+import gzip
 import io
 import re
 import tarfile
@@ -21,13 +22,14 @@ from typing import Any
 NEXT_BOOTS = ("commission", "talos", "ubuntu", "disk")
 STOP_AFTER = ("", "commission", "talos")
 
-# Pinned Alpine netboot. The kernel, initramfs, and modloop are fetched once
-# into the PXE asset dir. The boot itself does not need the Alpine package repo.
-ALPINE_VERSION = "3.20"
-ALPINE_NETBOOT = (
-    "https://dl-cdn.alpinelinux.org/alpine/v"
-    f"{ALPINE_VERSION}/releases/x86_64/netboot"
+# Keep kernel, initramfs, modules and the signed package repository from one ISO.
+# The boot node fetches all packages from its deployer; it needs no Internet repo.
+ALPINE_VERSION = "3.24.3"
+ALPINE_ISO_URL = (
+    "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/"
+    "alpine-standard-3.24.3-x86_64.iso"
 )
+ALPINE_ISO_SHA256 = "1629ffe7308d4f3d3eeeed3a97d09ad62293f6d37ef3e483a7306077fdac12be"
 COMMISSION_FILES = ("vmlinuz-lts", "initramfs-lts", "modloop-lts")
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
@@ -240,8 +242,8 @@ def render_commission_ipxe(assets_base_url: str, token: str, wipe_wwids: Any = N
     report = f"{base}/commission/{token}"
     return f"""#!ipxe
 # profile: commission
-kernel {base}/assets/commission/vmlinuz-lts modloop={base}/assets/commission/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=1 gsc_allow_wwids={allowed} gsc_token={token} gsc_report={report} console=tty0 console=ttyS0,115200
-initrd {base}/assets/commission/initramfs-lts
+kernel {base}/assets/commission/{ALPINE_VERSION}/vmlinuz-lts ip=dhcp alpine_repo={base}/assets/commission/{ALPINE_VERSION}/apks modloop={base}/assets/commission/{ALPINE_VERSION}/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=1 gsc_allow_wwids={allowed} gsc_token={token} gsc_report={report} console=tty0 console=ttyS0,115200
+initrd {base}/assets/commission/{ALPINE_VERSION}/initramfs-lts
 boot
 """
 
@@ -252,8 +254,8 @@ def render_inspection_ipxe(assets_base_url: str, token: str) -> str:
     base = assets_base_url.rstrip("/")
     return f"""#!ipxe
 # profile: inspect
-kernel {base}/assets/commission/vmlinuz-lts modloop={base}/assets/commission/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=0 gsc_token={token} gsc_report={base}/commission/{token} console=tty0 console=ttyS0,115200
-initrd {base}/assets/commission/initramfs-lts
+kernel {base}/assets/commission/{ALPINE_VERSION}/vmlinuz-lts ip=dhcp alpine_repo={base}/assets/commission/{ALPINE_VERSION}/apks modloop={base}/assets/commission/{ALPINE_VERSION}/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=0 gsc_token={token} gsc_report={base}/commission/{token} console=tty0 console=ttyS0,115200
+initrd {base}/assets/commission/{ALPINE_VERSION}/initramfs-lts
 boot
 """
 
@@ -314,18 +316,26 @@ def build_apkovl() -> bytes:
     """Alpine apkovl that runs the commission script from local.d."""
     payload = COMMISSION_SCRIPT.encode()
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+    with tarfile.open(fileobj=buf, mode="w") as tar:
         info = tarfile.TarInfo("etc/local.d/commission.start")
         info.size = len(payload)
         info.mode = 0o755
         info.mtime = 0
         tar.addfile(info, io.BytesIO(payload))
-        link = tarfile.TarInfo("etc/runlevels/default/local")
-        link.type = tarfile.SYMTYPE
-        link.linkname = "/etc/init.d/local"
-        link.mtime = 0
-        tar.addfile(link)
-    return buf.getvalue()
+        # An apkovl means Alpine does not create its normal sysinit links.
+        # Load the ISO's full module set before PCI hardware discovery/local.
+        services = [("sysinit", name) for name in ("devfs", "dmesg", "mdev", "hwdrivers", "modloop")]
+        services += [("default", "local")]
+        for runlevel, name in services:
+            link = tarfile.TarInfo(f"etc/runlevels/{runlevel}/{name}")
+            link.type = tarfile.SYMTYPE
+            link.linkname = f"/etc/init.d/{name}"
+            link.mtime = 0
+            tar.addfile(link)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0, compresslevel=9) as stream:
+        stream.write(buf.getvalue())
+    return compressed.getvalue()
 
 
 def _macs_in_report(body: dict[str, Any]) -> set[str]:
