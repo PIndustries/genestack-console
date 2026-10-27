@@ -8,6 +8,14 @@ from typing import Any
 from app.services.bootselect import normalize_mac
 
 
+def candidate_macs(node) -> list[str]:
+    """An explicit provisioning NIC wins; otherwise inspect advertised ports."""
+    selected = normalize_mac(node.pxe_mac)
+    advertised = sorted({normalize_mac(n.get("mac")) for n in (node.hardware_report or {}).get("nics", [])
+                         if isinstance(n, dict) and normalize_mac(n.get("mac"))})
+    return [selected] if selected and selected in advertised else (advertised if not selected else [])
+
+
 def validate_report(body: Any, node: Any) -> tuple[bool, str]:
     if not isinstance(body, dict) or body.get("wipe") is not False:
         return False, "inspection must report that no disk wipe was performed"
@@ -55,7 +63,19 @@ def ingest(db, node, body):
         return {"ok": False, "error": error, "node_id": node.id}
     stored = {k: v for k, v in body.items() if k != "token"}
     stored.update(source="ram-inspection", observed_at=datetime.now(UTC).isoformat(), hardware_modified=False)
+    stored["boot_mac"] = normalize_mac(node.pxe_mac)
     node.os_inventory_report = stored
+    if not node.expected_ip:
+        from app.services.baremetal import _lease_ip
+
+        lease = _lease_ip(node.pxe_mac)
+        if lease:
+            import ipaddress
+
+            try:
+                node.expected_ip = str(ipaddress.ip_address(lease))
+            except ValueError:
+                pass
     node.next_boot = "disk"
     node.boot_stage = "inspected"
     node.commission_token = None
@@ -71,10 +91,8 @@ def begin(db, env, node, *, dry_run: bool, log, settings=None, boot_now=False):
     from app.services import baremetal
 
     report = node.hardware_report or {}
-    mac = normalize_mac(node.pxe_mac)
-    advertised = {normalize_mac(n.get("mac", "")) for n in report.get("nics", []) if isinstance(n, dict)}
-    if not mac or mac not in advertised or str(report.get("serial") or "").lower() in ("", "unknown", "none", "null"):
-        return {"ok": False, "returncode": 2, "error": "Discover hardware and select an advertised provisioning MAC before inspection"}
+    if not candidate_macs(node) or str(report.get("serial") or "").lower() in ("", "unknown", "none", "null"):
+        return {"ok": False, "returncode": 2, "error": "Discover hardware with a real machine serial and advertised network interfaces before inspection"}
     if dry_run:
         return {"ok": True, "dry_run": True, "node_id": node.id, "message": "Would boot RAM inventory without disk writes or installation"}
     node.next_boot = "inspect"

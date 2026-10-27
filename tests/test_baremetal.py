@@ -173,7 +173,7 @@ def test_register_dry_run_logs_without_persisting(client, admin_headers, monkeyp
     assert _node_row(env["id"], name) is None
 
 
-def test_register_encrypts_password_and_autofills_mac(
+def test_register_encrypts_password_without_guessing_among_multiple_nics(
     client, admin_headers, monkeypatch
 ):
     from app.services import redfish
@@ -201,9 +201,8 @@ def test_register_encrypts_password_and_autofills_mac(
         "fernet:"
     ), "password must be encrypted at rest"
     assert decrypt_secret(row["bmc_password"]) == "calvin"
-    # First probed MAC wins
-    assert row["pxe_mac"] == "aa:bb:cc:dd:ee:01"
-    assert "autofilled pxe_mac" in job["log_text"]
+    assert row["pxe_mac"] is None
+    assert "RAM inspection will identify the boot NIC" in job["log_text"]
 
 
 def test_register_explicit_mac_skips_probe(client, admin_headers, monkeypatch):
