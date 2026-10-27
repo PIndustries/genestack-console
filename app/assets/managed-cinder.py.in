@@ -38,6 +38,8 @@ def helm_values(owner, host, export):
         },
         'pod': {
             'replicas': {'volume': 1, 'backup': 0},
+            # This is a single Cinder writer, without active/active coordination.
+            'lifecycle': {'upgrades': {'deployments': {'pod_replacement_strategy': 'Recreate'}}},
             'security_context': {'cinder_volume': {'pod': {'fsGroup': 42424}}},
             'annotations': {'cinder_volume': {OWNER: owner}},
         },

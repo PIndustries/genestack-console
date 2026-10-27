@@ -234,7 +234,9 @@ sizing. The infrastructure stage must first install Longhorn and its
 `general-multi-attach` StorageClass. Preparation creates a retained PVC and an
 export keeper, resolves the actual Longhorn ShareManager Service, and writes an
 owned Cinder Helm override. The `genestack` volume type selects this backend.
-Retries retain the claim and data. Changing its size or replacing an existing
+Retries retain the claim and data. Cinder uses a single volume writer and
+Recreate deployment updates, which briefly interrupt Cinder services during an
+upgrade rather than running overlapping uncoordinated volume workers. Changing its size or replacing an existing
 unmanaged Cinder worker stops for review. Disabling this option does not delete
 claims or migrate existing volumes; those require a separate migration plan.
 Ceph and custom Cinder overrides cannot be combined with this managed setup.
