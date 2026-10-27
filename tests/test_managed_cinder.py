@@ -122,6 +122,7 @@ def test_real_runtime_retains_claim_on_retry_and_uses_owned_service_dns(tmp_path
         values["pod"]["lifecycle"]["upgrades"]["deployments"]["pod_replacement_strategy"]
         == "Recreate"
     )
+    assert values["annotations"]["pod"]["cinder_volume"][KEY] == OWNER
     assert values["manifests"]["deployment_volume"] is True
     assert values["manifests"]["job_bootstrap"] is True
     execute(tmp_path, monkeypatch, cluster)

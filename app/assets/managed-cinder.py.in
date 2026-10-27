@@ -41,8 +41,8 @@ def helm_values(owner, host, export):
             # This is a single Cinder writer, without active/active coordination.
             'lifecycle': {'upgrades': {'deployments': {'pod_replacement_strategy': 'Recreate'}}},
             'security_context': {'cinder_volume': {'pod': {'fsGroup': 42424}}},
-            'annotations': {'cinder_volume': {OWNER: owner}},
         },
+        'annotations': {'pod': {'cinder_volume': {OWNER: owner}}},
         'labels': {'volume': {'node_selector_key': 'openstack-compute-node', 'node_selector_value': 'enabled'}},
         'bootstrap': {'volume_types': {'genestack': {'volume_backend_name': 'GENESTACK_LONGHORN'}}},
         'manifests': {'deployment_volume': True, 'statefulset_volume': False, 'job_bootstrap': True, 'job_storage_init': False, 'job_backup_storage_init': False, 'deployment_backup': False},
@@ -67,7 +67,7 @@ def run(payload):
     if target.exists():
         try:
             previous = json.loads(target.read_text())
-            if previous['pod']['annotations']['cinder_volume'][OWNER] != owner:
+            if previous['annotations']['pod']['cinder_volume'][OWNER] != owner:
                 raise ValueError('foreign owner')
         except (ValueError, KeyError, TypeError) as exc:
             raise ValueError('Existing managed storage override requires review') from exc
