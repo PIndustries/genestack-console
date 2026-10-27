@@ -216,3 +216,28 @@ Run from source when you are changing the console and testing that change. A pro
 `baremetal.node.inspect` prepares a RAM inventory profile for one registered machine. Hardware discovery must first provide its serial and advertised network interfaces. If a provisioning MAC is not yet selected, bound read-only profiles are offered only to those advertised interfaces. The actual PXE fetch identifies the boot NIC; a validated report can then save its DHCP lease as the provisioning address. An explicit NIC override is preserved. Preparation alone does not reboot. Passing `boot_now: true` explicitly restarts that machine, waits for its inventory report, and leaves it powered off. This interrupts an existing OS, so review the named target before starting. The RAM inventory does not mount or write disks. It does not start commissioning or Talos installation.
 
 The report binds the machine serial and provisioning MAC, records disk WWIDs and NIC carrier state, and excludes remote/read-only disks from installation reconciliation. Capacity planning accepts this evidence for 24 hours. A fresh read-only report is separate from the reviewed destructive disk allowlist.
+
+## Managed Cinder storage (reviewed capacity)
+
+An opt-in `storage.longhorn_cinder` section prepares a Longhorn RWX export before
+Cinder is installed by `genestack.deploy`:
+
+```yaml
+storage:
+  longhorn_cinder:
+    enabled: true
+    capacity_gib: 64
+```
+
+The capacity is an explicit reviewed allocation, not automatic whole-cluster
+sizing. The infrastructure stage must first install Longhorn and its
+`general-multi-attach` StorageClass. Preparation creates a retained PVC and an
+export keeper, resolves the actual Longhorn ShareManager Service, and writes an
+owned Cinder Helm override. The `genestack` volume type selects this backend.
+Retries retain the claim and data. Changing its size or replacing an existing
+unmanaged Cinder worker stops for review. Disabling this option does not delete
+claims or migrate existing volumes; those require a separate migration plan.
+Ceph and custom Cinder overrides cannot be combined with this managed setup.
+
+This does not yet complete the native installation-review flow or automatic
+allocation of every available data disk. Those remain acceptance requirements.

@@ -1478,3 +1478,28 @@ def test_place_control_plane_nodes_labels_and_clears_the_taint(monkeypatch, tmp_
     deploy_service._place_control_plane_nodes(empty, notes.append)
     assert calls == []
     assert any("no kubeconfig" in line for line in notes)
+
+
+def test_storage_prepare_failure_stops_before_cinder_install(
+    client, admin_headers, tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "etc-genestack"
+    config_dir.mkdir()
+    env = _create_env(client, admin_headers, genestack_config_dir=str(config_dir), dry_run=False)
+    doc = DOC.replace("  keystone: true", "  keystone: true\n  cinder: true")
+    doc += "\nstorage:\n  longhorn_cinder:\n    enabled: true\n    capacity_gib: 8\n"
+    _put_doc(client, admin_headers, env["id"], doc)
+    commands = []
+
+    def command(argv, **kwargs):
+        commands.append(argv)
+        return {"returncode": 1 if argv[0] == "python3" else 0, "dry_run": False}
+
+    monkeypatch.setattr(bridge, "run_command", command)
+    resp = _deploy_job(client, admin_headers, env["id"], params={"parallelism": 4})
+    assert resp.status_code == 201, resp.text
+    job = resp.json()
+    assert job["status"] == "failed", job
+    assert "Managed storage is not ready" in job["error"]
+    assert any(argv[0] == "python3" for argv in commands)
+    assert not any("bin/install-cinder.sh" in argv for argv in commands)
