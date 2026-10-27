@@ -165,3 +165,12 @@ from the pool, and preserves all other document sections. Version 0 creates the
 first configuration. Stale changed edits return 409; an identical network-only
 retry returns the current version. Invalid fields return 422. No network service
 is started by saving. Existing clients can omit these new fields unchanged.
+
+### Completed RAM inspection
+
+A successful `baremetal.node.inspect` job with `boot_now: true` explicitly
+returns and persists `dry_run: false` after the authenticated RAM report is
+accepted. A missing marker must never be treated as proof that a real reboot
+or inspection occurred. Native completion waits for this job's terminal result,
+then refreshes the hardware plan; an older verification badge is not completion
+of a newly requested inspection.

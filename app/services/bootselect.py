@@ -204,15 +204,15 @@ exit
 """
 
 
-def render_talos_ipxe(assets_base_url: str) -> str:
+def render_talos_ipxe(assets_base_url: str, assets_path: str = "assets") -> str:
     """Talos metal maintenance kernel. No machine config on the cmdline."""
     base = assets_base_url.rstrip("/")
     return f"""#!ipxe
 # profile: talos
 # Talos metal maintenance boot. The console pushes config over port 50000
 # only after a commission report has wiped the fixed disks.
-kernel {base}/assets/vmlinuz talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200
-initrd {base}/assets/initramfs.xz
+kernel {base}/{assets_path}/vmlinuz talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200
+initrd {base}/{assets_path}/initramfs.xz
 boot
 """
 
@@ -288,6 +288,7 @@ def render_profile_ipxe(
     hostname: str | None = None,
     wipe_wwids: Any = None,
     node_id: str | None = None,
+    talos_assets_path: str = "assets",
 ) -> str:
     choice = str(next_boot or "disk").strip().lower()
     if choice == "commission":
@@ -295,7 +296,7 @@ def render_profile_ipxe(
     elif choice == "inspect":
         script = render_inspection_ipxe(assets_base_url, token or "")
     elif choice == "talos":
-        script = render_talos_ipxe(assets_base_url)
+        script = render_talos_ipxe(assets_base_url, talos_assets_path)
     elif choice == "ubuntu":
         script = render_ubuntu_ipxe(assets_base_url, hostname)
     else:

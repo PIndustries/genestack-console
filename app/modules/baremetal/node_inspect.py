@@ -37,7 +37,7 @@ def run(self, handler, op, job, env, log, ctx, params, deadline, check_cancel,
         if node.boot_stage == "inspected" and node.os_inventory_report:
             self.write_audit(actor=job.created_by or "system", action="node.inspect", resource_type="baremetal_node",
                              resource_id=node.id, environment_id=env.id, details={"disk_writes": False, "rebooted": True}, success=True)
-            return {"ok": True, "node_id": node.id, "boot_stage": "inspected", "disk_writes": False}
+            return {"ok": True, "dry_run": False, "node_id": node.id, "boot_stage": "inspected", "disk_writes": False}
         if node.next_boot != "inspect" or node.boot_stage != "inspecting":
             return {"ok": False, "error": "Inspection was replaced or cancelled", "returncode": 2}
         time.sleep(2)
