@@ -176,6 +176,10 @@ In Guided setup, Servers can be BMC / Redfish or PXE. On Machines, record the ma
 
 Settings, then Config. Change what you need. Save. Each save is a version. Apply on this environment only when you are ready for the wipe. Deploy cluster asks you to confirm the wipe. It pushes the settings, network-boots Talos, then runs the Genestack pipeline: Kubernetes, then OpenStack. A server you did not select stays on its own disk. The log is Activity, then Jobs.
 
+Real commissioning requires a reviewed `wipe_disk_wwids` allowlist of exact OS-visible disk identifiers. A whole-cluster `genestack.greenfield` job takes an object keyed by every inventory hostname; `baremetal.node.provision` and `baremetal.node.next_boot` take the selected node's array. A complete fleet plan is checked before commissioning begins. Old callers without this plan stop before starting a wipe. Native guided plan submission remains a separate integration step.
+
+Commissioning clears the first and last 16 MiB on selected local writable disks; it is not a secure erase. A missing, ambiguous, mounted, read-only or remote target prevents all planned writes. Other disks, including attached remote volumes, are preserved. A reviewed wipe plan is separate from Talos's per-host installation target.
+
 Do not put the console's DHCP on a network other machines depend on.
 
 An ISO is rejected on this wipe path because an ISO does not wipe the disks. `baremetal.node.iso_boot` puts an ISO in the management-port virtual CD when the network card cannot PXE. That needs a management port. It is separate from booting a Talos ISO yourself and then choosing Talos is already installed.
@@ -206,3 +210,9 @@ Run from source when you are changing the console and testing that change. A pro
 | The Machines row and the management-port wall | [The console web page](ui.md) |
 | Every job, including deploy and the wipe | [Jobs](jobs.md) |
 | The screens | [The console web page](ui.md) |
+
+### Read disk identities before approving installation
+
+`baremetal.node.inspect` prepares a RAM inventory profile for one registered machine. Hardware discovery must first provide its serial and provisioning MAC. Preparation alone does not reboot. Passing `boot_now: true` explicitly restarts that machine, waits for its inventory report, and leaves it powered off. This interrupts an existing OS, so review the named target before starting. The RAM inventory does not mount or write disks. It does not start commissioning or Talos installation.
+
+The report binds the machine serial and provisioning MAC, records disk WWIDs and NIC carrier state, and excludes remote/read-only disks from installation reconciliation. Capacity planning accepts this evidence for 24 hours. A fresh read-only report is separate from the reviewed destructive disk allowlist.

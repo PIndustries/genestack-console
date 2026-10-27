@@ -48,6 +48,7 @@ CATALOG_ORDER = (
     "baremetal.node.register",
     "baremetal.nodes.list",
     "baremetal.hardware.discover",
+    "baremetal.node.inspect",
     "baremetal.node.power",
     "baremetal.node.pxe_boot",
     "baremetal.node.next_boot",

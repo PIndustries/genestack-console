@@ -14,7 +14,7 @@ OPERATION = {
     "name": "Greenfield redeploy (commission + Talos + OpenStack)",
     "description": (
         "DESTRUCTIVE. For each inventory server: PXE a RAM-disk commission "
-        "image that wipes fixed disks and reports hardware, then one-shot "
+        "image that clears reviewed disk metadata and reports hardware, then one-shot "
         "PXE the Talos image. Fresh maintenance means the Talos API is up, "
         "the node is not Kubernetes Ready, and Talos was served after this "
         "wipe. Then deploy OpenStack from hosts. boot=iso is rejected "
@@ -29,6 +29,7 @@ OPERATION = {
     "backend": "genestack",
     "params": [
         _p("dry_run", False, "Force a dry-run rehearsal", "boolean"),
+        _p("wipe_disk_wwids", False, "Reviewed exact disk WWIDs keyed by every inventory hostname; required for a real non-OVH rebuild", "object"),
         _p("skip_push", False, "Do not re-push the config document", "boolean"),
         _p(
             "boot",
@@ -123,6 +124,7 @@ def run(
         boot=boot,
         stop_after=stop_after,
         replace_hosts=params.get("replace_hosts") if isinstance(params, dict) else None,
+        wipe_disk_wwids=params.get("wipe_disk_wwids"),
     )
     self.write_audit(
         actor=job.created_by or "system",

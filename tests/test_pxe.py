@@ -336,7 +336,8 @@ def test_commission_profile_fetches_assets_without_the_network(tmp_path, monkeyp
                 "pxe_mac": "AA-BB-CC-DD-EE-01",
                 "expected_ip": "10.10.0.11",
                 "next_boot": "commission",
-                "token": "tok-1",
+                "token": "fixture-token-2026",
+                "wipe_wwids": ["naa.60000000000000000000000000000001"],
             }
         ],
         apply_runtime=False,
@@ -345,7 +346,7 @@ def test_commission_profile_fetches_assets_without_the_network(tmp_path, monkeyp
     assert set(seen) == {"vmlinuz-lts", "initramfs-lts", "modloop-lts"}
     script = (tmp_path / "pxe" / "mac" / "aa-bb-cc-dd-ee-01.ipxe").read_text()
     assert "gsc_wipe=1" in script
-    assert "gsc_token=tok-1" in script
+    assert "gsc_token=fixture-token-2026" in script
     assert "gsc_report=http://10.10.0.1:" in script
     apkovl = tmp_path / "pxe" / "assets" / "commission.apkovl.tar.gz"
     assert apkovl.is_file()

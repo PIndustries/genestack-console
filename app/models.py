@@ -700,8 +700,10 @@ class BaremetalNode(Base):
     boot_stage: Mapped[str] = mapped_column(String(32), default="new", nullable=False)
     commission_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     commission_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    commission_wipe_wwids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     # Non-destructive BMC inventory, separate from the destructive wipe report.
     hardware_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    os_inventory_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     boot_log: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     wiped_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

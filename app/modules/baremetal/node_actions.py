@@ -65,7 +65,7 @@ OPERATIONS = (
         "name": "Set Bare-Metal Next Boot",
         "description": (
             "Choose the next PXE image for one machine: commission (RAM-disk "
-            "probe and fixed-disk wipe), talos (only after a wipe report), "
+            "probe and reviewed-disk metadata clearing), talos (only after a wipe report), "
             "ubuntu (autoinstall of that machine, whole disk, no Talos), "
             "or disk (iPXE exits to the local disk). boot_now power-cycles "
             "into that image. The default for a machine that was not asked "
@@ -75,6 +75,7 @@ OPERATIONS = (
         "backend": "baremetal",
         "params": [
             _p("node_id", True, "BaremetalNode row UUID"),
+            _p("wipe_disk_wwids", False, "Exact OS-reconciled disk WWID allowlist; required for commission", "array"),
             _p(
                 "next_boot",
                 True,
@@ -117,8 +118,8 @@ OPERATIONS = (
         "id": "baremetal.node.provision",
         "name": "Provision Bare-Metal Node (zero-touch)",
         "description": (
-            "Commission, then Talos. The first PXE is a RAM disk that wipes "
-            "fixed disks and posts a hardware report. After that report, a "
+            "Commission, then Talos. The first PXE is a RAM disk that clears "
+            "reviewed local disk metadata and posts a hardware report. After that report, a "
             "second one-shot PXE serves Talos. Success is fresh maintenance: "
             "the Talos API is up, the node is not Kubernetes Ready, and Talos "
             "was served after this wipe. The node is then marked talos-ready "
@@ -132,6 +133,7 @@ OPERATIONS = (
         "backend": "baremetal",
         "params": [
             _p("node_id", True, "BaremetalNode row UUID"),
+            _p("wipe_disk_wwids", False, "Exact OS-reconciled disk WWID allowlist; required for a real provision", "array"),
             _p(
                 "roles",
                 False,
@@ -220,6 +222,7 @@ def run(
             node,
             target,
             boot_now=boot_now,
+            wipe_disk_wwids=params.get("wipe_disk_wwids"),
             dry_run=dry,
             log=log,
             settings=self.settings,
@@ -264,6 +267,7 @@ def run(
             env,
             node,
             roles=roles,
+            wipe_disk_wwids=params.get("wipe_disk_wwids"),
             actor=job.created_by or "system",
             dry_run=dry,
             log=log,

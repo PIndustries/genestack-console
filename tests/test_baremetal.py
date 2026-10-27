@@ -517,7 +517,7 @@ def test_provision_zero_touch_happy_path(client, admin_headers, monkeypatch):
         admin_headers,
         env["id"],
         "baremetal.node.provision",
-        {"node_id": node_id, "roles": ["compute"]},
+        {"node_id": node_id, "roles": ["compute"], "wipe_disk_wwids": ["naa.60000000000000000000000000000001"]},
     )
     assert job["status"] == "success", job
     assert "talos-ready" in job["log_text"]
@@ -575,6 +575,7 @@ def test_provision_timeout_marks_node_failed(client, admin_headers, monkeypatch)
             db.get(BaremetalNode, node_id),
             roles=[],
             actor="tester",
+            wipe_disk_wwids=["naa.60000000000000000000000000000001"],
             dry_run=False,
             log=logs.append,
             timeout_seconds=0,
@@ -612,6 +613,7 @@ def test_provision_stop_after_commission_does_not_serve_talos(
             db.get(BaremetalNode, node_id),
             roles=["compute"],
             actor="tester",
+            wipe_disk_wwids=["naa.60000000000000000000000000000001"],
             dry_run=False,
             log=lambda *_: None,
             timeout_seconds=5,
@@ -648,6 +650,7 @@ def test_provision_stop_after_talos_does_not_update_inventory(
             db.get(BaremetalNode, node_id),
             roles=["compute"],
             actor="tester",
+            wipe_disk_wwids=["naa.60000000000000000000000000000001"],
             dry_run=False,
             log=lambda *_: None,
             timeout_seconds=5,
