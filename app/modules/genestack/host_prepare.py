@@ -15,10 +15,8 @@ OPERATION = {
     "id": "genestack.host_prepare",
     "name": "Prepare Deploy Host",
     "description": (
-        "Take a fresh deploy host to 'ready for push + deploy': preflight "
-        "tool checks, clone the genestack repo (fetch-only when already "
-        "present unless update=true), then run bootstrap.sh to build the "
-        "/etc/genestack skeleton. Mirrors docs/genestack-getting-started.md."
+        "Install deployment tools and initialize this environment's configuration "
+        "on the deploy host. Existing source and cloud settings are preserved."
     ),
     "required_role": "admin",
     "backend": "genestack",
