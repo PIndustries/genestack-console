@@ -80,6 +80,20 @@ jobs:
           bare = tag[1:]
           if bare != version:
               raise SystemExit(f"{tag} does not match app/version.py {version}")
+          # Fail before compilation when required customer release notes are missing.
+          changelog = Path("CHANGELOG.md").read_text().splitlines()
+          notes = []
+          take = False
+          for line in changelog:
+              if line.startswith("## "):
+                  if take:
+                      break
+                  take = line[3:].strip() == version
+                  continue
+              if take:
+                  notes.append(line)
+          if not "\n".join(notes).strip():
+              raise SystemExit(f"CHANGELOG.md has no section for {version}")
           prerelease = "-" in bare
           out = Path(os.environ["GITHUB_OUTPUT"])
           with out.open("a") as fh:
