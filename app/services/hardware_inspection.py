@@ -136,3 +136,16 @@ def evidence(node: dict[str, Any], *, now: datetime):
         return body if valid else None
     except (TypeError, ValueError, KeyError):
         return None
+
+
+def disarm(db, node, token: str | None) -> bool:
+    """Revoke only this unfinished inspection; never overwrite a newer run/report."""
+    db.refresh(node)
+    if not token or node.commission_token != token or node.next_boot != "inspect" or node.boot_stage != "inspecting":
+        return False
+    node.next_boot = "disk"
+    node.boot_stage = "failed"
+    node.commission_token = None
+    db.add(node)
+    db.commit()
+    return True

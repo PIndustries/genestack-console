@@ -185,7 +185,7 @@ def prepare_os(run, *, immutable: bool | None = None) -> None:
     if immutable is None:
         immutable = Path("/run/ostree-booted").exists()
     if immutable:
-        missing = [name for name in ("git", "curl", "wget", "jq", "cc", "make")
+        missing = [name for name in ("git", "curl", "wget", "jq", "cc", "make", "dnsmasq")
                    if not shutil.which(name)]
         if importlib.util.find_spec("ensurepip") is None:
             missing.append("python3-venv")
@@ -195,9 +195,9 @@ def prepare_os(run, *, immutable: bool | None = None) -> None:
         return
     if shutil.which("apt-get"):
         run(["apt-get", "update", "-qq"])
-        run(["apt-get", "install", "-y", "python3-pip", "python3-venv", "python3-dev", "build-essential", "jq", "curl", "wget", "git"])
+        run(["apt-get", "install", "-y", "python3-pip", "python3-venv", "python3-dev", "build-essential", "jq", "curl", "wget", "git", "dnsmasq-base", "ipxe"])
     elif shutil.which("dnf"):
-        run(["dnf", "install", "-y", "python3-pip", "python3-devel", "gcc", "gcc-c++", "make", "jq", "curl", "wget", "git"])
+        run(["dnf", "install", "-y", "python3-pip", "python3-devel", "gcc", "gcc-c++", "make", "jq", "curl", "wget", "git", "dnsmasq", "ipxe-bootimgs"])
     else:
         raise RuntimeError("Automatic bootstrap supports apt or dnf Linux deployers")
 

@@ -256,7 +256,7 @@ def test_real_completed_inspection_is_explicitly_distinct_from_rehearsal(monkeyp
     from app.models import BaremetalNode
     from app.modules.baremetal import node_inspect
 
-    target = SimpleNamespace(id="fixture", environment_id="fixture-env", boot_stage="inspected", os_inventory_report={"source": "ram-inspection"})
+    target = SimpleNamespace(id="fixture", environment_id="fixture-env", boot_stage="inspected", commission_token=None, os_inventory_report={"source": "ram-inspection"})
     class Database:
         def get(self, model, identity):
             assert model is BaremetalNode and identity == "fixture"
@@ -274,3 +274,49 @@ def test_real_completed_inspection_is_explicitly_distinct_from_rehearsal(monkeyp
     assert result["ok"] is True
     assert result["dry_run"] is False, "Native callers must be able to prove this was a real inspection"
     assert result["disk_writes"] is False
+
+
+def test_failed_inspection_revokes_only_its_own_pending_token():
+    from types import SimpleNamespace
+
+    from app.services.hardware_inspection import disarm
+
+    class DB:
+        writes = 0
+        def refresh(self, node): pass
+        def add(self, node): self.writes += 1
+        def commit(self): pass
+    db = DB()
+    node = SimpleNamespace(commission_token='test-token', next_boot='inspect', boot_stage='inspecting')
+    assert not disarm(db, node, 'older-token')
+    assert db.writes == 0 and node.commission_token == 'test-token'
+    assert disarm(db, node, 'test-token')
+    assert node.commission_token is None and node.next_boot == 'disk' and node.boot_stage == 'failed'
+    node.commission_token = None
+    node.boot_stage = 'inspected'
+    assert not disarm(db, node, 'test-token')
+    assert node.boot_stage == 'inspected'
+
+
+def test_cancelled_inspection_disarms_report_token_and_allows_retry(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.modules.baremetal import node_inspect
+    from app.services.job_runner import JobCancelledError
+
+    node = SimpleNamespace(id="owned", environment_id="fixture", commission_token="owned-test-token",
+                           next_boot="inspect", boot_stage="inspecting", os_inventory_report=None)
+    class DB:
+        def get(self, model, identity): return node
+        def refresh(self, value): pass
+        def add(self, value): pass
+        def commit(self): pass
+    runner = SimpleNamespace(db=DB(), settings=None)
+    monkeypatch.setattr(node_inspect.hardware_inspection, "begin", lambda *a, **k: {"ok": True})
+    def cancel(): raise JobCancelledError("fixture cancelled")
+    with pytest.raises(JobCancelledError):
+        node_inspect.run(runner, None, None, SimpleNamespace(created_by="fixture"),
+            SimpleNamespace(id="fixture"), lambda _: None, None,
+            {"node_id": "owned", "boot_now": True}, None, cancel,
+            False, 900, None, None, None, None, None, None, None)
+    assert node.next_boot == "disk" and node.boot_stage == "failed" and node.commission_token is None

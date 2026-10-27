@@ -30,15 +30,19 @@ def run(self, handler, op, job, env, log, ctx, params, deadline, check_cancel,
     self.db.commit()
     if not result.get("ok") or dry or not boot_now:
         return result
-    stop = min(time.monotonic() + min(timeout, 900), deadline or float("inf"))
-    while time.monotonic() < stop:
-        check_cancel()
-        self.db.refresh(node)
-        if node.boot_stage == "inspected" and node.os_inventory_report:
-            self.write_audit(actor=job.created_by or "system", action="node.inspect", resource_type="baremetal_node",
-                             resource_id=node.id, environment_id=env.id, details={"disk_writes": False, "rebooted": True}, success=True)
-            return {"ok": True, "dry_run": False, "node_id": node.id, "boot_stage": "inspected", "disk_writes": False}
-        if node.next_boot != "inspect" or node.boot_stage != "inspecting":
-            return {"ok": False, "error": "Inspection was replaced or cancelled", "returncode": 2}
-        time.sleep(2)
-    return {"ok": False, "error": "RAM inventory report did not arrive; inspect the selected NIC and provisioning network", "returncode": 2}
+    token = node.commission_token
+    try:
+        stop = min(time.monotonic() + min(timeout, 900), deadline or float("inf"))
+        while time.monotonic() < stop:
+            check_cancel()
+            self.db.refresh(node)
+            if node.boot_stage == "inspected" and node.os_inventory_report:
+                self.write_audit(actor=job.created_by or "system", action="node.inspect", resource_type="baremetal_node",
+                                 resource_id=node.id, environment_id=env.id, details={"disk_writes": False, "rebooted": True}, success=True)
+                return {"ok": True, "dry_run": False, "node_id": node.id, "boot_stage": "inspected", "disk_writes": False}
+            if node.next_boot != "inspect" or node.boot_stage != "inspecting":
+                return {"ok": False, "error": "Inspection was replaced or cancelled", "returncode": 2}
+            time.sleep(2)
+        return {"ok": False, "error": "RAM inventory report did not arrive; inspect the selected NIC and provisioning network", "returncode": 2}
+    finally:
+        hardware_inspection.disarm(self.db, node, token)

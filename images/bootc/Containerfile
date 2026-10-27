@@ -70,6 +70,8 @@ RUN printf '%s\n' \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        dnsmasq-base \
+        ipxe \
         git \
         wget \
         jq \

@@ -224,7 +224,7 @@ def test_ensure_assets_and_config_happy_path(tmp_path, monkeypatch):
     }
     env = SimpleNamespace(name="bm-env")
     logs: list[str] = []
-    result = pxe.ensure_assets_and_config(env, doc, _settings(tmp_path), logs.append)
+    result = pxe.ensure_assets_and_config(env, doc, _settings(tmp_path), logs.append, apply_runtime=False)
     assert result["ok"] is True, result
     assert result["changed"] is True
     assert result["nodes"] == 1  # only source: baremetal servers are reserved
@@ -244,7 +244,7 @@ def test_ensure_assets_and_config_happy_path(tmp_path, monkeypatch):
         "download_factory_image",
         lambda *a, **k: pytest.fail("unexpected re-download"),  # pragma: no cover
     )
-    again = pxe.ensure_assets_and_config(env, doc, _settings(tmp_path), logs.append)
+    again = pxe.ensure_assets_and_config(env, doc, _settings(tmp_path), logs.append, apply_runtime=False)
     assert again["ok"] is True
     assert again["changed"] is False
 
@@ -401,3 +401,16 @@ def test_pxe_doc_non_mapping_rejected():
         envconfig.ConfigValidationError, match="'pxe' must be a mapping"
     ):
         envconfig.parse_document("pxe: eth1\n")
+
+
+def test_pxe_preparation_reports_unavailable_boot_services(tmp_path, monkeypatch):
+    from app.services import pxe_runtime
+
+    monkeypatch.setattr(pxe, "download_factory_image", _fake_download(_tar_asset()))
+    monkeypatch.setattr(pxe_runtime, "apply_pxe_cfg", lambda *a: {
+        "http_running": True, "dhcp_running": True, "tftp_running": False,
+        "tftp_error": "Bootloader helper missing"})
+    result = pxe.ensure_assets_and_config(SimpleNamespace(name="fixture"),
+        {"pxe": dict(PXE_CFG), "talos": {"image_url": "https://factory.example/talos.tar"}},
+        _settings(tmp_path), lambda _: None)
+    assert result["ok"] is False and result["error"] == "Bootloader helper missing"
