@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## Unreleased
+
+- Add a read-only installation review with exact, fresh OS disk identities,
+  measured capacities, automatic role proposals, and explicit blockers. This
+  review does not save configuration or start installation.
+
 ## 2026.10.27.10
 
 Complete real RAM inspection and prepare the correct Talos PXE assets.
