@@ -47,19 +47,17 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.models import Environment, OvhAccount
+from app.services import baremetal as baremetal_service
+from app.services import deploy_needs as deploy_needs_service
+from app.services import deploy_timing, helm_guard, managed_cinder, secret_lease, service_registry
 from app.services import envconfig as envconfig_service
 from app.services import genestack_bridge as bridge
-from app.services import secret_lease
-from app.services import service_registry
-from app.services import deploy_needs as deploy_needs_service
-from app.services import helm_guard
 from app.services import talos as talos_service
 from app.services import talos_prepare as talos_prepare_service
 from app.services.crypto import decrypt_secret
 from app.services.envcontext import EnvContext
 from app.services.executors import pick_executor
 from app.services.job_runner import JobDeadlineExceededError, clamp_deadline_timeout
-from app.services import baremetal as baremetal_service
 from app.services.ovh import (
     DEFAULT_BYOI_OS,
     OvhClient,
@@ -73,7 +71,6 @@ from app.services.ovh import (
     server_may_inherit_ovh,
 )
 from app.services.service_registry import PIPELINE_STAGES, stage_required
-from app.services import deploy_timing
 
 LogFn = Callable[[str], None]
 
@@ -1167,6 +1164,45 @@ def run_deploy(
             control_planes_patched = True
         if stage["id"] == "infrastructure" and not dry_run:
             _apply_saved_role_labels(doc, ctx, log)
+        if any(item.get("name") == "cinder" for item in items):
+            try:
+                storage_argv = managed_cinder.prepare_command(
+                    doc or {}, str(env.id), str(ctx.config_dir)
+                )
+            except ValueError as exc:
+                return finish(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "returncode": 2,
+                        "failed_at": "storage/preflight",
+                        "dry_run": dry_run,
+                    }
+                )
+            if storage_argv is not None:
+                _bind_kubeconfig(ctx, extra_env, log)
+                log("[storage] prepare the reviewed export before installing Cinder")
+                storage_result = bridge.run_command(
+                    storage_argv,
+                    cwd=ctx.genestack_root,
+                    timeout=clamp_deadline_timeout(timeout, deadline),
+                    dry_run=dry_run,
+                    extra_env=extra_env,
+                    ssh_target=ssh_target,
+                    remote_env=remote_env,
+                    agent_env_id=agent_env_id,
+                    log=log,
+                )
+                if storage_result.get("returncode") not in (0, None):
+                    return finish(
+                        {
+                            "ok": False,
+                            "error": "Managed storage is not ready; Cinder was not installed",
+                            "returncode": storage_result.get("returncode"),
+                            "failed_at": "storage/prepare",
+                            "dry_run": dry_run,
+                        }
+                    )
         if not dry_run and _is_services_stage(stage) and _parallelism > _PARALLEL_MIN:
             failure = _run_services_parallel(
                 stage,

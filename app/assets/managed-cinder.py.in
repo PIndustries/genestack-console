@@ -1,0 +1,197 @@
+"""Standard-library runtime sent unchanged to the selected deploy executor."""
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+
+OWNER = 'genestack.dev/storage-owner'
+NAME = 'genestack-cinder-data'
+NAMESPACE = 'openstack'
+
+
+def helm_values(owner, host, export):
+    backend = 'gsc_longhorn'
+    return {
+        'storage': '',
+        'conf': {
+            'cinder': {'DEFAULT': {'enabled_backends': backend, 'default_volume_type': 'genestack'}},
+            'backends': {
+                'DEFAULT': {'enabled_backends': backend},
+                'rbd1': None,
+                backend: {
+                    'backend_host': 'gsc-' + owner,
+                    'volume_driver': 'cinder.volume.drivers.nfs.NfsDriver',
+                    'volume_backend_name': 'GENESTACK_LONGHORN',
+                    'nas_host': host, 'nas_share_path': export,
+                    'nfs_mount_options': 'vers=4.1,noresvport',
+                    'nas_secure_file_operations': True,
+                    'nas_secure_file_permissions': True,
+                    'max_over_subscription_ratio': 1.0,
+                    'reserved_percentage': 10,
+                },
+            },
+        },
+        'pod': {
+            'replicas': {'volume': 1, 'backup': 0},
+            # This is a single Cinder writer, without active/active coordination.
+            'lifecycle': {'upgrades': {'deployments': {'pod_replacement_strategy': 'Recreate'}}},
+            'security_context': {'cinder_volume': {'pod': {'fsGroup': 42424}}},
+        },
+        'annotations': {'pod': {'cinder_volume': {OWNER: owner}}},
+        'labels': {'volume': {'node_selector_key': 'openstack-compute-node', 'node_selector_value': 'enabled'}},
+        'bootstrap': {'volume_types': {'genestack': {'volume_backend_name': 'GENESTACK_LONGHORN'}}},
+        'manifests': {'deployment_volume': True, 'statefulset_volume': False, 'job_bootstrap': True, 'job_storage_init': False, 'job_backup_storage_init': False, 'deployment_backup': False},
+    }
+
+
+def run(payload):
+    owner = payload['environment_id']
+    namespace = payload.get('namespace', NAMESPACE)
+    if not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', namespace):
+        raise ValueError('Invalid storage namespace')
+    size = payload['capacity_gib']
+    if not re.fullmatch(r'[a-zA-Z0-9-]{1,63}', owner):
+        raise ValueError('Invalid environment identity')
+    if isinstance(size, bool) or not isinstance(size, int) or not 8 <= size <= 1048576:
+        raise ValueError('Invalid export capacity')
+    root = pathlib.Path(payload['config_dir'])
+    if not root.is_absolute() or '..' in root.parts:
+        raise ValueError('An absolute environment config directory is required')
+    target = root / 'helm-configs/cinder/zz-console-managed-storage.yaml'
+    # Validate output ownership before touching cluster resources.
+    if target.exists():
+        try:
+            previous = json.loads(target.read_text())
+            if previous['annotations']['pod']['cinder_volume'][OWNER] != owner:
+                raise ValueError('foreign owner')
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError('Existing managed storage override requires review') from exc
+    kubeconfig = os.environ.get('KUBECONFIG', '')
+    if not kubeconfig:
+        for candidate in [root / 'kubeconfig', root / 'inventory/artifacts/admin.conf']:
+            if candidate.is_file():
+                kubeconfig = str(candidate)
+                break
+    if not kubeconfig or not pathlib.Path(kubeconfig).is_file():
+        raise RuntimeError('An explicit environment kubeconfig is required before storage preparation')
+    k = ['kubectl', '--kubeconfig', kubeconfig]
+
+    def command(args, doc=None):
+        verb_index = 2 if args[:1] == ['-n'] else 0
+        verb = args[verb_index]
+        for attempt in range(3 if verb == 'get' else 1):
+            p = subprocess.run(k + args, input=json.dumps(doc) if doc else None,
+                               capture_output=True, text=True, timeout=200, check=False)
+            if p.returncode == 0:
+                return json.loads(p.stdout) if p.stdout.strip().startswith('{') else None
+            if verb == 'get' and attempt < 2:
+                time.sleep(attempt + 1)
+                continue
+            # No Kubernetes output: a failed command may contain secret material.
+            raise RuntimeError('Managed storage Kubernetes step failed: ' + ' '.join(args[verb_index:verb_index + 3]))
+
+    def get(kind, name, namespace=None):
+        namespace = namespace or payload.get("namespace", NAMESPACE)
+        return command(['-n', namespace, 'get', kind, name, '--ignore-not-found', '-o', 'json'])
+
+    def owned(obj):
+        return bool(obj) and obj.get('metadata', {}).get('labels', {}).get(OWNER) == owner
+
+    def ensure(doc, current):
+        if current is None:
+            return command(['create', '-f', '-', '-o', 'json'], doc)
+        if not owned(current):
+            raise RuntimeError('Existing storage resource belongs to another environment')
+        return current
+
+    # Complete collision/worker preflight before the first Kubernetes write.
+    current = {kind: get(kind, NAME) for kind in ['PersistentVolumeClaim', 'Deployment']}
+    for obj in current.values():
+        if obj and not owned(obj):
+            raise RuntimeError('Existing storage resource requires review')
+    pvc = current['PersistentVolumeClaim']
+    if pvc and (pvc['spec'].get('storageClassName') != 'general-multi-attach'
+                or pvc['spec'].get('accessModes') != ['ReadWriteMany']
+                or pvc['spec']['resources']['requests']['storage'] != str(size) + 'Gi'):
+        raise RuntimeError('Existing storage size/class differs; automatic replacement is forbidden')
+    worker = get('Deployment', 'cinder-volume')
+    if worker and worker['spec']['template']['metadata'].get('annotations', {}).get(OWNER) != owner:
+        raise RuntimeError('Existing Cinder worker requires an explicit migration review')
+    sc = command(['get', 'storageclass', 'general-multi-attach', '-o', 'json'])
+    if sc.get('provisioner') != 'driver.longhorn.io':
+        raise RuntimeError('general-multi-attach is not backed by Longhorn')
+    command(['get', 'namespace', namespace, '-o', 'json'])
+    meta = {'name': NAME, 'namespace': namespace, 'labels': {OWNER: owner}}
+    claim = {'apiVersion': 'v1', 'kind': 'PersistentVolumeClaim', 'metadata': meta,
+             'spec': {'accessModes': ['ReadWriteMany'], 'storageClassName': 'general-multi-attach',
+                      'resources': {'requests': {'storage': str(size) + 'Gi'}}}}
+    pvc = ensure(claim, pvc)
+    keeper = {'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': meta, 'spec': {
+        'replicas': 1, 'selector': {'matchLabels': {OWNER: owner, 'app': NAME}},
+        'template': {'metadata': {'labels': {OWNER: owner, 'app': NAME}}, 'spec': {
+            'securityContext': {'runAsUser': 42424, 'runAsGroup': 42424, 'fsGroup': 42424},
+            'containers': [{'name': 'export-keeper', 'image': 'busybox:1.37.0',
+                'command': ['sh', '-ec', 'mkdir -p /data/cinder; test -w /data/cinder; exec sleep 86400'],
+                'resources': {'requests': {'cpu': '10m', 'memory': '16Mi'}, 'limits': {'cpu': '100m', 'memory': '32Mi'}},
+                'securityContext': {'allowPrivilegeEscalation': False, 'capabilities': {'drop': ['ALL']}},
+                'volumeMounts': [{'name': 'data', 'mountPath': '/data'}]}],
+            'volumes': [{'name': 'data', 'persistentVolumeClaim': {'claimName': NAME}}],
+        }}}}
+    if current['Deployment']:
+        actual = current['Deployment']['spec']['template']['spec']
+        expected = keeper['spec']['template']['spec']
+        if (actual.get('volumes') != expected['volumes']
+                or actual.get('securityContext') != expected['securityContext']
+                or not actual.get('containers')
+                or actual['containers'][0].get('command') != expected['containers'][0]['command']
+                or actual['containers'][0].get('image') != expected['containers'][0]['image']):
+            raise RuntimeError('Existing export keeper differs; automatic replacement is forbidden')
+    original_uid = pvc['metadata']['uid']
+    ensure(keeper, current['Deployment'])
+    command(['-n', namespace, 'rollout', 'status', 'deployment/' + NAME, '--timeout=180s'])
+    pvc = get('PersistentVolumeClaim', NAME)
+    if (not owned(pvc) or pvc['metadata']['uid'] != original_uid
+            or pvc.get('status', {}).get('phase') != 'Bound'):
+        raise RuntimeError('Managed storage claim is not bound')
+    volume = pvc['spec']['volumeName']
+    pv = command(['get', 'persistentvolume', volume, '-o', 'json'])
+    if pv['spec']['claimRef'].get('uid') != original_uid or pv['spec']['csi'].get('volumeHandle') != volume:
+        raise RuntimeError('Longhorn volume does not belong to the reviewed claim')
+    v = get('volumes.longhorn.io', volume, 'longhorn-system')
+    sm = get('sharemanagers.longhorn.io', volume, 'longhorn-system')
+    endpoint = urllib.parse.urlsplit(v.get('status', {}).get('shareEndpoint', ''))
+    if endpoint.scheme != 'nfs' or not endpoint.hostname or not endpoint.path.startswith('/'):
+        raise RuntimeError('Longhorn has no ready NFS endpoint')
+    services = command(['-n', 'longhorn-system', 'get', 'services', '-o', 'json'])
+    matches = [s for s in services['items'] if s['spec'].get('clusterIP') == endpoint.hostname
+               and any(o.get('kind') == 'ShareManager' and o.get('name') == volume and o.get('uid') == sm['metadata']['uid']
+                       for o in s['metadata'].get('ownerReferences', []))]
+    if len(matches) != 1:
+        raise RuntimeError('Longhorn share Service identity is ambiguous')
+    host = matches[0]['metadata']['name'] + '.longhorn-system.svc'
+    values = helm_values(owner, host, endpoint.path.rstrip('/') + '/cinder')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.managed-storage-', dir=target.parent)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(values, f, indent=2)
+            f.write('\n')
+        os.replace(name, target)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+    print(json.dumps({'managed_storage': 'ready', 'capacity_gib': size,
+                      'claim_uid': pvc['metadata']['uid'], 'override_written': True}))
+
+
+if __name__ == '__main__':
+    try:
+        run(json.loads(sys.argv[1]))
+    except Exception as exc:  # noqa: BLE001 -- CLI reports a failed step without a traceback
+        print('[storage] ' + str(exc), file=sys.stderr)
+        raise SystemExit(1)

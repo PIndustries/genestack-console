@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.6
+
+Prepare retained block storage for a fresh cloud installation.
+
+- Opt in with a reviewed Longhorn Cinder capacity. Before installing Cinder, prepare an RWX claim and export keeper, verify the actual share Service owner, and generate its NFS backend settings.
+- Retain storage and data on retries. Refuse changed capacity, foreign resources, custom backend overrides and existing unmanaged Cinder workers until migration is reviewed. Never fall back to the deployer's default Kubernetes context.
+- Enable the volume worker and volume-type bootstrap explicitly even when upstream Helm values disable them. Use a stable backend identity and one volume writer; Cinder services briefly stop during Recreate upgrades.
+- Add a repeatable offline pinned-chart check. Isolated live tests verified claim/data preservation on retry and exact volume bytes across VM replacement. Automatic whole-cluster sizing and the full native greenfield journey remain separate acceptance work.
+
 ## 2026.10.27.5
 
 Discover the provisioning NIC from the actual RAM boot.

@@ -25,7 +25,8 @@ Older server rows may still say ``source: maas``; they still load::
               compute_interface,    # must NOT be the public / default-route NIC
               ovn: {external_interface, ...},  # br-ex uplink; never the public NIC (empty does not fall back to compute_interface)
               metallb_pools: [...], ovn_bridge_mappings: [...]}
-    storage: {cinder_backend_name, cinder_worker_name, ceph: {enabled, external_pvc}}
+    storage: {cinder_backend_name, cinder_worker_name, ceph: {enabled, external_pvc},
+              longhorn_cinder: {enabled, capacity_gib}}
     group_vars:                                # ansible inventory group_vars
       <group>: {<var>: <value>, ...}           # group names: ^[a-z][a-z0-9_]*$
     components: {keystone: true, glance: false, ...}
@@ -201,6 +202,7 @@ KNOWN_STORAGE_KEYS = frozenset(
     {
         "cinder_backend_name",
         "cinder_worker_name",
+        "longhorn_cinder",
         "ceph",
     }
 )
@@ -574,6 +576,12 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
             for key in storage
             if key not in KNOWN_STORAGE_KEYS
         )
+        from app.services.managed_cinder import settings as managed_cinder_settings
+
+        try:
+            managed_cinder_settings(data)
+        except ValueError as exc:
+            raise ConfigValidationError(str(exc)) from exc
         ceph = storage.get("ceph")
         if ceph is not None:
             if not isinstance(ceph, dict):

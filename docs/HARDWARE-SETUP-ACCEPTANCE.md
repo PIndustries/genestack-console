@@ -67,3 +67,21 @@ scheduling field conflicted with `KubeNodeConfig`; the replacement patch removes
 only the control-plane scheduling taint. Fresh boot/installer and config versions
 are aligned. Real hardware boot, permanent VM storage and full app-driven
 OpenStack/LAMP acceptance remain required.
+
+## Storage recovery evidence (2026-10-27)
+
+A bounded disposable NFS-backed Cinder worker on the existing DFW cluster passed
+real volume provisioning, guest disk writes, first-VM removal and exact-byte
+reads from a new VM. A worker restart and an owned NFS share-manager restart each
+preserved the data for another fresh VM. The test used Service DNS verified
+against Longhorn ownership rather than assuming a service name or storing a
+service IP. Its temporary resources were removed; the production Helm release
+was unchanged.
+
+The managed export preparation runtime also passed an isolated live test:
+retained claim identity and guest-independent file bytes across retries, rejected
+changed capacity, and stopped on foreign resources. A transient Kubernetes API
+read failure in the first run led to bounded read retries; writes are not blindly
+retried. These are component proofs on the existing cluster. They do not certify
+fresh physical installation, automatic storage sizing, native deployment approval,
+or the complete app-driven LAMP journey.
