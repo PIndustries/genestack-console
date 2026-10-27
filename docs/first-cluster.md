@@ -243,3 +243,10 @@ Ceph and custom Cinder overrides cannot be combined with this managed setup.
 
 This does not yet complete the native installation-review flow or automatic
 allocation of every available data disk. Those remain acceptance requirements.
+
+The offline chart acceptance command is
+`python scripts/check-managed-cinder-chart.py <pinned-cinder-chart.tgz> <upstream-cinder-values.yaml>`.
+It checks the combined chart output, including the worker ownership annotation,
+single-writer update strategy and default volume-type bootstrap; it performs no
+cluster operations. Keep the pinned chart and upstream values with the test
+receipt so the check can be repeated against a dependency upgrade.
