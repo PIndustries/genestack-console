@@ -4,6 +4,17 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.26.3
+
+First-deployer setup and isolated cloud configuration.
+
+- Prepare Deploy Host initializes provider, inventory, Helm and Kustomize configuration inside the selected environment, preserving existing overrides.
+- Systemd preparation resolves the deployer account's real home directory and makes Ansible available to the worker.
+- Deployment tools are checked before preparation completes; kubectl downloads require the published SHA-256 checksum.
+- Archive-based source installations are preserved without attempting Git fetch.
+- The managed bootstrap ships in both Python packages and the compiled Linux program and uses the local, SSH or agent execution path selected for the environment.
+- Hardware discovery and capacity planning remain review steps before cluster installation.
+
 ## 2026.10.26.2
 
 Native app setup and connection stability, validated during private-cloud acceptance.
