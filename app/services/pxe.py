@@ -457,25 +457,10 @@ def _baremetal_nodes(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def fetch_commission_assets(root: Path, log: LogFn | None = None) -> dict[str, Any]:
-    """Download the pinned Alpine netboot files used by the commission RAM disk."""
-    from app.services.bootselect import ALPINE_NETBOOT, COMMISSION_FILES
+    """Prepare one verified ISO's boot files and offline package repository."""
+    from app.services.commission_assets import fetch
 
-    dest = root / "assets" / "commission"
-    dest.mkdir(parents=True, exist_ok=True)
-    changed = False
-    try:
-        for name in COMMISSION_FILES:
-            path = dest / name
-            if path.is_file() and path.stat().st_size > 0:
-                continue
-            download_factory_image(
-                f"{ALPINE_NETBOOT}/{name}", log, dest, filename=name
-            )
-            changed = True
-            _log(log, f"[pxe] commission asset {name}")
-    except ImageDownloadError as exc:
-        return {"ok": False, "error": str(exc), "changed": changed}
-    return {"ok": True, "changed": changed}
+    return fetch(root, log)
 
 
 def _write_mac_profiles(
