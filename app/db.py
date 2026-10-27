@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
-from app.services.request_safety import configured_path
+from app.services.request_safety import configured_path, under_root
 
 log = logging.getLogger(__name__)
 
@@ -121,10 +121,45 @@ def _ensure_sqlite_parent(url: str) -> None:
         pass
 
 
+def _protect_configured_shared_sqlite(settings, group_id: int) -> None:
+    """Share only configured service state, never a caller-supplied move target."""
+    root = settings.data_dir.resolve()
+    active = _sqlite_path_from_url(settings.database_url)
+    if active is None or active.parent != root:
+        raise ValueError("Shared SQLite state must be in the configured data directory")
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        if root.stat().st_gid != group_id:
+            os.chown(root, -1, group_id)
+        root.chmod(0o2770)
+    except OSError:
+        pass
+    for name in (active.name, active.name + "-wal", active.name + "-shm"):
+        candidate = under_root(root, name)
+        if candidate.is_file():
+            try:
+                if candidate.stat().st_gid != group_id:
+                    os.chown(candidate, -1, group_id)
+                candidate.chmod(0o660)
+            except OSError:
+                pass
+
+
 def create_db_engine(database_url: str | None = None):
     settings = get_settings()
     url = database_url or settings.database_url
-    _ensure_sqlite_parent(url)
+    group_id = None
+    if url.startswith("sqlite") and settings.sqlite_group and url == settings.database_url:
+        import grp
+
+        try:
+            group_id = grp.getgrnam(settings.sqlite_group).gr_gid
+        except KeyError as exc:
+            raise ValueError("The configured SQLite service group does not exist") from exc
+    if group_id is not None:
+        _protect_configured_shared_sqlite(settings, group_id)
+    else:
+        _ensure_sqlite_parent(url)
 
     # SQLite-only connect args and pragmas; nothing driver-specific leaks
     # into other dialects (e.g. postgresql+psycopg://).
@@ -158,11 +193,17 @@ def create_db_engine(database_url: str | None = None):
             # Engine connect may create the file; lock it down once it exists.
             # If it does not exist yet, the first request creates it — harden
             # again via the connect hook below.
-            _chmod_owner_only(db_path)
+            if group_id is not None:
+                _protect_configured_shared_sqlite(settings, group_id)
+            else:
+                _chmod_owner_only(db_path)
 
             @event.listens_for(engine, "connect")
             def _chmod_sqlite_file(dbapi_conn, connection_record):  # noqa: ARG001
-                _chmod_owner_only(db_path)
+                if group_id is not None:
+                    _protect_configured_shared_sqlite(settings, group_id)
+                else:
+                    _chmod_owner_only(db_path)
 
     return engine
 

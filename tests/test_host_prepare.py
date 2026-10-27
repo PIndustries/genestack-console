@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.services import genestack_bridge as bridge
 from app.services.catalog import get_operation
 from app.services.host_prepare import bootstrap_command
@@ -291,3 +293,35 @@ def test_installed_source_archive_is_not_fetched_or_replaced(client, admin_heade
     scripts = _scripts(captured)
     assert not any("git clone" in script or "git -C" in script for script in scripts)
     assert any("base64.b64decode" in script for script in scripts)
+
+
+@pytest.mark.parametrize("linked", [True, False])
+@pytest.mark.parametrize("empty", [True, False])
+def test_actual_empty_appliance_directory_is_cloned_not_treated_as_an_archive(
+    client, admin_headers, monkeypatch, tmp_path, empty, linked
+):
+    import subprocess
+
+    target = tmp_path / "source with spaces"
+    target.mkdir()
+    if linked:
+        alias = tmp_path / "appliance-source"
+        alias.symlink_to(target, target_is_directory=True)
+        target = alias
+    if not empty:
+        (target / "customer-file").write_text("preserve me")
+    captured = []
+
+    def run(cmd, **kwargs):
+        script = str(cmd[2])
+        captured.append(script)
+        rc = subprocess.run(cmd, capture_output=True, check=False).returncode if script.startswith(("test -d ", "test -n ")) else 0
+        return {"returncode": rc, "dry_run": False}
+
+    monkeypatch.setattr(bridge, "run_command", run)
+    env = _create_env(client, admin_headers, dry_run=False)
+    job = _prepare_job(client, admin_headers, env["id"], params={"genestack_path": str(target)}).json()
+    assert job["status"] == "success", job.get("error")
+    assert any(s.startswith("git clone ") for s in captured) is empty
+    if not empty:
+        assert (target / "customer-file").read_text() == "preserve me"

@@ -6,6 +6,23 @@ The oldest GitHub Release is v2026.10.03. The source history starts two version 
 
 ## 2026.10.27.13
 
+- Make first-customer deployer preparation work on the appliance: clone into an
+  empty source directory, recognize its `/opt` symlink correctly, and preserve
+  installed source on retries. Keep the source checkout owned by the system
+  worker while returning generated cloud configuration to its original account.
+- Run host setup through the privileged worker while keeping the HTTP API under
+  its service account. Share SQLite state only with the configured service group;
+  ordinary installations retain owner-only database permissions.
+- Include preparation prerequisites in the immutable image rather than running
+  apt against it. Create the writable tool directory before installing tools.
+- Build an isolated, source-checksummed Python 3.13.18 for Genestack's pinned
+  deployment dependencies. Leave Ubuntu's Python unchanged and preserve an
+  incompatible prior virtual environment before recreating it.
+- Actual iPhone preparation passed against the source candidate. Independent
+  checks verified the real job, isolated configuration, deployment tools and no
+  inherited cluster. Fresh compiled-image and full cloud/LAMP acceptance remain
+  separate checks.
+
 - Include and enable automatic time synchronization in the appliance runtime.
   First-customer app testing found that no time-sync service was installed and
   hosted sign-in rejected the token's issued-at timestamp on slight clock drift.

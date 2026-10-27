@@ -52,6 +52,7 @@ if [ ! -f "$PREFIX/config.yaml" ]; then
 dry_run: true
 seed_demo: true
 data_dir: ${PREFIX}/data
+sqlite_group: genestack
 update:
   url: https://github.com/PIndustries/genestack-console/releases/latest/download/version.json
   auto: false
@@ -75,7 +76,7 @@ EOF
 fi
 
 if id genestack >/dev/null 2>&1; then
-  chown -R genestack:genestack "$PREFIX" "$GENESTACK_ROOT" || true
+  chown -R genestack:genestack "$PREFIX" || true
 fi
 
 if [ ! -f "$PREFIX/ADMIN_CREDENTIALS.txt" ] && id genestack >/dev/null 2>&1 && [ -x "$PREFIX/bin/genestack-console" ]; then
@@ -108,4 +109,18 @@ SSH is off.
       printf '%s\n' "$banner" > /etc/issue.d/genestack.issue
     fi
   fi
+fi
+
+# The unprivileged API and privileged local worker share only this account's
+# state. Keep SQLite journals group-accessible without opening them to others.
+# The source checkout stays root-owned for the worker's system bootstrap.
+if id genestack >/dev/null 2>&1; then
+  chgrp genestack "$PREFIX/data"
+  chmod 2770 "$PREFIX/data"
+  for file in "$PREFIX/data/console.db" "$PREFIX/data/console.db-wal" "$PREFIX/data/console.db-shm"; do
+    if [ -f "$file" ]; then
+      chgrp genestack "$file"
+      chmod 0660 "$file"
+    fi
+  done
 fi

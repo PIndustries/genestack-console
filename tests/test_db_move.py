@@ -239,3 +239,68 @@ def test_post_viewer_is_403(client, viewer_headers):
     )
     assert response.status_code == 403
     assert _config_text() == before
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_sqlite_database_and_journals_remain_private_for_service_accounts(tmp_path, monkeypatch, shared):
+    import grp
+    import stat
+
+    settings = get_settings()
+    group = grp.getgrgid(os.getegid())
+    monkeypatch.setattr(settings, "sqlite_group", group.gr_name if shared else "")
+    path = tmp_path / "private-state" / "console.db"
+    monkeypatch.setattr(settings, "data_dir", path.parent)
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{path}")
+    engine = create_db_engine()
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE test_state (id INTEGER)")
+            connection.exec_driver_sql("INSERT INTO test_state VALUES (1)")
+            for file in [path, Path(str(path) + "-wal"), Path(str(path) + "-shm")]:
+                if file.exists():
+                    assert stat.S_IMODE(file.stat().st_mode) == (0o660 if shared else 0o600)
+                    if shared:
+                        assert file.stat().st_gid == group.gr_gid
+        assert stat.S_IMODE(path.parent.stat().st_mode) == (0o2770 if shared else 0o700)
+    finally:
+        engine.dispose()
+
+
+def test_shared_permissions_never_apply_to_database_move_target(tmp_path, monkeypatch):
+    import grp
+    import stat
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "sqlite_group", grp.getgrgid(os.getegid()).gr_name)
+    monkeypatch.setattr(settings, "data_dir", tmp_path / "configured-state")
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{settings.data_dir / 'console.db'}")
+    target = tmp_path / "migration-target" / "target.db"
+    engine = create_db_engine(f"sqlite:///{target}")
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE target_state (id INTEGER)")
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+        assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+    finally:
+        engine.dispose()
+
+
+def test_shared_database_companion_cannot_escape_state_directory(tmp_path, monkeypatch):
+    import grp
+    import stat
+
+    settings = get_settings()
+    root = tmp_path / "configured-state"
+    root.mkdir()
+    outside = tmp_path / "outside-file"
+    outside.write_text("preserve")
+    outside.chmod(0o600)
+    (root / "console.db-wal").symlink_to(outside)
+    monkeypatch.setattr(settings, "sqlite_group", grp.getgrgid(os.getegid()).gr_name)
+    monkeypatch.setattr(settings, "data_dir", root)
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{root / 'console.db'}")
+    with pytest.raises(ValueError, match="invalid path"):
+        create_db_engine()
+    assert outside.read_text() == "preserve"
+    assert stat.S_IMODE(outside.stat().st_mode) == 0o600

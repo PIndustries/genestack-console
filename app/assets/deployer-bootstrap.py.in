@@ -6,8 +6,8 @@ also runs independently in integration tests; it never imports the Console DB.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
-from pathlib import Path
 import platform
 import pwd
 import re
@@ -16,8 +16,10 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from pathlib import Path
 
 KUBECTL_VERSION = "v1.35.0"
+DEPLOYER_PYTHON = Path("/usr/lib/genestack-python/bin/python3")
 
 
 def copy_missing(source: Path, target: Path) -> None:
@@ -96,6 +98,21 @@ def initialize_layout(root: Path, config: Path, provider: str) -> None:
                 document.write_text("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../base\n")
 
 
+def initialize_account_layout(root: Path, config: Path, provider: str) -> None:
+    """Return generated configuration to the account that owns the cloud."""
+    if config.is_symlink():
+        raise RuntimeError("Refusing a symlinked cloud configuration directory")
+    owner = config.stat() if config.exists() else None
+    try:
+        initialize_layout(root, config, provider)
+    finally:
+        if owner is not None and os.geteuid() == 0:
+            # Do not follow pristine-repository links or chmod private files.
+            for parent, directories, files in os.walk(config, followlinks=False):
+                for path in [Path(parent), *(Path(parent) / name for name in directories + files)]:
+                    os.chown(path, owner.st_uid, owner.st_gid, follow_symlinks=False)
+
+
 def execution_environment(home: Path, root: Path, config: Path, provider: str) -> dict[str, str]:
     env = dict(os.environ)
     # Frozen application loader paths must not leak into system Python/pip.
@@ -135,6 +152,56 @@ def install_kubectl(directory: Path, version: str) -> None:
         name.unlink(missing_ok=True)
 
 
+def deployment_python(*, immutable: bool = False) -> str:
+    if DEPLOYER_PYTHON.is_file() and os.access(DEPLOYER_PYTHON, os.X_OK):
+        return str(DEPLOYER_PYTHON)
+    if immutable or not (3, 11) <= sys.version_info[:2] <= (3, 13):
+        raise RuntimeError("Deployment tools require the appliance's isolated Python 3.13 runtime")
+    return sys.executable
+
+
+def prepare_venv(home: Path, run, *, immutable: bool) -> Path:
+    venv = home / ".venvs/genestack"
+    if venv.is_symlink():
+        raise RuntimeError("Refusing a symlinked deployment virtual environment")
+    if venv.exists():
+        marker = venv / "pyvenv.cfg"
+        if not marker.is_file() or marker.is_symlink():
+            raise RuntimeError("Existing deployment directory is not a managed Python environment")
+        version = re.search(r"^version\s*=\s*3\.(11|12|13)\.", marker.read_text(), re.MULTILINE)
+        if version and (venv / "bin/python").is_file() and os.access(venv / "bin/python", os.X_OK):
+            return venv
+        # Preserve the previous environment before changing interpreter versions.
+        backup = Path(tempfile.mkdtemp(prefix="genestack.previous-", dir=venv.parent))
+        backup.rmdir()
+        venv.rename(backup)
+        print("[prepare] Previous incompatible deployment environment preserved", flush=True)
+    run([deployment_python(immutable=immutable), "-m", "venv", str(venv)])
+    return venv
+
+
+def prepare_os(run, *, immutable: bool | None = None) -> None:
+    """Bootc dependencies belong in the image, never in runtime apt writes."""
+    if immutable is None:
+        immutable = Path("/run/ostree-booted").exists()
+    if immutable:
+        missing = [name for name in ("git", "curl", "wget", "jq", "cc", "make")
+                   if not shutil.which(name)]
+        if importlib.util.find_spec("ensurepip") is None:
+            missing.append("python3-venv")
+        if missing:
+            raise RuntimeError("Appliance image is missing preparation tools: " + ", ".join(missing))
+        deployment_python(immutable=True)
+        return
+    if shutil.which("apt-get"):
+        run(["apt-get", "update", "-qq"])
+        run(["apt-get", "install", "-y", "python3-pip", "python3-venv", "python3-dev", "build-essential", "jq", "curl", "wget", "git"])
+    elif shutil.which("dnf"):
+        run(["dnf", "install", "-y", "python3-pip", "python3-devel", "gcc", "gcc-c++", "make", "jq", "curl", "wget", "git"])
+    else:
+        raise RuntimeError("Automatic bootstrap supports apt or dnf Linux deployers")
+
+
 def prepare(root: Path, config: Path, provider: str, tools: Path) -> None:
     if os.geteuid() != 0:
         raise RuntimeError("Deploy-host preparation requires root on the deployer")
@@ -146,25 +213,18 @@ def prepare(root: Path, config: Path, provider: str, tools: Path) -> None:
     env = execution_environment(home, root, config, provider)
     def run(argv: list[str]) -> None:
         subprocess.run(argv, cwd=root, env=env, check=True)
-    if shutil.which("apt-get"):
-        run(["apt-get", "update", "-qq"])
-        run(["apt-get", "install", "-y", "python3-pip", "python3-venv", "python3-dev", "build-essential", "jq", "curl", "wget", "git"])
-    elif shutil.which("dnf"):
-        run(["dnf", "install", "-y", "python3-pip", "python3-devel", "gcc", "gcc-c++", "make", "jq", "curl", "wget", "git"])
-    else:
-        raise RuntimeError("Automatic bootstrap supports apt or dnf Linux deployers")
-    initialize_layout(root, config, provider)
+    prepare_os(run)
+    initialize_account_layout(root, config, provider)
+    tools.mkdir(parents=True, exist_ok=True)
     # Use upstream tool installers, not its bootstrap's hard-coded config paths
     # or its blanket environment dump (which can include operator secrets).
     run(["bash", "-ec", 'source scripts/lib/functions.sh; ensureYq; ensureHelm; ensureCmctl'])
-    venv = home / ".venvs/genestack"
-    run(["python3", "-m", "venv", str(venv)])
+    venv = prepare_venv(home, run, immutable=Path("/run/ostree-booted").exists())
     run([str(venv / "bin/python"), "-m", "pip", "install", "--upgrade", "pip"])
     run([str(venv / "bin/python"), "-m", "pip", "install", "-r", str(root / "requirements.txt")])
     run([str(venv / "bin/ansible-playbook"), str(root / "scripts/get-ansible-collection-requirements.yml"),
          "-e", "collections_file=" + str(root / "ansible-collection-requirements.yml"),
          "-e", "user_collections_file=" + str(root / "user-collection-requirements.yml")])
-    tools.mkdir(parents=True, exist_ok=True)
     service_path = str(tools) + os.pathsep + "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     for tool in ("ansible", "ansible-playbook", "ansible-galaxy"):
         if not shutil.which(tool, path=service_path):

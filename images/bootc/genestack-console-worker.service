@@ -5,10 +5,12 @@ Requires=genestack-console-prepare.service
 
 [Service]
 Type=simple
-User=genestack
+User=root
 Group=genestack
+UMask=0007
 Environment=GSC_PREFIX=/opt/genestack-console
 Environment=CONSOLE_CONFIG=/opt/genestack-console/config.yaml
+Environment=PATH=/opt/genestack-console/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=/opt/genestack-console
 ExecStart=/opt/genestack-console/bin/genestack-console worker --daemon --interval 5
 Restart=on-failure
