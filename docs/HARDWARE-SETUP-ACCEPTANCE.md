@@ -105,3 +105,24 @@ unselected disk preserved. The full module image loaded before hardware probing.
 These are real network-boot and disk-I/O component checks using explicitly owned
 64 MiB virtual disks. They do not certify native app/BMC submission, UEFI boot,
 Talos/OpenStack bootstrap or the final physical DFW deployment.
+
+## First-use dedicated network test
+
+A fresh secondary Ethernet port had no IPv4 address. The native picker initially
+omitted it, leaving a first-time user needing shell configuration. A real iPhone
+simulator regression reproduced that failure before implementation.
+
+The native setup now offers unused ports and an explicit dedicated-network
+confirmation. Its administrator worker job rechecks the port fingerprint, assigns
+an unused private subnet using an exact-MAC systemd-networkd configuration, and
+enables outbound masquerading. A successful simulator run configured the actual
+owned appliance port and saved the provisioning settings. Independent checks
+verified the normal account actor, real successful job, kernel forwarding and
+unchanged management address/default route. This is a source-candidate result;
+fresh packaged-image replay, node egress and OpenStack/LAMP tests remain required.
+
+The action rejects ports with existing IP networks or non-link-local routes,
+master membership and virtual link kinds. It never starts DHCP or reboots a
+machine. A failed reconfiguration removes the new file and reconfigures only the
+selected port. Existing configured networks remain available through the ordinary
+settings-only save path.

@@ -80,6 +80,7 @@ CATALOG_ORDER = (
     "hosts.ubuntu.bringup",
     "hosts.microk8s.install",
     "hosts.kubespray.adopt",
+    "genestack.provisioning_interface",
 )
 
 

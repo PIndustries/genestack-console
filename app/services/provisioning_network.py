@@ -1,4 +1,4 @@
-"""Local network suggestions and validation; never changes an interface or starts DHCP."""
+"""Local network suggestions and validation; interface setup is an explicit worker job."""
 
 from __future__ import annotations
 
@@ -201,3 +201,62 @@ def validate(
     result["netmask"] = str(network.netmask)
     result["dns"] = ",".join(str(ip) for ip in dns)
     return result
+
+
+def unused_interfaces() -> list[dict[str, Any]]:
+    """Expose only bare Ethernet ports with no IPv4, master or host routes."""
+    import hashlib
+
+    try:
+        records = _json_command(["ip", "-j", "-d", "address", "show"])
+        routes = _json_command(["ip", "-4", "-j", "route", "show", "table", "all"])
+        routes6 = _json_command(["ip", "-6", "-j", "route", "show", "table", "all"])
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+    def routed_ipv6(route: dict[str, Any]) -> bool:
+        try:
+            destination = ipaddress.IPv6Network(route.get("dst", "::/0"), strict=False)
+        except ValueError:
+            return True
+        return not (destination.is_link_local or destination.is_multicast)
+
+    used = {str(r.get("dev")) for r in routes + [r for r in routes6 if routed_ipv6(r)]}
+    occupied = []
+    for item in records:
+        for address in item.get("addr_info", []):
+            if address.get("family") == "inet":
+                try:
+                    occupied.append(ipaddress.IPv4Interface(str(address["local"]) + "/" + str(address["prefixlen"])).network)
+                except (KeyError, ValueError):
+                    return []
+    for route in routes:
+        destination = route.get("dst", "default")
+        if destination != "default":
+            try:
+                occupied.append(ipaddress.IPv4Network(destination, strict=False))
+            except ValueError:
+                return []
+    subnet = next((ipaddress.IPv4Network(f"10.77.{n}.0/24") for n in range(28, 255)
+                   if not any(ipaddress.IPv4Network(f"10.77.{n}.0/24").overlaps(net) for net in occupied)), None)
+    if subnet is None:
+        return []
+    result = []
+    for item in records:
+        name, mac = item.get("ifname", ""), item.get("address", "")
+        if (item.get("link_type") != "ether" or item.get("master")
+            or item.get("linkinfo", {}).get("info_kind") or name in used
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,14}", name)
+            or not re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", mac)
+            or name.startswith(("docker", "veth", "cni", "flannel", "kube", "virbr", "br-"))
+            or any(a.get("family") == "inet" or (a.get("family") == "inet6" and a.get("scope") != "link")
+                   for a in item.get("addr_info", []))):
+            continue
+        digest = hashlib.sha256((name + "|" + mac + "|unused").encode()).hexdigest()
+        server = str(subnet.network_address + 1)
+        result.append({"id": name + ":unused", "name": name, "mac": mac, "address": "",
+                       "fingerprint": digest, "suggested_config": {
+                           "interface": name, "next_server": server, "netmask": str(subnet.netmask),
+                           "range_start": str(subnet.network_address + 128),
+                           "range_end": str(subnet.network_address + 254), "gateway": server,
+                           "dns": ",".join(dns_servers()), "http_port": 8088}})
+    return result[:32]

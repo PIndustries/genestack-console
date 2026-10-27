@@ -1494,13 +1494,14 @@ def get_provider(db: Session, env: Environment) -> dict[str, Any]:
     from app.services.talos import DEFAULT_TALOS_IMAGE_URL, DEFAULT_TALOS_ISO_URL
 
     talos = dict(doc.get("talos") or {}) if isinstance(doc.get("talos"), dict) else {}
-    from app.services.provisioning_network import KEYS, interfaces
+    from app.services.provisioning_network import KEYS, interfaces, unused_interfaces
 
     return {
         "supports_provisioning_config": True,
         "config_version": current[1].version if current else 0,
         "pxe": {k: v for k, v in (doc.get("pxe") or {}).items() if k in KEYS},
         "provisioning_interfaces": interfaces(),
+        "unused_provisioning_interfaces": unused_interfaces(),
         "provider": doc.get("provider") or "talos",
         "talos": talos,
         "deploy": deploy,

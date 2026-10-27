@@ -21,6 +21,7 @@ class GenestackModule(Module):
         "smoke",
         "host_prepare",
         "host_setup",
+        "provisioning_interface",
         "services_list",
         "cluster_status",
         "pipeline_run",
