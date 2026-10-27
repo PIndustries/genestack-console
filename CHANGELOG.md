@@ -4,7 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
-## Unreleased
+## 2026.10.27.12
+
+- Include curl and git in the appliance runtime. A fresh published .11 boot
+  could not execute the native app's copied account-link command because curl
+  was absent; no link token was consumed. Check these tools and Python TLS/YAML
+  in the actual built runtime before producing appliance images.
+- The published .11 clean boot passed automatic state growth, immutable mount,
+  healthy API and cloud-init checks. Full cloud/LAMP acceptance remains open.
+
 
 - Save an exact reviewed installation proposal with configuration-version and
   hardware-evidence checks, safe retry, and explicit separation from execution.
