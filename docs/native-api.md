@@ -207,3 +207,20 @@ configuration, submit a job, or start installation. The response has `version`,
 Review GET adds `supports_plan_save` and `saved_plan_matches`; the latter becomes
 false if configuration or hardware changes. The saved review survives an app
 restart and remains separate from approval to erase or install machines.
+
+
+### Dedicated provisioning port setup
+
+`GET /api/v1/environments/{id}/config/provider` includes optional
+`unused_provisioning_interfaces`. Each entry has a name, MAC, fingerprint, empty
+address and a complete suggested private PXE configuration. Older deployers may
+omit the field.
+
+After confirming that the selected port connects only to the new cloud's machine
+network, submit the admin operation `genestack.provisioning_interface` with
+`interface`, `fingerprint` and `dedicated_network_confirmed: true`. The operation
+requires a local root worker and active systemd-networkd. It rechecks unused-port
+evidence under a host lock; stale inventory is rejected. It returns the assigned
+address and does not start DHCP or boot nodes. Follow the normal job, reload the
+provider snapshot, then save the connected interface's PXE settings using the
+existing version-checked provider endpoint. Dry runs do not create network files.

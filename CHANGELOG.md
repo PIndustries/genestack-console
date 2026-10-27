@@ -4,6 +4,18 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## Unreleased
+
+- Expose unused dedicated Ethernet ports to native setup, including ports with
+  only IPv6 link-local addresses. Suggest an unused private subnet and reject
+  existing IPv4/IPv6 uplinks, routed ports, bridge/bond members and virtual links.
+- Add an explicit administrator job to configure the selected port by its fresh
+  hardware fingerprint. Persist an exact-MAC networkd configuration, enable
+  outbound masquerading, verify the management route remains unchanged and
+  roll back a failed setup. This action does not start DHCP or reboot machines.
+- A real iPhone simulator test configured and saved the new port on the owned
+  appliance candidate. Whole-cluster installation and LAMP acceptance remain open.
+
 ## 2026.10.27.13
 
 - Make first-customer deployer preparation work on the appliance: clone into an

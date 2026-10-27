@@ -41,7 +41,7 @@ _BASE = "http://10.10.0.1:8080"
 def test_load_modules_sees_host_operations():
     clear_module_cache()
     ids = [op.id for op in get_operation_catalog()]
-    assert ids[-4:] == [
+    assert [operation for operation in ids if operation.startswith("hosts.")] == [
         "hosts.ubuntu.prepare",
         "hosts.ubuntu.bringup",
         "hosts.microk8s.install",
