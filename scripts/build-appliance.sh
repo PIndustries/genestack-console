@@ -90,6 +90,7 @@ echo "==> appliance onboarding tools"
 run_priv podman run --rm --network none --entrypoint /bin/bash "$REF" -ec '
   curl --version >/dev/null
   git --version >/dev/null
+  systemctl is-enabled systemd-timesyncd.service >/dev/null
   python3 -c "import ssl, urllib.request, yaml"
 '
 

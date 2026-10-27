@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.13
+
+- Include and enable automatic time synchronization in the appliance runtime.
+  First-customer app testing found that no time-sync service was installed and
+  hosted sign-in rejected the token's issued-at timestamp on slight clock drift.
+- Allow at most 30 seconds of JWT clock skew while retaining signature, expiry,
+  issuer, audience and nonce validation. Verify the real ES256 token exchange
+  and rejection boundaries rather than mocking away token validation.
+- Full appliance, private-cloud installation and LAMP acceptance remain open.
+
 ## 2026.10.27.12
 
 - Include curl and git in the appliance runtime. A fresh published .11 boot

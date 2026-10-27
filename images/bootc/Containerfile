@@ -78,6 +78,7 @@ RUN printf '%s\n' \
         podman \
         systemd \
         systemd-resolved \
+        systemd-timesyncd \
         policycoreutils \
         systemd-boot \
         systemd-boot-efi \
@@ -176,7 +177,7 @@ RUN set -eu; \
 RUN set -eu; \
     systemctl disable ssh.service; \
     systemctl enable qemu-guest-agent.service \
-      systemd-networkd.service systemd-resolved.service \
+      systemd-networkd.service systemd-resolved.service systemd-timesyncd.service \
       cloud-init-local.service cloud-init-main.service \
       cloud-init-network.service \
       cloud-config.service cloud-final.service; \
