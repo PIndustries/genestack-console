@@ -148,3 +148,20 @@ aggregate is not a production-release gate. Overlay testing targets the actual
 running source, preserving its newer functionality (including its existing Loki
 implementation and `activity` stream topic). Never replace the live source with
 this older checkout wholesale. The additive overlay does not require migrations.
+
+## Provisioning network setup
+
+`GET /api/v1/environments/{id}/config/provider` adds `supports_provisioning_config`,
+`config_version`, network-only `pxe` values and `provisioning_interfaces`.
+Each connected Ethernet choice has `id`, `name`, IPv4 CIDR `address` and nullable
+`suggested_config`. Suggestions do not establish that the pool is reserved;
+the operator must confirm that independently before starting network services.
+
+Operators save via the existing `PUT .../config/provider` with the existing
+`provider`, `expected_version` and `pxe`: `interface`, `next_server`, `netmask`,
+`range_start`, `range_end`, `gateway`, comma-separated `dns`, integer `http_port`.
+The server checks the interface address and subnet, excludes deployer/gateway
+from the pool, and preserves all other document sections. Version 0 creates the
+first configuration. Stale changed edits return 409; an identical network-only
+retry returns the current version. Invalid fields return 422. No network service
+is started by saving. Existing clients can omit these new fields unchanged.

@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.8
+
+Configure the machine provisioning network from native setup.
+
+- Discover connected Ethernet interfaces and suggest a private address range that excludes the deployer and gateway. Users must reserve that range outside other DHCP pools.
+- Add a network-only configuration update to the existing provider API. Validate addresses against the actual interface subnet, require the current configuration version, preserve unrelated configuration and credentials, and safely accept an identical retry.
+- Saving records configuration only. It does not start DHCP, change interfaces, reboot machines or erase disks. The full native installation and cloud workload journey remains separate acceptance work.
+
 ## 2026.10.27.7
 
 Make the first RAM inspection boot self-contained.
