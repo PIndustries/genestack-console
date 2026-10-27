@@ -1,0 +1,14 @@
+[Unit]
+Description=Expand Genestack appliance writable state
+DefaultDependencies=no
+After=local-fs.target
+Before=genestack-console-prepare.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=90
+ExecStart=/usr/lib/genestack-console/grow-state.py
+
+[Install]
+WantedBy=multi-user.target

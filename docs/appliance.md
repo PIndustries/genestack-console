@@ -50,7 +50,7 @@ The first boot writes `config.yaml`, creates the `admin` user, and stores the pa
 
 ## Boot it
 
-The qcow2 is a 10 GiB disk. Decompress it and give it room for the Genestack checkout and the image cache. SSH does not start. cloud-init still runs. The first boot grows the root filesystem to the size of the virtual disk and writes the admin password on the machine console.
+The qcow2 is a 10 GiB disk. Decompress it and give it room for the Genestack checkout and the image cache. SSH does not start. cloud-init still runs. Before Console preparation, the appliance grows its actual ext4 state partition and filesystem to use the larger disk. Its immutable composefs root stays unchanged. The first boot writes the admin password on the machine console.
 
 ```bash
 xz -d genestack-console-appliance-<version>-amd64.qcow2.xz
