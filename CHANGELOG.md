@@ -6,6 +6,20 @@ The oldest GitHub Release is v2026.10.03. The source history starts two version 
 
 ## Unreleased
 
+- Fix actual UEFI firmware boot: select the EFI iPXE loader from the client's
+  advertised architecture instead of sending the BIOS loader to every machine.
+  Keep the subsequent iPXE HTTP chain and reject unsupported firmware types.
+- Own a read-only TFTP helper restricted to the system bootloader directory and
+  selected machine interface. Include dnsmasq/iPXE in appliance prerequisites,
+  and fail provisioning preparation before a reboot if its services cannot start.
+- Revoke an unfinished inspection token on cancellation or timeout without
+  changing a newer run or a completed inventory report.
+- A real UEFI boot started from the iPhone simulator fetched its loader over
+  TFTP, loaded the RAM inventory image over HTTP, returned exact disk WWIDs and
+  assigned an address without manual entry. Both virtual disks matched their
+  pre-boot byte/hole baselines afterward. This is source-candidate inspection
+  evidence; Talos/OpenStack installation and LAMP acceptance remain open.
+
 - Expose unused dedicated Ethernet ports to native setup, including ports with
   only IPv6 link-local addresses. Suggest an unused private subnet and reject
   existing IPv4/IPv6 uplinks, routed ports, bridge/bond members and virtual links.

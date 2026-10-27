@@ -97,6 +97,9 @@ run_priv podman run --rm --network none --entrypoint /bin/bash "$REF" -ec '
   wget --version >/dev/null
   /usr/lib/genestack-python/bin/python3 -c "import ssl, sqlite3, bz2, lzma, ctypes, readline, venv, ensurepip"
   systemctl is-enabled systemd-timesyncd.service >/dev/null
+  dnsmasq --version >/dev/null
+  test -s /usr/lib/ipxe/ipxe.efi
+  test -s /usr/lib/ipxe/undionly.kpxe
   python3 -c "import ssl, urllib.request, yaml, ensurepip"
 '
 

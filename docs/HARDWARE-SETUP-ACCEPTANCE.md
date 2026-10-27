@@ -126,3 +126,21 @@ master membership and virtual link kinds. It never starts DHCP or reboots a
 machine. A failed reconfiguration removes the new file and reconfigures only the
 selected port. Existing configured networks remain available through the ordinary
 settings-only save path.
+
+## UEFI first-boot regression
+
+The next actual native-triggered RAM boot received a DHCP address but its UEFI
+firmware was offered the BIOS `undionly.kpxe` filename; no TFTP service supplied
+that initial loader. Earlier tests entered iPXE directly and had not tested this
+firmware handoff. Firmware architecture now selects the matching BIOS or x86-64
+EFI loader. A separate dnsmasq process serves read-only files from the system
+bootloader directory on the selected interface, with DNS and DHCP disabled.
+Provisioning readiness includes this helper; missing/bound services fail before
+power actions rather than leaving a machine waiting for an unavailable loader.
+
+The repeated iPhone simulator test passed a real UEFI boot, TFTP loader retrieval,
+HTTP RAM-image boot and accepted inventory report with both exact disk WWIDs.
+The node's provisioning address came from its actual DHCP lease. Independent
+byte/hole baselines verified both virtual disks were unchanged. A cancelled run
+now revokes only its own unfinished inspection token so it can be retried safely.
+The full cloud installer and workload acceptance are still separate steps.

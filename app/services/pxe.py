@@ -670,8 +670,11 @@ def ensure_assets_and_config(
             _log(
                 log,
                 "[pxe] hub L2 runtime applied "
-                f"dhcp={runtime.get('dhcp_running')} http={runtime.get('http_running')}",
+                f"dhcp={runtime.get('dhcp_running')} http={runtime.get('http_running')} tftp={runtime.get('tftp_running')}",
             )
+            if not all(runtime.get(key) for key in ["http_running", "dhcp_running", "tftp_running"]):
+                return {"ok": False, "changed": changed, "runtime": runtime,
+                        "error": runtime.get("tftp_error") or runtime.get("dhcp_error") or runtime.get("http_error") or "Provisioning services are not ready"}
         elif apply_runtime and agent_id:
             # Remote site: agent is the L2 proxy. Do not bind DHCP on the hub.
             runtime = {

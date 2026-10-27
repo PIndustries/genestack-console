@@ -1,4 +1,4 @@
-"""In-process PXE: DHCP + boot-file HTTP, owned by the Console.
+"""Console-owned PXE: in-process DHCP/HTTP plus a read-only bootloader TFTP helper.
 
 Operators get a compiled binary. PXE configuration, leases, and runtime
 state live in Python — not a docker sidecar. The console renders
@@ -25,6 +25,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from app.services.pxe_tftp import BootloaderTftpServer
+
 log = logging.getLogger(__name__)
 
 BOOTREQUEST = 1
@@ -47,6 +49,7 @@ OPT_CLIENT_ID = 61
 OPT_TFTP = 66
 OPT_BOOTFILE = 67
 OPT_USER_CLASS = 77
+OPT_ARCHITECTURE = 93
 OPT_END = 255
 
 SO_BINDTODEVICE = 25
@@ -464,15 +467,22 @@ class DhcpServer:
                 return ip
         return None
 
-    def _boot_file(self, ipxe: bool) -> str:
+    def _boot_file(self, request: DhcpPacket) -> str | None:
         next_server = self.cfg.next_server or self.cfg.gateway
-        if ipxe and next_server:
+        if request.is_ipxe and next_server:
             return f"http://{next_server}:{self.cfg.http_port}/boot.ipxe"
-        return "undionly.kpxe"
+        raw = request.options.get(OPT_ARCHITECTURE)
+        if raw is None:
+            return "undionly.kpxe"
+        if not raw or len(raw) % 2:
+            return None
+        architectures = struct.unpack("!" + "H" * (len(raw) // 2), raw)
+        if any(arch in (7, 9) for arch in architectures):
+            return "ipxe.efi"
+        return "undionly.kpxe" if 0 in architectures else None
 
     def _reply(self, req: DhcpPacket, msg_type: int, yiaddr: str) -> DhcpPacket:
-        ipxe = req.is_ipxe
-        boot = self._boot_file(ipxe)
+        boot = self._boot_file(req) or ""
         server = self.cfg.next_server or self.cfg.gateway or "0.0.0.0"
         opts: dict[int, bytes] = {
             OPT_MSGTYPE: bytes([msg_type]),
@@ -514,6 +524,8 @@ class DhcpServer:
             return None
         msg = req.msg_type
         if msg not in (DHCPDISCOVER, DHCPREQUEST):
+            return None
+        if self._boot_file(req) is None:
             return None
         mac = req.mac.lower()
         hostname = ""
@@ -622,22 +634,29 @@ class DhcpServer:
 
 
 class PxeRuntime:
-    """One DHCP+HTTP pair for a provisioning interface."""
+    """One DHCP/HTTP pair and a bootloader-only helper for a provisioning interface."""
 
     def __init__(self, cfg: PxeNetConfig) -> None:
         self.cfg = cfg
         self.http = PxeHttpServer(cfg.http_bind or "0.0.0.0", cfg.http_port, cfg.root)
         self.dhcp = DhcpServer(cfg)
+        self.tftp = BootloaderTftpServer(cfg.interface, cfg.root / "bootloader-tftp.log")
 
     def start(self) -> dict[str, Any]:
         self.cfg.root.mkdir(parents=True, exist_ok=True)
+        self.tftp.start()
+        if not self.tftp.running:
+            return self.status()
         self.http.start()
         self.dhcp.start()
+        if not self.http.running or not self.dhcp.running:
+            self.stop()
         return self.status()
 
     def stop(self) -> None:
         self.http.stop()
         self.dhcp.stop()
+        self.tftp.stop()
 
     def status(self) -> dict[str, Any]:
         return {
@@ -648,6 +667,8 @@ class PxeRuntime:
             "dhcp_port": self.cfg.dhcp_port,
             "http_running": self.http.running,
             "dhcp_running": self.dhcp.running,
+            "tftp_running": self.tftp.running,
+            "tftp_error": self.tftp.error,
             "http_error": self.http.error,
             "dhcp_error": self.dhcp.error,
             "root": str(self.cfg.root),
@@ -691,6 +712,7 @@ class PxeManager:
             runtimes = {k: v.status() for k, v in self._runtimes.items()}
         any_http = any(item.get("http_running") for item in runtimes.values())
         any_dhcp = any(item.get("dhcp_running") for item in runtimes.values())
+        any_tftp = any(item.get("tftp_running") for item in runtimes.values())
         leases: list[dict[str, Any]] = []
         for item in runtimes.values():
             leases.extend(item.get("leases") or [])
@@ -698,6 +720,7 @@ class PxeManager:
             "running": any_http or any_dhcp,
             "http_running": any_http,
             "dhcp_running": any_dhcp,
+            "tftp_running": any_tftp,
             "sidecar": False,
             "runtimes": runtimes,
             "leases": leases,
