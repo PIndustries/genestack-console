@@ -115,8 +115,9 @@ def _request(
         with _client(host, username, password) as client:
             response = client.request(method, path, json=json)
             # iLO 4: unauthenticated root is 200, Systems/* is 401 until a session exists.
-            if response.status_code in (401, 403) and _open_session(client, username, password):
-                response = client.request(method, path, json=json)
+            if response.status_code in (401, 403):
+                if _open_session(client, username, password):
+                    response = client.request(method, path, json=json)
     except httpx.HTTPError as exc:
         raise RedfishError(f"redfish {method} {path} failed: {exc}") from exc
     if response.status_code >= 400:
