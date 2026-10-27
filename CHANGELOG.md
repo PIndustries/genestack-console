@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.1
+
+Measured RAID inventory for first-cloud setup.
+
+- Read advertised standard Redfish volumes and HPE logical drives, preserving persistent identifiers, measured capacity, health and physical-drive membership.
+- Capacity proposals use whole logical disks on RAID controllers instead of counting their physical members as independently usable disks.
+- Logical-disk proposals require OS-visible identity verification before installation; inventory discovery does not change RAID, boot settings or disks.
+
 ## 2026.10.26.3
 
 First-deployer setup and isolated cloud configuration.

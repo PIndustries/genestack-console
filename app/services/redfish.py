@@ -115,9 +115,8 @@ def _request(
         with _client(host, username, password) as client:
             response = client.request(method, path, json=json)
             # iLO 4: unauthenticated root is 200, Systems/* is 401 until a session exists.
-            if response.status_code in (401, 403):
-                if _open_session(client, username, password):
-                    response = client.request(method, path, json=json)
+            if response.status_code in (401, 403) and _open_session(client, username, password):
+                response = client.request(method, path, json=json)
     except httpx.HTTPError as exc:
         raise RedfishError(f"redfish {method} {path} failed: {exc}") from exc
     if response.status_code >= 400:
@@ -237,6 +236,40 @@ def hardware_inventory(
                 raise RedfishError("Hardware collection exceeded its member limit")
             return [get(ref) for ref in refs]
 
+        def logical_volumes(controller: dict[str, Any], *, legacy: bool) -> list[dict[str, Any]]:
+            link = resource(controller, "LogicalDrives" if legacy else "Volumes")
+            if not link:
+                return []
+            volumes = []
+            for volume in members(link):
+                physical = resource(volume, "DataDrives") if legacy else None
+                if physical:
+                    attached = members(physical)
+                else:
+                    attached = [get(ref) for ref in (volume.get("Links") or {}).get("Drives", [])]
+                identifiers = volume.get("Identifiers") or []
+                identity = volume.get("VolumeUniqueIdentifier")
+                if not identity:
+                    # Only standardized persistent OS-visible identifiers qualify.
+                    identity = next((item.get("DurableName") for item in identifiers
+                                     if item.get("DurableNameFormat") in ("NAA", "EUI", "UUID")), None)
+                capacity = positive(volume.get("CapacityBytes"))
+                if capacity is None and legacy:
+                    mib = positive(volume.get("CapacityMiB"))
+                    capacity = mib * 1024**2 if mib else None
+                volumes.append({
+                    "id": safe_path(volume),
+                    "unique_identifier": identity,
+                    "capacity_bytes": capacity,
+                    "raid_type": volume.get("RAIDType") or volume.get("Raid"),
+                    "health": (volume.get("Status") or {}).get("Health"),
+                    "state": (volume.get("Status") or {}).get("State"),
+                    "physical_drive_serials": sorted({str(d["SerialNumber"]) for d in attached
+                                                       if d.get("SerialNumber")}),
+                    "os_mapping_verified": False,
+                })
+            return volumes
+
         try:
             if check:
                 check()
@@ -277,9 +310,11 @@ def hardware_inventory(
             if memory is None:
                 issues.append("Installed memory is unavailable")
             drives: dict[str, dict[str, Any]] = {}
+            volumes: list[dict[str, Any]] = []
             storage = resource(system, "Storage")
             if storage:
                 for controller in members(storage):
+                    volumes.extend(logical_volumes(controller, legacy=False))
                     for ref in controller.get("Drives") or []:
                         path = safe_path(ref)
                         drive = get(path)
@@ -304,6 +339,7 @@ def hardware_inventory(
                         if not controllers:
                             continue
                         for controller in members(controllers):
+                            volumes.extend(logical_volumes(controller, legacy=True))
                             physical = resource(controller, "PhysicalDrives") or resource(
                                 controller, "DiskDrives"
                             )
@@ -366,6 +402,7 @@ def hardware_inventory(
                 "cpu_cores": cpu_cores,
                 "memory_gib": memory,
                 "drives": list(drives.values()),
+                "logical_volumes": volumes,
                 "nics": nics,
                 "issues": issues,
                 "hardware_modified": False,

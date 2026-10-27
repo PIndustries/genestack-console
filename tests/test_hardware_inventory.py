@@ -214,3 +214,43 @@ def test_cancel_during_discovery_closes_session_without_hardware_writes(bmc):
         redfish.hardware_inventory('bmc.test', 'operator', 'secret', check=check)
     assert calls[-1] == ('DELETE', 'https://bmc.test/redfish/v1/SessionService/Sessions/1')
     assert not any(method in ('PATCH', 'PUT') for method, _ in calls)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_logical_storage_preserves_os_identity_and_physical_membership(bmc, legacy):
+    paths, calls, _ = bmc
+    controller = paths["/redfish/v1/Controllers/1"]
+    if legacy:
+        system = paths["/redfish/v1/Systems/A"]
+        del system["Storage"]
+        system["Oem"] = {"Hp": {"links": {"SmartStorage": {"href": "/redfish/v1/SmartStorage"}}}}
+        paths["/redfish/v1/SmartStorage"] = {"links": {"ArrayControllers": {"href": "/redfish/v1/Storage"}}}
+        controller["links"] = {"LogicalDrives": {"href": "/redfish/v1/Volumes"}}
+    else:
+        controller["Volumes"] = {"@odata.id": "/redfish/v1/Volumes"}
+    paths["/redfish/v1/Volumes"] = {"Members": [{"@odata.id": "/redfish/v1/Volumes/1"}]}
+    volume = {"@odata.id": "/redfish/v1/Volumes/1", "Status": {"Health": "OK", "State": "Enabled"}}
+    if legacy:
+        volume.update(VolumeUniqueIdentifier="60000000000000000000000000000001", CapacityMiB=1024, Raid="1")
+        volume["links"] = {"DataDrives": {"href": "/redfish/v1/VolumeDrives"}}
+        paths["/redfish/v1/VolumeDrives"] = {"Members": [{"@odata.id": "/redfish/v1/Drives/1"}]}
+    else:
+        volume.update(Identifiers=[{"DurableNameFormat": "NAA", "DurableName": "60000000000000000000000000000001"}], CapacityBytes=1024**3, RAIDType="RAID1")
+        volume["Links"] = {"Drives": [{"@odata.id": "/redfish/v1/Drives/1"}]}
+    paths["/redfish/v1/Volumes/1"] = volume
+    report = redfish.hardware_inventory("bmc.test", "operator", "secret")
+    assert len(report["logical_volumes"]) == 1
+    found = report["logical_volumes"][0]
+    assert found["unique_identifier"] == "60000000000000000000000000000001"
+    assert found["capacity_bytes"] == 1024**3
+    assert found["physical_drive_serials"] == ["disk-a"]
+    assert found["os_mapping_verified"] is False
+    assert report["hardware_modified"] is False
+    assert all(method == "GET" or "/SessionService/Sessions" in path for method, path in calls)
+
+
+def test_volume_links_cannot_forward_bmc_credentials(bmc):
+    paths, _, _ = bmc
+    paths["/redfish/v1/Controllers/1"]["Volumes"] = {"@odata.id": "https://other.test/redfish/v1/Volumes"}
+    with pytest.raises(redfish.RedfishError, match="unsafe"):
+        redfish.hardware_inventory("bmc.test", "operator", "secret")

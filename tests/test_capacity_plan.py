@@ -147,3 +147,41 @@ def test_empty_environment_api_flow_discovers_capacity(client, admin_headers, mo
     assert result.json()["allocations"][0]["name"] == "arbitrary-machine"
     current = client.get(f"/api/v1/environments/{env['id']}/config", headers=admin_headers).json()
     assert current["version"] is None
+
+
+def test_mirrored_physical_members_are_not_counted_as_separate_os_disks():
+    node = machine()
+    node["hardware"]["logical_volumes"] = [{
+        "unique_identifier": "60000000000000000000000000000001",
+        "capacity_bytes": 128 * 1024**3, "health": "OK", "state": "Enabled",
+        "physical_drive_serials": ["boot", "data"], "os_mapping_verified": False,
+    }]
+    plan = propose([node])
+    allocation = plan["allocations"][0]
+    assert allocation["proposed_boot_disk_serial"] is None
+    assert allocation["proposed_boot_disk_identifier"] == "60000000000000000000000000000001"
+    assert allocation["disk_identity_kind"] == "logical_volume"
+    assert allocation["candidate_data_disks"] == []
+    assert "storage" not in allocation["proposed_roles"]
+    assert any("OS-visible" in blocker for blocker in plan["blockers"])
+
+
+def test_two_logical_disks_use_persistent_identifiers_not_member_serials():
+    node = machine()
+    node["hardware"]["logical_volumes"] = [
+        {"unique_identifier": "volume-a", "capacity_bytes": 128 * 1024**3, "health": "OK", "state": "Enabled"},
+        {"unique_identifier": "volume-b", "capacity_bytes": 1024 * 1024**3, "health": "OK", "state": "Enabled"},
+    ]
+    allocation = propose([node])["allocations"][0]
+    assert allocation["proposed_boot_disk_identifier"] == "volume-a"
+    assert allocation["candidate_data_disks"] == [{"serial": None, "unique_identifier": "volume-b", "capacity_bytes": 1024 * 1024**3}]
+
+
+def test_unknown_logical_disk_identity_does_not_fall_back_to_raid_members():
+    node = machine()
+    node["hardware"]["logical_volumes"] = [{"capacity_bytes": 1024**4, "health": "OK", "state": "Enabled"}]
+    plan = propose([node])
+    assert plan["blockers"]
+    assert plan["allocations"][0]["proposed_boot_disk_serial"] is None
+    assert plan["allocations"][0]["proposed_boot_disk_identifier"] is None
+    assert plan["allocations"][0]["candidate_data_disks"] == []
