@@ -5,7 +5,7 @@ All routes are env-scoped via ``get_env_scoped`` (tenant membership enforced).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -57,6 +57,53 @@ class ProviderPut(BaseModel):
     network: dict[str, Any] | None = None
     pxe: dict[str, Any] | None = None
     expected_version: int | None = Field(default=None, ge=0)
+
+
+class InstallationReviewPut(BaseModel):
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_version: int = Field(ge=0)
+
+
+@router.put("/config/installation-plan")
+def save_installation_review(
+    body: InstallationReviewPut,
+    db: Annotated[Session, Depends(get_db)],
+    principal: Annotated[Principal, Depends(require_operator)],
+    env: Annotated[Environment, Depends(get_env_scoped("operator"))],
+) -> dict[str, Any]:
+    from app.services import hardware_installation
+
+    try:
+        row = hardware_installation.save_review(
+            db, env, principal.username, body.fingerprint, body.expected_version
+        )
+    except (envconfig_service.ConfigConflictError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="The configuration or hardware changed; review the plan again"
+        ) from exc
+    except envconfig_service.ConfigValidationError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    JobRunner(db).write_audit(
+        actor=principal.username,
+        action="env.installation.reviewed",
+        resource_type="environment",
+        resource_id=env.id,
+        environment_id=env.id,
+        details={
+            "version": row.version,
+            "fingerprint": body.fingerprint,
+            "installation_started": False,
+        },
+    )
+    db.commit()
+    return {
+        "version": row.version,
+        "plan_saved": True,
+        "installation_started": False,
+        "hardware_modified": False,
+    }
 
 
 class ServerRemove(BaseModel):
@@ -176,10 +223,8 @@ def render_config(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # The preview is an API response — never hand back plaintext secrets
     if envconfig_service.KUBESECRETS_FILENAME in files:
-        files[envconfig_service.KUBESECRETS_FILENAME] = (
-            envconfig_service.mask_kubesecrets(
-                files[envconfig_service.KUBESECRETS_FILENAME]
-            )
+        files[envconfig_service.KUBESECRETS_FILENAME] = envconfig_service.mask_kubesecrets(
+            files[envconfig_service.KUBESECRETS_FILENAME]
         )
     return {"version": row.version, "files": files}
 
@@ -243,9 +288,7 @@ def put_config_provider(
 
 
 def _validate_roles(roles: list[str]) -> None:
-    invalid = [
-        r for r in roles if r.lower() not in envconfig_service.VALID_SERVER_ROLES
-    ]
+    invalid = [r for r in roles if r.lower() not in envconfig_service.VALID_SERVER_ROLES]
     if invalid:
         raise HTTPException(
             status_code=422,
@@ -462,9 +505,7 @@ def remove_server(
     env: Environment = Depends(get_env_scoped("operator")),
 ) -> dict[str, Any]:
     """Remove a server entry from the doc — stored as a new config version."""
-    result = envconfig_service.remove_server(
-        db, env, principal.username, hostname=body.hostname
-    )
+    result = envconfig_service.remove_server(db, env, principal.username, hostname=body.hostname)
     if result is None:
         raise HTTPException(
             status_code=404,

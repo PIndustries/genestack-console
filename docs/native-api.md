@@ -192,3 +192,18 @@ installation. Credentials and raw configuration are never returned. The
 fingerprint covers the returned evidence and current configuration version.
 This endpoint does not save configuration, submit a job, reboot, erase or install
 anything. Saving and executing a reviewed installation are separate operations.
+
+`PUT /api/v1/environments/{id}/config/installation-plan` requires an operator,
+an explicit `expected_version`, and the exact review `fingerprint`. It recomputes
+the current hardware review before saving and rejects blockers (422), changed
+configuration or evidence (409). An identical retry after a lost response returns
+the already-created version only while its configuration and evidence still match.
+
+The new configuration version preserves all existing sections and stores only
+the reviewed proposal in `hardware_installation`, with
+`execution_authorized: false`. It does not apply role assignments or disk
+configuration, submit a job, or start installation. The response has `version`,
+`plan_saved: true`, `installation_started: false`, and `hardware_modified: false`.
+Review GET adds `supports_plan_save` and `saved_plan_matches`; the latter becomes
+false if configuration or hardware changes. The saved review survives an app
+restart and remains separate from approval to erase or install machines.

@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## Unreleased
+
+- Save an exact reviewed installation proposal with configuration-version and
+  hardware-evidence checks, safe retry, and explicit separation from execution.
+  Preserve existing configuration and expose whether the saved review still
+  matches current hardware after reopening the app.
+
 ## 2026.10.27.11
 
 Make the appliance use its allocated state disk and expose measured installation review.

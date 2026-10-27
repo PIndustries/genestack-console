@@ -162,6 +162,7 @@ KNOWN_TOP_LEVEL_KEYS = frozenset(
         "pxe",
         "ovh",
         "registry",
+        "hardware_installation",
     }
 )
 
