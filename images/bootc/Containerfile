@@ -13,6 +13,17 @@
 ARG BASE=docker.io/library/ubuntu:26.04
 ARG BOOTC_VERSION=v1.16.14
 ARG BOOTUPD_VERSION=v0.3.2
+FROM ${BASE} AS deployer-python
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl build-essential pkg-config xz-utils \
+        libssl-dev libffi-dev zlib1g-dev libbz2-dev liblzma-dev \
+        libsqlite3-dev libreadline-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY deployer-python.sh /tmp/deployer-python.sh
+RUN bash /tmp/deployer-python.sh /usr/lib/genestack-python /out 2
+
 FROM ${BASE} AS builder
 ARG BOOTC_VERSION
 ARG BOOTUPD_VERSION
@@ -44,6 +55,7 @@ RUN make \
 FROM ${BASE}
 ENV DEBIAN_FRONTEND=noninteractive
 COPY --from=builder /output/ /
+COPY --from=deployer-python /out/usr/lib/genestack-python/ /usr/lib/genestack-python/
 
 RUN printf '%s\n' \
         'do_symlinks = yes' \
@@ -59,6 +71,17 @@ RUN printf '%s\n' \
         ca-certificates \
         curl \
         git \
+        wget \
+        jq \
+        python3-pip \
+        python3-venv \
+        python3-dev \
+        build-essential \
+        libffi8 \
+        libbz2-1.0 \
+        liblzma5 \
+        libsqlite3-0 \
+        libreadline8t64 \
         openssh-server \
         qemu-guest-agent \
         cloud-init \

@@ -127,6 +127,7 @@ class Settings(BaseModel):
     config_path: Path = DEFAULT_CONFIG_PATH
     data_dir: Path = Field(default_factory=lambda: host_prefix() / "data")
     database_url: str = "sqlite:///./data/console.db"
+    sqlite_group: str = ""
     api_keys: dict[str, Role] = Field(
         default_factory=lambda: {
             "dev-admin-key": "admin",
@@ -558,6 +559,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         config_path=path if path.is_file() else DEFAULT_CONFIG_PATH,
         data_dir=data_dir,
         database_url=str(db_url),
+        sqlite_group=str(raw.get("sqlite_group") or "").strip(),
         api_keys=keys,
         genestack_root=genestack_root,
         ansible_root=ansible_root,

@@ -239,3 +239,27 @@ def test_post_viewer_is_403(client, viewer_headers):
     )
     assert response.status_code == 403
     assert _config_text() == before
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_sqlite_database_and_journals_remain_private_for_service_accounts(tmp_path, monkeypatch, shared):
+    import grp
+    import stat
+
+    settings = get_settings()
+    group = grp.getgrgid(os.getegid())
+    monkeypatch.setattr(settings, "sqlite_group", group.gr_name if shared else "")
+    path = tmp_path / "private-state" / "console.db"
+    engine = create_db_engine(f"sqlite:///{path}")
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE test_state (id INTEGER)")
+            connection.exec_driver_sql("INSERT INTO test_state VALUES (1)")
+            for file in [path, Path(str(path) + "-wal"), Path(str(path) + "-shm")]:
+                if file.exists():
+                    assert stat.S_IMODE(file.stat().st_mode) == (0o660 if shared else 0o600)
+                    if shared:
+                        assert file.stat().st_gid == group.gr_gid
+        assert stat.S_IMODE(path.parent.stat().st_mode) == (0o2770 if shared else 0o700)
+    finally:
+        engine.dispose()

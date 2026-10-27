@@ -65,6 +65,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$stage" "$work"' EXIT
 
 cp "$ROOT/images/bootc/Containerfile" "$stage/Containerfile"
+cp "$ROOT/images/bootc/deployer-python.sh" "$stage/deployer-python.sh"
 cp "$ROOT/images/bootc/prepare.sh" "$stage/prepare.sh"
 cp "$ROOT/images/bootc/grow-state.py" "$stage/grow-state.py"
 cp "$ROOT/images/bootc/genestack-console.service" "$stage/genestack-console.service"
@@ -90,8 +91,13 @@ echo "==> appliance onboarding tools"
 run_priv podman run --rm --network none --entrypoint /bin/bash "$REF" -ec '
   curl --version >/dev/null
   git --version >/dev/null
+  cc --version >/dev/null
+  make --version >/dev/null
+  jq --version >/dev/null
+  wget --version >/dev/null
+  /usr/lib/genestack-python/bin/python3 -c "import ssl, sqlite3, bz2, lzma, ctypes, readline, venv, ensurepip"
   systemctl is-enabled systemd-timesyncd.service >/dev/null
-  python3 -c "import ssl, urllib.request, yaml"
+  python3 -c "import ssl, urllib.request, yaml, ensurepip"
 '
 
 # Every part builds this before the qcow2. A missing installer tool fails here,

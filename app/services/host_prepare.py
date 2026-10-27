@@ -166,6 +166,12 @@ def run_host_prepare(
     else:
         probe, _ = _step("repo-probe", f"test -d {quoted_path}")
         fresh = probe.get("returncode") not in (0, None)
+        if not fresh:
+            content, _ = _step(
+                "repo-content-probe",
+                f'test -n "$(find -H {quoted_path} -mindepth 1 -maxdepth 1 -print -quit)"',
+            )
+            fresh = content.get("returncode") not in (0, None)
     if fresh:
         result, failed = _step(
             "repo-clone",

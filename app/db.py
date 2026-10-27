@@ -98,17 +98,19 @@ def _sqlite_path_from_url(url: str) -> Path | None:
     return configured_path(os.fspath(path))
 
 
-def _chmod_owner_only(path: Path) -> None:
-    """Best-effort mode 0600 on console.db (and companions if present)."""
+def _chmod_owner_only(path: Path, group_id: int | None = None) -> None:
+    """Keep state private to its owner or an explicitly configured service group."""
     for candidate in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
         if candidate.is_file():
             try:
-                candidate.chmod(0o600)
+                if group_id is not None:
+                    os.chown(candidate, -1, group_id)
+                candidate.chmod(0o600 if group_id is None else 0o660)
             except OSError:
                 pass
 
 
-def _ensure_sqlite_parent(url: str) -> None:
+def _ensure_sqlite_parent(url: str, group_id: int | None = None) -> None:
     """Create parent directory for SQLite file URLs if needed."""
     path = _sqlite_path_from_url(url)
     if path is None:
@@ -116,7 +118,9 @@ def _ensure_sqlite_parent(url: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Restrict the data dir so newly created DBs are not world-readable.
     try:
-        path.parent.chmod(0o700)
+        if group_id is not None:
+            os.chown(path.parent, -1, group_id)
+        path.parent.chmod(0o700 if group_id is None else 0o2770)
     except OSError:
         pass
 
@@ -124,7 +128,15 @@ def _ensure_sqlite_parent(url: str) -> None:
 def create_db_engine(database_url: str | None = None):
     settings = get_settings()
     url = database_url or settings.database_url
-    _ensure_sqlite_parent(url)
+    group_id = None
+    if url.startswith("sqlite") and settings.sqlite_group:
+        import grp
+
+        try:
+            group_id = grp.getgrnam(settings.sqlite_group).gr_gid
+        except KeyError as exc:
+            raise ValueError("The configured SQLite service group does not exist") from exc
+    _ensure_sqlite_parent(url, group_id)
 
     # SQLite-only connect args and pragmas; nothing driver-specific leaks
     # into other dialects (e.g. postgresql+psycopg://).
@@ -158,11 +170,11 @@ def create_db_engine(database_url: str | None = None):
             # Engine connect may create the file; lock it down once it exists.
             # If it does not exist yet, the first request creates it — harden
             # again via the connect hook below.
-            _chmod_owner_only(db_path)
+            _chmod_owner_only(db_path, group_id)
 
             @event.listens_for(engine, "connect")
             def _chmod_sqlite_file(dbapi_conn, connection_record):  # noqa: ARG001
-                _chmod_owner_only(db_path)
+                _chmod_owner_only(db_path, group_id)
 
     return engine
 

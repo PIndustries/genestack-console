@@ -108,3 +108,20 @@ The disk is `dist/genestack-console-appliance-<version>-amd64.qcow2.xz`. The ins
 The operating system is Ubuntu 26.04 LTS. The build starts from `docker.io/library/ubuntu:26.04` and installs the kernel, OpenSSH, cloud-init, and bootc 1.16.14. Ubuntu 26.04 has the ostree release that bootc links against. The disk boots with GRUB. bootupd installs that bootloader, because bootc's ostree install requires bootupd. bootupd writes the boot environment with `/usr/bin/grub2-editenv`. Ubuntu names that program `grub-editenv`, so the image links the name bootupd expects. The ISO is a second image that boots live and runs `bootc install to-disk` for the appliance image. Its live initramfs needs `dmsetup` and `parted`, because dracut will not build the live module without them. The menu default and the timeout in the ISO config are numbers. Image Builder rejects them when they are quoted. Image Builder reads the install config by running `bootc install print-configuration` in the installer image. That image copies `/usr/bin/bootc` from the appliance image, because Ubuntu does not package bootc. Image Builder then runs `skopeo` in that image to put the appliance image on the CD. It formats the EFI boot image with `mkfs.fat`, and it builds the CD with `/usr/bin/xorrisofs`. Ubuntu names that program `xorriso`, so the image links the name Image Builder runs. `GSC_BOOTC_BASE` selects the Ubuntu image. `GSC_BOOTC_VERSION` selects the bootc release. `GSC_IMAGE_BUILDER` selects the image-builder container. The default is `ghcr.io/osbuild/image-builder-cli:latest`.
 
 A tag on this repository runs that build after the Linux binary is published and attaches the compressed qcow2 and the ISO to the same GitHub Release. The binary, `version.json`, `console.sh`, and `console.ps1` are published first. The qcow2 is attached as soon as it is built. The ISO is attached after that. A later tag publishes its program while this disk or ISO is still building. A failure in the disk build leaves that release in place. A disk that finished stays on the release when the ISO step fails. The disk and ISO uploads do not mark the release latest.
+
+
+### Deployment tooling runtime
+
+The appliance includes a separate Python 3.13.18 runtime for Genestack deployment
+requirements. Ubuntu retains its own Python for operating-system services. The
+image build verifies the [official source checksum](https://www.python.org/downloads/release/python-31318/)
+before compiling the isolated runtime, and checks its standard-library modules
+before converting the image. Preparation retains compatible deployment virtual
+environments and preserves incompatible ones before creating a replacement.
+
+The HTTP API runs as `genestack`. Host preparation and provisioning jobs run in
+the system worker. The generated `sqlite_group: genestack` setting keeps their
+SQLite database and journals accessible to that service group without granting
+access to other users. Installations without this setting retain owner-only
+permissions. Source checkouts remain owned by the system worker; generated
+cloud configuration retains the cloud directory's original account ownership.

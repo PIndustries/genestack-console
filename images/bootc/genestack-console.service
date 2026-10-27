@@ -8,8 +8,10 @@ Requires=genestack-console-prepare.service
 Type=simple
 User=genestack
 Group=genestack
+UMask=0007
 Environment=GSC_PREFIX=/opt/genestack-console
 Environment=CONSOLE_CONFIG=/opt/genestack-console/config.yaml
+Environment=PATH=/opt/genestack-console/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory=/opt/genestack-console
 ExecStart=/opt/genestack-console/bin/genestack-console serve --host 0.0.0.0 --port 8080
 Restart=on-failure
