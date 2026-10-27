@@ -185,7 +185,8 @@ _INITRD_SUFFIXES = ("boot/initramfs.xz", "boot/initramfs", "initramfs.xz", "init
 def _match_member(name: str, suffixes: tuple[str, ...]) -> bool:
     clean = name.lstrip("/").lower()
     # ISO9660 names may be mangled (uppercase, ";1" version suffix, 8.3).
-    clean = clean.split(";")[0]
+    # An extensionless ISO9660 file is represented as VMLINUZ.;1.
+    clean = clean.split(";")[0].rstrip(".")
     return any(clean.endswith(suffix) for suffix in suffixes)
 
 
