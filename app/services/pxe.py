@@ -501,7 +501,7 @@ def _write_mac_profiles(
             wipe_wwids=profile.get("wipe_wwids"),
             node_id=profile.get("node_id"),
         )
-        needs |= profile_from_script(script) == "commission"
+        needs |= profile_from_script(script) in ("commission", "inspect")
         changed |= _write_if_changed(mac_dir / filename, script, log)
     return changed, needs
 

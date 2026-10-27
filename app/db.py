@@ -72,6 +72,7 @@ _BAREMETAL_NODE_COLUMN_MIGRATIONS = {
     "commission_report": "TEXT",
     "commission_wipe_wwids": "TEXT",
     "hardware_report": "TEXT",
+    "os_inventory_report": "TEXT",
     "boot_log": "TEXT",
     "wiped_at": "TIMESTAMP",
     "talos_served_at": "TIMESTAMP",

@@ -210,3 +210,9 @@ Run from source when you are changing the console and testing that change. A pro
 | The Machines row and the management-port wall | [The console web page](ui.md) |
 | Every job, including deploy and the wipe | [Jobs](jobs.md) |
 | The screens | [The console web page](ui.md) |
+
+### Read disk identities before approving installation
+
+`baremetal.node.inspect` prepares a RAM inventory profile for one registered machine. Hardware discovery must first provide its serial and provisioning MAC. Preparation alone does not reboot. Passing `boot_now: true` explicitly restarts that machine, waits for its inventory report, and leaves it powered off. This interrupts an existing OS, so review the named target before starting. The RAM inventory does not mount or write disks. It does not start commissioning or Talos installation.
+
+The report binds the machine serial and provisioning MAC, records disk WWIDs and NIC carrier state, and excludes remote/read-only disks from installation reconciliation. Capacity planning accepts this evidence for 24 hours. A fresh read-only report is separate from the reviewed destructive disk allowlist.

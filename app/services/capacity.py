@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BaremetalNode, Environment
+from app.services.hardware_inspection import evidence
 
 MAX_REPORT_AGE = timedelta(hours=24)
 
@@ -56,9 +58,14 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
             continue
         if not node.get("ip") or not node.get("mac"):
             blockers.append(f"{name}: provisioning IP and PXE MAC are required")
+        os_facts = evidence(node, now=now)
         up_nics = [
             n for n in report.get("nics", []) if n.get("link_status") == "LinkUp" and n.get("mac")
         ]
+        if os_facts:
+            advertised = {str(n.get("mac") or "").lower() for n in report.get("nics", [])}
+            up_nics = [dict(n, link_status="LinkUp") for n in os_facts["nics"]
+                       if n.get("link_up") is True and str(n.get("mac") or "").lower() in advertised]
         if not up_nics:
             blockers.append(f"{name}: a verified connected network interface is required")
         logical = report.get("logical_volumes") or []
@@ -66,7 +73,21 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
             # A RAID member's serial is not an installable OS disk. Only whole
             # logical volumes may contribute, and OS discovery must reconcile them.
             disk_inventory = [dict(d, serial=d.get("unique_identifier")) for d in logical]
-            blockers.append(f"{name}: verify logical-volume identifiers against OS-visible disks before installation")
+            if os_facts:
+                def canonical(value):
+                    return re.sub(r"^(?:naa\.|eui\.|0x)", "", str(value or "").lower())
+                local = {canonical(d["wwid"]): d for d in os_facts["disks"]
+                         if d["wwid"] and not d["remote"] and not d["readonly"]}
+                reconciled = []
+                for disk in disk_inventory:
+                    match = local.get(canonical(disk.get("unique_identifier")))
+                    if match:
+                        reconciled.append(dict(disk, serial=match["wwid"], capacity_bytes=match["size_sectors"] * 512))
+                    else:
+                        blockers.append(f"{name}: logical volume {disk.get('unique_identifier') or 'unknown'} has no verified local writable OS disk")
+                disk_inventory = reconciled
+            else:
+                blockers.append(f"{name}: verify logical-volume identifiers against OS-visible disks before installation")
         else:
             disk_inventory = report.get("drives", [])
         healthy = [
@@ -97,6 +118,7 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
                 "observed_at": report["observed_at"],
                 "disks": healthy,
                 "logical_storage": bool(logical),
+                "os_inventory_verified": bool(os_facts),
                 "connected_nics": up_nics,
             }
         )
@@ -146,6 +168,7 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
                      "unique_identifier": d["serial"] if node["logical_storage"] else None,
                      "capacity_bytes": d["capacity_bytes"]} for d in data
                 ],
+                "os_inventory_verified": node["os_inventory_verified"],
                 "measurement_time": node["observed_at"],
             }
         )
@@ -181,6 +204,7 @@ def for_environment(db: Session, env: Environment) -> dict[str, Any]:
                 "ip": n.expected_ip,
                 "mac": n.pxe_mac,
                 "hardware": n.hardware_report,
+                "os_inventory": n.os_inventory_report,
             }
             for n in rows
         ]

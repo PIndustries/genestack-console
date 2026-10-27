@@ -15,6 +15,7 @@ class BaremetalModule(Module):
         "node_register",
         "nodes_list",
         "hardware_discover",
+        "node_inspect",
         "bmc_scan",
         "node_actions",
     )

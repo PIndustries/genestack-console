@@ -246,6 +246,18 @@ boot
 """
 
 
+def render_inspection_ipxe(assets_base_url: str, token: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", str(token or "")):
+        return render_disk_ipxe()
+    base = assets_base_url.rstrip("/")
+    return f"""#!ipxe
+# profile: inspect
+kernel {base}/assets/commission/vmlinuz-lts modloop={base}/assets/commission/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=0 gsc_token={token} gsc_report={base}/commission/{token} console=tty0 console=ttyS0,115200
+initrd {base}/assets/commission/initramfs-lts
+boot
+"""
+
+
 def render_ubuntu_ipxe(assets_base_url: str, hostname: str | None = None) -> str:
     """Ubuntu autoinstall. A hostname uses that machine's own seed directory."""
     base = assets_base_url.rstrip("/")
@@ -278,6 +290,8 @@ def render_profile_ipxe(
     choice = str(next_boot or "disk").strip().lower()
     if choice == "commission":
         script = render_commission_ipxe(assets_base_url, token or "", wipe_wwids)
+    elif choice == "inspect":
+        script = render_inspection_ipxe(assets_base_url, token or "")
     elif choice == "talos":
         script = render_talos_ipxe(assets_base_url)
     elif choice == "ubuntu":

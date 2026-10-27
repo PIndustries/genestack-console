@@ -78,6 +78,7 @@ def node_payload(node: BaremetalNode) -> dict[str, Any]:
         "commission": commission_summary(node.commission_report),
         "commission_wipe_wwids": list(node.commission_wipe_wwids or []),
         "hardware": node.hardware_report,
+        "os_inventory": node.os_inventory_report,
         "boot_log": list(node.boot_log or [])[-5:],
         "last_seen": node.last_seen.isoformat() if node.last_seen else None,
         "created_at": node.created_at.isoformat() if node.created_at else None,
@@ -455,8 +456,17 @@ def begin_commission(
     node.state = "booting"
     db.add(node)
     db.flush()
-    prepared = _prepare_pxe(db, env, settings, log)
+    try:
+        prepared = _prepare_pxe(db, env, settings, log)
+    except Exception:  # noqa: BLE001 -- a failed preparation must revoke destructive boot authorization
+        prepared = {"ok": False, "error": "PXE preparation failed; commissioning was disarmed", "returncode": 2}
     if isinstance(prepared, dict) and prepared.get("ok") is False:
+        node.next_boot = "disk"
+        node.boot_stage = "failed"
+        node.commission_token = None
+        node.commission_wipe_wwids = None
+        db.add(node)
+        db.flush()
         return prepared
     log(f"[baremetal] {node.name} next boot is the commission RAM disk")
     if boot_now:
@@ -645,14 +655,17 @@ def guarded_commission_profile(root: str, url_path: str) -> str | None:
         if path.stat().st_size > 8192:
             return render_disk_ipxe()
         script = path.read_text(encoding="utf-8")
-        if profile_from_script(script) != "commission":
+        profile = profile_from_script(script)
+        if profile not in ("commission", "inspect"):
             return render_disk_ipxe() if "gsc_wipe=1" in script else script
         bindings = re.findall(r"^# node-id: ([A-Za-z0-9-]{1,64})$", script, re.MULTILINE)
         tokens = re.findall(r"(?:^|\s)gsc_token=([^\s]+)", script)
         plans = re.findall(r"(?:^|\s)gsc_allow_wwids=([^\s]+)", script)
-        if len(bindings) != 1 or len(tokens) != 1 or len(plans) != 1:
+        if len(bindings) != 1 or len(tokens) != 1 or (profile == "commission" and len(plans) != 1):
             return render_disk_ipxe()
-        allowed = validate_wipe_wwids(plans[0].split(","))
+        if profile == "inspect" and (plans or "gsc_wipe=1" in script):
+            return render_disk_ipxe()
+        allowed = validate_wipe_wwids(plans[0].split(",")) if profile == "commission" else None
         with SessionLocal() as db:
             nodes = db.scalars(select(BaremetalNode).where(BaremetalNode.commission_token == tokens[0])).all()
             if len(nodes) != 1:
@@ -660,8 +673,9 @@ def guarded_commission_profile(root: str, url_path: str) -> str | None:
             node = nodes[0]
             if (bindings[0] != node.id
                 or normalize_mac(node.pxe_mac) != normalize_mac(filename[:-5])
-                or node.next_boot != "commission" or node.boot_stage != "commissioning"
-                or allowed != validate_wipe_wwids(node.commission_wipe_wwids)):
+                or node.next_boot != profile
+                or node.boot_stage != ("commissioning" if profile == "commission" else "inspecting")
+                or (profile == "commission" and allowed != validate_wipe_wwids(node.commission_wipe_wwids))):
                 return render_disk_ipxe()
         return script
     except (OSError, ValueError):
@@ -735,6 +749,10 @@ def ingest_commission(token: str, body: Any) -> dict[str, Any]:
         )
         if node is None:
             return {"ok": False, "error": "unknown commission token"}
+        if node.next_boot == "inspect" or node.boot_stage == "inspecting":
+            from app.services.hardware_inspection import ingest
+
+            return ingest(db, node, body)
         if node.wiped_at is not None and node.boot_stage in (
             "commissioned",
             "talos",

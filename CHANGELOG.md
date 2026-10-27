@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.4
+
+RAM inspection before installation planning.
+
+- Prepare a separate read-only inventory profile. Rebooting requires an explicit job parameter; the machine reports OS disk WWIDs and NIC carrier state and powers off without disk writes.
+- Match reports to the registered machine serial and provisioning NIC. Reject write claims, malformed or duplicate disk facts, and reused tokens. Read-only inspection never marks a machine commissioned or serves Talos.
+- Reconcile fresh RAID logical identities against measured local writable OS disks, preserving the exact OS WWID for a later reviewed installation plan. Remote disks cannot satisfy this gate.
+- Inspection is separate from installation and does not authorize a physical rebuild.
+
 ## 2026.10.27.3
 
 Reviewed local-disk commissioning scope.

@@ -289,3 +289,20 @@ def test_allowlist_fits_boot_command_line():
 
     with pytest.raises(ValueError, match="command-line budget"):
         bootselect.validate_wipe_wwids(["naa." + format(i, "064x") for i in range(32)])
+
+
+import pytest
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_failed_preparation_revokes_commission_profile(monkeypatch, raises):
+    target = SimpleNamespace(id="node", name="host", pxe_mac=MAC, next_boot="disk", commission_token=None)
+    def fail(*a):
+        if raises:
+            raise OSError("fixture preparation failed")
+        return {"ok": False, "error": "fixture preparation failed"}
+    monkeypatch.setattr(baremetal, "_prepare_pxe", fail)
+    result = baremetal.begin_commission(Mock(), SimpleNamespace(), target, log=lambda _: None, wipe_disk_wwids=[A])
+    assert result["ok"] is False
+    assert target.next_boot == "disk" and target.commission_token is None
+    assert target.commission_wipe_wwids is None

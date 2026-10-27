@@ -703,6 +703,7 @@ class BaremetalNode(Base):
     commission_wipe_wwids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     # Non-destructive BMC inventory, separate from the destructive wipe report.
     hardware_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    os_inventory_report: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     boot_log: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     wiped_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
