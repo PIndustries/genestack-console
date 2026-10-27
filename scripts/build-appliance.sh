@@ -83,6 +83,16 @@ run_priv podman build \
   -f "$stage/Containerfile" \
   "$stage"
 
+# Exercise the installed runtime, not the toolchain builder stage. The native
+# app's copied account-link command needs curl before it can install anything;
+# deploy-host preparation probes git before cloning Genestack.
+echo "==> appliance onboarding tools"
+run_priv podman run --rm --network none --entrypoint /bin/bash "$REF" -ec '
+  curl --version >/dev/null
+  git --version >/dev/null
+  python3 -c "import ssl, urllib.request, yaml"
+'
+
 # Every part builds this before the qcow2. A missing installer tool fails here,
 # before the long disk pass. The ISO part builds it again from the local cache.
 echo "==> installer image ${ISO_REF}"
