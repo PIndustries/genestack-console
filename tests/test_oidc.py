@@ -204,7 +204,7 @@ def test_callback_state_is_single_use(client, monkeypatch):
     _enable_oidc(monkeypatch)
     _mock_metadata(monkeypatch)
     email = f"sso-replay-{uuid.uuid4().hex[:8]}@example.com"
-    state, nonce, claims = _finish_flow(client, email)
+    state, _nonce, claims = _finish_flow(client, email)
     _mock_exchange(monkeypatch, claims)
     params = {"code": "abc", "state": state}
     first = client.get(
@@ -375,7 +375,7 @@ def test_hosted_mode_portal_issuer(client, admin_headers, monkeypatch):
     )
     _mock_metadata(monkeypatch)
     email = f"hosted-{uuid.uuid4().hex[:8]}@example.com"
-    state, nonce, claims = _finish_flow(client, email)
+    state, _nonce, claims = _finish_flow(client, email)
     claims["iss"] = "https://app.genestack.dev"
     claims["aud"] = "genestack-console"
     claims["gsc_tenant_id"] = tenant_resp.json()["id"]
@@ -552,3 +552,53 @@ def test_provision_user_gsc_role_defaults_to_viewer(client, monkeypatch):
     ).json()
     tenants = {t["name"]: t["role"] for t in who["tenants"]}
     assert tenants == {"oidc-role-default": "viewer"}
+
+
+@pytest.mark.parametrize(
+    "override,accepted",
+    [
+        ({"iat": 1_790_000_001}, True),
+        ({"iat": 1_790_000_030}, True),
+        ({"iat": 1_790_000_031}, False),
+        ({"nbf": 1_790_000_031}, False),
+        ({"exp": 1_789_999_969}, False),
+        ({"iss": "https://other.example.com"}, False),
+        ({"aud": "another-console"}, False),
+        ({"_wrong_signer": True}, False),
+    ],
+)
+def test_signed_provider_tokens_allow_only_bounded_clock_skew(monkeypatch, override, accepted):
+    """Exercise actual ES256 signature/JWKS/claim validation used by the hub."""
+    import httpx
+    from joserfc import jwt
+    from joserfc.jwk import ECKey
+
+    settings = _enable_oidc(monkeypatch)
+    _mock_metadata(monkeypatch)
+    monkeypatch.setattr("joserfc._rfc7519.claims.time.time", lambda: 1_790_000_000)
+    key = ECKey.generate_key("P-256")
+    key.ensure_kid()
+    claims = {"iss": _ISSUER, "aud": "console-client", "sub": "test-user",
+              "iat": 1_790_000_000, "exp": 1_790_000_300, "nonce": "reviewed-nonce"}
+    claims.update({k: v for k, v in override.items() if not k.startswith("_")})
+    signer = ECKey.generate_key("P-256") if override.get("_wrong_signer") else key
+    encoded = jwt.encode({"alg": "ES256", "kid": key.kid}, claims, signer)
+
+    def post(url, *, data, timeout):
+        assert url == _META["token_endpoint"]
+        assert data["grant_type"] == "authorization_code" and data["code"] == "test-code"
+        return httpx.Response(200, json={"id_token": encoded}, request=httpx.Request("POST", url))
+
+    def get(url, *, timeout):
+        assert url == _META["jwks_uri"]
+        return httpx.Response(200, json={"keys": [key.as_dict(private=False)]},
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(oidc_mod.httpx, "post", post)
+    monkeypatch.setattr(oidc_mod.httpx, "get", get)
+    if accepted:
+        assert oidc_mod.exchange_code(settings, "test-code") == claims
+    else:
+        from joserfc.errors import BadSignatureError, ExpiredTokenError, InvalidClaimError
+        with pytest.raises((InvalidClaimError, ExpiredTokenError, BadSignatureError, ValueError)):
+            oidc_mod.exchange_code(settings, "test-code")

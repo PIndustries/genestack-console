@@ -44,6 +44,7 @@ from app.models import Membership, Tenant, User, UserRole
 
 STATE_TTL_SECONDS = 600
 _HTTP_TIMEOUT = 10.0
+_CLOCK_SKEW_SECONDS = 30
 _SUPPORTED_ALGS = ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"]
 
 _state_lock = threading.Lock()
@@ -218,7 +219,8 @@ def exchange_code(settings: Settings, code: str) -> dict[str, Any]:
     # checks go through JWTClaimsRegistry.validate (Token has no .validate).
     token = jwt.decode(id_token, key_set, algorithms=_SUPPORTED_ALGS)
     claims = dict(token.claims)
-    JWTClaimsRegistry().validate(claims)
+    # Preserve time validation while allowing bounded clock skew between hosts.
+    JWTClaimsRegistry(leeway=_CLOCK_SKEW_SECONDS).validate(claims)
 
     issuer = settings.oidc_issuer_url.rstrip("/")
     if claims.get("iss") != issuer:
