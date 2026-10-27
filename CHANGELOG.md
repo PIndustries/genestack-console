@@ -4,7 +4,22 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
-## Unreleased
+## 2026.10.27.11
+
+Make the appliance use its allocated state disk and expose measured installation review.
+
+- Grow the actual ext4 state partition and filesystem before Console preparation.
+  Bootc mounts `/` as immutable composefs and `/sysroot` read-only; use the
+  writable `/var` bind of the same verified block device for online filesystem
+  growth. Leave unrelated disks and mount modes unchanged.
+- Disable cloud-init's incompatible composefs root-resize attempt. Include the
+  partition-growth tool in the appliance and bound the first-boot service.
+- Include locale and distribution helpers in the image and use the built-in
+  C.UTF-8 locale, so first boot does not attempt package installation into an
+  immutable operating system.
+- A clean published .10 appliance on a 40 GiB virtual disk reproduced the 8.3 GiB
+  state limitation. The candidate helper expanded it to 37.8 GiB and a second run
+  left its size unchanged. A newly built .11 image still needs first-boot testing.
 
 - Add a read-only installation review with exact, fresh OS disk identities,
   measured capacities, automatic role proposals, and explicit blockers. This

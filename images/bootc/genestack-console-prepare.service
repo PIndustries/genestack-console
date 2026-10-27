@@ -1,7 +1,8 @@
 [Unit]
 Description=Prepare Genestack Console state
 DefaultDependencies=no
-After=local-fs.target
+After=local-fs.target genestack-console-grow-state.service
+Wants=genestack-console-grow-state.service
 Before=genestack-console.service genestack-console-worker.service
 
 [Service]

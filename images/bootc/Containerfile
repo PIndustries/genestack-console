@@ -60,6 +60,9 @@ RUN printf '%s\n' \
         openssh-server \
         qemu-guest-agent \
         cloud-init \
+        cloud-guest-utils \
+        locales \
+        lsb-release \
         sudo \
         openssl \
         dosfstools \
@@ -223,16 +226,18 @@ RUN set -eu; \
 
 COPY genestack-console /usr/lib/genestack-console/genestack-console
 COPY prepare.sh /usr/lib/genestack-console/prepare.sh
+COPY grow-state.py /usr/lib/genestack-console/grow-state.py
 COPY genestack-console.service /usr/lib/systemd/system/genestack-console.service
 COPY genestack-console-worker.service /usr/lib/systemd/system/genestack-console-worker.service
 COPY genestack-console-prepare.service /usr/lib/systemd/system/genestack-console-prepare.service
+COPY genestack-console-grow-state.service /usr/lib/systemd/system/genestack-console-grow-state.service
 COPY 10-genestack-cloud.cfg /etc/cloud/cloud.cfg.d/10-genestack.cfg
 
-RUN chmod 0755 /usr/lib/genestack-console/genestack-console /usr/lib/genestack-console/prepare.sh \
+RUN chmod 0755 /usr/lib/genestack-console/genestack-console /usr/lib/genestack-console/prepare.sh /usr/lib/genestack-console/grow-state.py \
     && mkdir -p /var/opt /var/lib/genestack-console/bin /var/lib/genestack-console/data /var/lib/genestack /etc/genestack \
     && ln -sfn /var/lib/genestack-console /opt/genestack-console \
     && ln -sfn /var/lib/genestack /opt/genestack \
-    && systemctl enable genestack-console-prepare.service genestack-console.service genestack-console-worker.service \
+    && systemctl enable genestack-console-grow-state.service genestack-console-prepare.service genestack-console.service genestack-console-worker.service \
     && printf '%s\n' 'genestack ALL=(root) NOPASSWD: /usr/bin/bootc' \
       > /etc/sudoers.d/genestack-bootc \
     && chmod 0440 /etc/sudoers.d/genestack-bootc

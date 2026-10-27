@@ -66,12 +66,14 @@ trap 'rm -rf "$stage" "$work"' EXIT
 
 cp "$ROOT/images/bootc/Containerfile" "$stage/Containerfile"
 cp "$ROOT/images/bootc/prepare.sh" "$stage/prepare.sh"
+cp "$ROOT/images/bootc/grow-state.py" "$stage/grow-state.py"
 cp "$ROOT/images/bootc/genestack-console.service" "$stage/genestack-console.service"
 cp "$ROOT/images/bootc/genestack-console-worker.service" "$stage/genestack-console-worker.service"
 cp "$ROOT/images/bootc/genestack-console-prepare.service" "$stage/genestack-console-prepare.service"
+cp "$ROOT/images/bootc/genestack-console-grow-state.service" "$stage/genestack-console-grow-state.service"
 cp "$ROOT/images/bootc/10-genestack-cloud.cfg" "$stage/10-genestack-cloud.cfg"
 cp "$ELF" "$stage/genestack-console"
-chmod 0755 "$stage/prepare.sh" "$stage/genestack-console"
+chmod 0755 "$stage/prepare.sh" "$stage/grow-state.py" "$stage/genestack-console"
 
 echo "==> bootc image ${REF}"
 run_priv podman build \
