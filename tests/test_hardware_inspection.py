@@ -176,3 +176,76 @@ def test_inspection_job_cannot_prepare_a_node_in_another_cloud(client, admin_hea
     job = _submit(client, admin_headers, env["id"], "baremetal.node.inspect", {"node_id": identity, "boot_now": True})
     assert job["status"] == "failed"
     prepare.assert_not_called()
+
+
+def test_management_only_node_learns_boot_nic_and_lease_from_real_http_exchange(tmp_path, monkeypatch):
+    import json
+    import urllib.request
+    import uuid
+
+    from app.db import SessionLocal
+    from app.models import BaremetalNode, Environment
+    from app.services.pxe_runtime import PxeHttpServer
+
+    second = "aa:bb:cc:00:00:02"
+    unknown = "aa:bb:cc:00:00:ff"
+    token = uuid.uuid4().hex; identity = _stored_node(token)
+    with SessionLocal() as db:
+        target = db.get(BaremetalNode, identity)
+        target.next_boot = "inspect"; target.boot_stage = "inspecting"; target.pxe_mac = None
+        target.expected_ip = None
+        target.hardware_report = {"serial": report()["serial"], "nics": [{"mac": MAC}, {"mac": second}]}
+        db.commit()
+        profiles = baremetal.boot_profiles(db, db.get(Environment, target.environment_id))
+        assert {p["pxe_mac"] for p in profiles} == {MAC, second}
+        assert all(p["expected_ip"] is None for p in profiles)
+    directory = tmp_path / "mac"; directory.mkdir()
+    script = bootselect.render_profile_ipxe("inspect", "http://192.0.2.1", token, node_id=identity)
+    for mac in [MAC, second, unknown]:
+        (directory / (mac.replace(":", "-") + ".ipxe")).write_text(script)
+    monkeypatch.setattr(baremetal, "_lease_ip", lambda mac: "192.0.2.77" if mac == second else "")
+    server = PxeHttpServer("127.0.0.1", 0, tmp_path); server.start()
+    try:
+        base = "http://127.0.0.1:" + str(server._httpd.server_address[1])
+        def get(mac):
+            with urllib.request.urlopen(base + "/mac/" + mac.replace(":", "-") + ".ipxe", timeout=5) as response:
+                return response.read().decode()
+        assert "# profile: disk" in get(unknown)
+        with SessionLocal() as db:
+            assert db.get(BaremetalNode, identity).pxe_mac is None
+        assert "gsc_wipe=0" in get(second)
+        # Once the real boot NIC is observed, another alias cannot replace it.
+        assert "# profile: disk" in get(MAC)
+        body = report(); body["nics"] = [{"mac": second, "link_up": True}]
+        req = urllib.request.Request(base + "/commission/" + token, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            assert json.load(response)["ok"] is True
+        with SessionLocal() as db:
+            target = db.get(BaremetalNode, identity)
+            assert target.pxe_mac == second and target.expected_ip == "192.0.2.77"
+            assert target.os_inventory_report["boot_mac"] == second
+            assert target.wiped_at is None and target.next_boot == "disk"
+    finally:
+        server.stop()
+
+
+def test_inspection_preparation_does_not_require_guessing_first_bmc_nic(monkeypatch):
+    target = node(); target.pxe_mac = None
+    monkeypatch.setattr(baremetal, "_prepare_pxe", lambda *a: {"ok": True})
+    power = Mock(side_effect=AssertionError("preparation must not reboot"))
+    monkeypatch.setattr(baremetal, "pxe_boot", power)
+    result = hardware_inspection.begin(Mock(), SimpleNamespace(), target, dry_run=False, log=lambda _: None)
+    assert result["ok"] and target.pxe_mac is None
+    power.assert_not_called()
+
+
+def test_registration_can_keep_a_single_unambiguous_interface(client, admin_headers, monkeypatch):
+    from app.services import redfish
+    from tests.test_baremetal import _create_env, _node_row, _register_params, _submit
+
+    monkeypatch.setattr(redfish, "system_macs", lambda *a: [MAC, MAC])
+    env = _create_env(client, admin_headers, dry_run=False)
+    job = _submit(client, admin_headers, env["id"], "baremetal.node.register", _register_params("single-interface"))
+    assert job["status"] == "success"
+    assert _node_row(env["id"], "single-interface")["pxe_mac"] == MAC

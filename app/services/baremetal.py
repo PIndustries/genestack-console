@@ -120,8 +120,9 @@ def register_node(
     """Validate and upsert a bare-metal node (keyed by env + name).
 
     The BMC password is fernet-encrypted at rest. When ``pxe_mac`` is absent
-    the node's ethernet MACs are probed over Redfish to autofill it (the
-    first interface MAC wins); the probe is skipped on dry-run and a probe
+    the node's ethernet MACs are probed over Redfish. A single unique MAC
+    may be filled; multiple NICs remain unselected until RAM inspection.
+    The probe is skipped on dry-run and a probe
     failure only logs a warning — registration still succeeds without a MAC.
     """
     op_id = "baremetal.node.register"
@@ -196,11 +197,12 @@ def register_node(
                 f"[baremetal] mac autofill probe failed for {name}: {exc} — continuing without"
             )
         else:
-            if macs:
-                node.pxe_mac = macs[0]
-                log(
-                    f"[baremetal] autofilled pxe_mac={node.pxe_mac} from redfish ({len(macs)} found)"
-                )
+            unique = sorted({normalize_mac(mac) for mac in macs if normalize_mac(mac)})
+            if len(unique) == 1:
+                node.pxe_mac = unique[0]
+                log(f"[baremetal] autofilled pxe_mac={node.pxe_mac} from the single reported interface")
+            elif unique:
+                log(f"[baremetal] {name} has multiple interfaces; RAM inspection will identify the boot NIC")
             else:
                 log(f"[baremetal] redfish reported no ethernet MACs for {name}")
     db.add(node)
@@ -404,17 +406,17 @@ def boot_profiles(db: Session, env: Environment) -> list[dict[str, Any]]:
     stmt = select(BaremetalNode).where(BaremetalNode.environment_id == env.id)
     profiles: list[dict[str, Any]] = []
     for node in db.scalars(stmt).all():
-        profiles.append(
-            {
-                "name": node.name,
-                "node_id": node.id,
-                "pxe_mac": node.pxe_mac,
-                "expected_ip": node.expected_ip,
-                "next_boot": node.next_boot or "disk",
-                "token": node.commission_token or "",
+        from app.services.hardware_inspection import candidate_macs
+
+        macs = candidate_macs(node) if node.next_boot == "inspect" else [node.pxe_mac]
+        for mac in macs:
+            profiles.append({
+                "name": node.name, "node_id": node.id, "pxe_mac": mac,
+                # Never reserve the same address against every unproven NIC.
+                "expected_ip": node.expected_ip if normalize_mac(mac) == normalize_mac(node.pxe_mac) else None,
+                "next_boot": node.next_boot or "disk", "token": node.commission_token or "",
                 "wipe_wwids": node.commission_wipe_wwids,
-            }
-        )
+            })
     return profiles
 
 
@@ -671,8 +673,11 @@ def guarded_commission_profile(root: str, url_path: str) -> str | None:
             if len(nodes) != 1:
                 return render_disk_ipxe()
             node = nodes[0]
+            from app.services.hardware_inspection import candidate_macs
+
+            permitted_macs = candidate_macs(node) if profile == "inspect" else [normalize_mac(node.pxe_mac)]
             if (bindings[0] != node.id
-                or normalize_mac(node.pxe_mac) != normalize_mac(filename[:-5])
+                or normalize_mac(filename[:-5]) not in permitted_macs
                 or node.next_boot != profile
                 or node.boot_stage != ("commissioning" if profile == "commission" else "inspecting")
                 or (profile == "commission" and allowed != validate_wipe_wwids(node.commission_wipe_wwids))):
@@ -700,7 +705,18 @@ def record_boot_fetch(root: str, url_path: str, *, script: str | None = None) ->
     with SessionLocal() as db:
         binding = re.search(r"^# node-id: ([A-Za-z0-9-]{1,64})$", script, re.MULTILINE)
         node = db.get(BaremetalNode, binding[1]) if binding else _find_node_by_mac(db, mac.replace("-", ":"))
-        if node is not None and normalize_mac(node.pxe_mac) != normalize_mac(mac):
+        if node is not None and profile == "inspect":
+            from app.services.hardware_inspection import candidate_macs
+
+            tokens = re.findall(r"(?:^|\s)gsc_token=([^\s]+)", script)
+            if (node.next_boot == "inspect" and node.boot_stage == "inspecting"
+                and len(tokens) == 1 and tokens[0] == node.commission_token
+                and normalize_mac(mac) in candidate_macs(node)):
+                # This is the NIC that actually fetched the authorized PXE profile.
+                node.pxe_mac = normalize_mac(mac)
+            else:
+                node = None
+        elif node is not None and normalize_mac(node.pxe_mac) != normalize_mac(mac):
             node = None
         if node is None:
             return

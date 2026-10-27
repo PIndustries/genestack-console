@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.5
+
+Discover the provisioning NIC from the actual RAM boot.
+
+- Management-only registration leaves multiple network interfaces unselected instead of guessing the first one.
+- Read-only inspection can serve bound non-writing profiles to advertised NICs until the machine actually fetches one. Unknown NICs and a replacement alias are rejected.
+- A validated RAM report records the observed boot MAC and, when available, its DHCP lease as the provisioning address. Alternate unproven NICs do not receive duplicate address reservations.
+- Commissioning still requires the exact selected provisioning MAC and reviewed disk allowlist; inspection aliases cannot authorize a wipe.
+
 ## 2026.10.27.4
 
 RAM inspection before installation planning.
