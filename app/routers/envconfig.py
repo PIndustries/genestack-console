@@ -55,6 +55,8 @@ class ProviderPut(BaseModel):
     talos: dict[str, Any] | None = None
     deploy: dict[str, Any] | None = None
     network: dict[str, Any] | None = None
+    pxe: dict[str, Any] | None = None
+    expected_version: int | None = Field(default=None, ge=0)
 
 
 class ServerRemove(BaseModel):
@@ -208,7 +210,14 @@ def put_config_provider(
             talos=body.talos,
             deploy=body.deploy,
             network=body.network,
+            pxe=body.pxe,
+            expected_version=body.expected_version,
         )
+    except (envconfig_service.ConfigConflictError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="Configuration changed; reload before saving"
+        ) from exc
     except envconfig_service.ConfigValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     JobRunner(db).write_audit(
@@ -220,7 +229,12 @@ def put_config_provider(
         details={"version": row.version, "provider": body.provider},
     )
     db.commit()
-    return {"version": row.version, "warnings": warnings, "provider": body.provider}
+    return {
+        "version": row.version,
+        "warnings": warnings,
+        "provider": body.provider,
+        **({"provisioning_config_saved": True} if body.pxe is not None else {}),
+    }
 
 
 # ---------------------------------------------------------------------------

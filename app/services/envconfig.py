@@ -1400,6 +1400,8 @@ def set_provider(
     talos: dict | None = None,
     deploy: dict | None = None,
     network: dict | None = None,
+    pxe: dict | None = None,
+    expected_version: int | None = None,
 ) -> tuple[EnvConfigVersion, list[str]]:
     """Set the deployment provider (+ talos/deploy sections) as a NEW config version.
 
@@ -1423,6 +1425,30 @@ def set_provider(
         raise ConfigValidationError("set_provider: network must be a mapping")
     current = get_current(db, env)
     doc: dict[str, Any] = dict(current[0]) if current else {}
+    if pxe is not None:
+        if expected_version is None:
+            raise ConfigValidationError("Reload provisioning settings before saving")
+        from app.services import provisioning_network
+        from app.config import get_settings
+
+        try:
+            clean = provisioning_network.validate(
+                pxe, provisioning_network.interfaces(), get_settings().port
+            )
+        except ValueError as exc:
+            raise ConfigValidationError(str(exc)) from exc
+        previous = dict(doc.get("pxe") or {})
+        if (
+            current
+            and all(previous.get(k) == v for k, v in clean.items())
+            and doc.get("provider", "talos") == provider
+            and talos is None
+            and deploy is None
+            and network is None
+        ):
+            return current[1], []
+        previous.update(clean)
+        doc["pxe"] = previous
     doc["provider"] = provider
     if talos is not None:
         merged = dict(doc.get("talos") or {})
@@ -1443,7 +1469,7 @@ def set_provider(
         merged_net = dict(doc.get("network") or {})
         merged_net.update({k: v for k, v in network.items() if v is not None})
         doc["network"] = merged_net
-    row, warnings = put_version(db, env, _dump(doc), actor)
+    row, warnings = put_version(db, env, _dump(doc), actor, expected_version=expected_version)
     warnings.extend(
         f"deploy: unknown key '{key}' (ignored)"
         for key in doc.get("deploy") or {}
@@ -1467,7 +1493,13 @@ def get_provider(db: Session, env: Environment) -> dict[str, Any]:
     from app.services.talos import DEFAULT_TALOS_IMAGE_URL, DEFAULT_TALOS_ISO_URL
 
     talos = dict(doc.get("talos") or {}) if isinstance(doc.get("talos"), dict) else {}
+    from app.services.provisioning_network import KEYS, interfaces
+
     return {
+        "supports_provisioning_config": True,
+        "config_version": current[1].version if current else 0,
+        "pxe": {k: v for k, v in (doc.get("pxe") or {}).items() if k in KEYS},
+        "provisioning_interfaces": interfaces(),
         "provider": doc.get("provider") or "talos",
         "talos": talos,
         "deploy": deploy,
