@@ -1,4 +1,5 @@
 """The real installer uses a sibling PXE directory shared with its sidecar."""
+
 from types import SimpleNamespace
 
 import pytest
@@ -70,3 +71,27 @@ def test_agent_link_cannot_escape_valid_installer_payload(tmp_path):
     (payload / "agent-fixture").symlink_to("/etc")
     with pytest.raises(ValueError, match="invalid path"):
         under_root(provisioning_root(data), "agent-fixture")
+
+
+def test_inspection_does_not_require_an_unrelated_talos_disk_image(tmp_path, monkeypatch):
+    def commission(root, log):
+        (root / "assets").mkdir(parents=True, exist_ok=True)
+        return {"ok": True, "changed": False}
+
+    monkeypatch.setattr(pxe, "fetch_commission_assets", commission)
+    monkeypatch.setattr(
+        pxe,
+        "fetch_talos_assets",
+        lambda *args: pytest.fail("RAM inspection must not download or unpack a Talos disk"),
+    )
+    from app.services.talos import DEFAULT_TALOS_IMAGE_URL
+
+    result = pxe.ensure_assets_and_config(
+        SimpleNamespace(name="fresh-installer"),
+        {"pxe": dict(PXE_CFG), "talos": {"image_url": DEFAULT_TALOS_IMAGE_URL}},
+        Settings(data_dir=tmp_path),
+        profiles=[{"pxe_mac": "52:54:00:27:10:87", "next_boot": "inspect", "token": "a" * 32}],
+        apply_runtime=False,
+    )
+    assert result["ok"], result
+    assert "profile: inspect" in (tmp_path / "pxe/mac/52-54-00-27-10-87.ipxe").read_text()

@@ -4,6 +4,15 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.10
+
+Complete real RAM inspection and prepare the correct Talos PXE assets.
+
+- Read-only RAM inspection no longer downloads an unrelated Talos VM disk. Completed real inspection jobs explicitly record `dry_run: false`, so native apps can distinguish verified hardware from a rehearsal.
+- Recognize the default Image Factory QCOW2 model and download its matching kernel and initramfs from the same schematic and version. Support both XZ and the actual factory's Zstd initramfs encoding.
+- Publish complete source-specific pairs, validate cached bytes and hashes, preserve previous ready payloads on failed downloads, and generate profiles pointing to the matching pair. Custom tar/ISO inputs retain their existing path.
+- A clean native iPhone test booted the owned blank VM through its management controller and showed current-job completion with verified OS disk identities. Independent checks confirmed no disk changes and power-off. Actual factory download/cache checks also passed on the isolated source candidate. Compiled-release, managed-LAN, installation and full cloud/LAMP acceptance remain separate checks.
+
 ## 2026.10.27.9
 
 Allow RAM inspection on the installer's shared PXE directory.

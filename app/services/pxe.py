@@ -278,6 +278,11 @@ def fetch_talos_assets(
     if not image_url.lower().startswith("https://"):
         raise PxeError(f"pxe image_url must be an https:// URL (got: {image_url!r})")
     dest = Path(dest_dir)
+    from app.services.factory_pxe_assets import model, fetch
+
+    factory_model = model(image_url)
+    if factory_model:
+        return fetch(factory_model, dest, download_factory_image, log)
     assets = dest / "assets"
     kernel_path = assets / "vmlinuz"
     initrd_path = assets / "initramfs.xz"
@@ -465,7 +470,8 @@ def fetch_commission_assets(root: Path, log: LogFn | None = None) -> dict[str, A
 
 
 def _write_mac_profiles(
-    root: Path, base_url: str, profiles: list[dict[str, Any]], log: LogFn | None
+    root: Path, base_url: str, profiles: list[dict[str, Any]], log: LogFn | None,
+    talos_assets_path: str = "assets",
 ) -> tuple[bool, bool]:
     """Write ``mac/<mac>.ipxe``. Returns (changed, needs_commission_kernel)."""
     from app.services.bootselect import mac_filename, render_profile_ipxe, profile_from_script
@@ -486,6 +492,7 @@ def _write_mac_profiles(
             hostname=str(profile.get("name") or ""),
             wipe_wwids=profile.get("wipe_wwids"),
             node_id=profile.get("node_id"),
+            talos_assets_path=talos_assets_path,
         )
         needs |= profile_from_script(script) in ("commission", "inspect")
         changed |= _write_if_changed(mac_dir / filename, script, log)
@@ -571,8 +578,17 @@ def ensure_assets_and_config(
         changed |= _write_if_changed(
             root / "boot.ipxe", render_boot_ipxe(base_url), log
         )
+        image_url = str(pxe_cfg.get("image_url") or "").strip()
+        if not image_url:
+            talos = doc.get("talos")
+            if isinstance(talos, dict):
+                image_url = str(talos.get("image_url") or "").strip()
+        from app.services.factory_pxe_assets import model
+
+        factory_model = model(image_url)
         mac_changed, needs_commission = _write_mac_profiles(
-            root, base_url, list(profiles or []), log
+            root, base_url, list(profiles or []), log,
+            talos_assets_path=factory_model["path"] if factory_model else "assets",
         )
         changed |= mac_changed
         if needs_commission:
@@ -598,15 +614,14 @@ def ensure_assets_and_config(
                 changed = True
                 _log(log, f"[pxe] wrote {apkovl_path}")
 
-        image_url = str(pxe_cfg.get("image_url") or "").strip()
-        if not image_url:
-            talos = doc.get("talos")
-            if isinstance(talos, dict):
-                image_url = str(talos.get("image_url") or "").strip()
         assets: dict[str, Any] = {"changed": False}
-        if image_url:
+        choices = {str(profile.get("next_boot") or "disk").strip().lower() for profile in profiles or []}
+        inspection_only = "inspect" in choices and choices <= {"inspect", "disk"}
+        if image_url and not inspection_only:
             assets = fetch_talos_assets(image_url, root, log)
             changed |= bool(assets.get("changed"))
+        elif inspection_only:
+            _log(log, "[pxe] read-only RAM inspection does not need Talos boot files")
         else:
             _log(log, "[pxe] no pxe.image_url / talos.image_url — skipping asset fetch")
 
@@ -676,7 +691,7 @@ def ensure_assets_and_config(
             "changed": changed,
             "config_path": str(root / "dnsmasq.conf"),
             "ipxe_path": str(root / "boot.ipxe"),
-            "assets_dir": str(root / "assets"),
+            "assets_dir": str(Path(assets["kernel"]).parent if assets.get("kernel") else root / "assets"),
             "nodes": len(nodes),
             "image_url": image_url or None,
             "agent_id": agent_id,
@@ -761,8 +776,13 @@ def render_env_pxe_status(
                     running = True
             except Exception:
                 running = False
-        kernel = root / "assets" / "vmlinuz"
-        initrd = root / "assets" / "initramfs.xz"
+        from app.services.factory_pxe_assets import model
+
+        source_url = str(cfg.get("image_url") or (doc.get("talos") or {}).get("image_url") or "")
+        factory_model = model(source_url)
+        asset_root = root / (factory_model["path"] if factory_model else "assets")
+        kernel = asset_root / "vmlinuz"
+        initrd = asset_root / "initramfs.xz"
         agent_configs.append(
             {
                 "agent_id": agent_id,

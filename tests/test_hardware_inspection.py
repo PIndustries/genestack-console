@@ -249,3 +249,28 @@ def test_registration_can_keep_a_single_unambiguous_interface(client, admin_head
     job = _submit(client, admin_headers, env["id"], "baremetal.node.register", _register_params("single-interface"))
     assert job["status"] == "success"
     assert _node_row(env["id"], "single-interface")["pxe_mac"] == MAC
+
+
+def test_real_completed_inspection_is_explicitly_distinct_from_rehearsal(monkeypatch):
+    from types import SimpleNamespace
+    from app.models import BaremetalNode
+    from app.modules.baremetal import node_inspect
+
+    target = SimpleNamespace(id="fixture", environment_id="fixture-env", boot_stage="inspected", os_inventory_report={"source": "ram-inspection"})
+    class Database:
+        def get(self, model, identity):
+            assert model is BaremetalNode and identity == "fixture"
+            return target
+        def commit(self):
+            pass
+        def refresh(self, value):
+            assert value is target
+    runner = SimpleNamespace(db=Database(), settings=None, write_audit=lambda **kw: None)
+    monkeypatch.setattr(node_inspect.hardware_inspection, "begin", lambda *a, **k: {"ok": True})
+    result = node_inspect.run(runner, None, None, SimpleNamespace(created_by="operator"),
+        SimpleNamespace(id="fixture-env"), lambda line: None, None,
+        {"node_id": "fixture", "boot_now": True}, None, lambda: None,
+        False, 900, None, None, None, None, None, None, None)
+    assert result["ok"] is True
+    assert result["dry_run"] is False, "Native callers must be able to prove this was a real inspection"
+    assert result["disk_writes"] is False
