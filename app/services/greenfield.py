@@ -1,6 +1,6 @@
 """Greenfield redeploy: commission, then Talos, then the pipeline.
 
-Each inventory server PXE-boots a RAM disk that wipes fixed disks and
+Each inventory server PXE-boots a RAM disk that clears metadata only on reviewed local disks and
 reports hardware. The next one-shot PXE serves Talos. Fresh maintenance is
 the Talos API up, the node not Kubernetes Ready, and Talos served after
 that wipe. Then ``genestack.deploy`` from ``hosts``. ``stop_after`` can
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.models import BaremetalNode, Environment
 from app.services import baremetal as baremetal_service
-from app.services.bootselect import metal_ready, served_after_wipe
+from app.services.bootselect import metal_ready, served_after_wipe, validate_wipe_wwids
 from app.services import deploy as deploy_service
 from app.services import deploy_timing
 from app.services import envconfig as envconfig_service
@@ -63,6 +63,17 @@ def _bm_by_name(db: Session, env: Environment) -> dict[str, BaremetalNode]:
     return out
 
 
+def _wipe_plan(raw: Any, hostnames: set[str]) -> dict[str, list[str]]:
+    """Validate the entire reviewed plan before commissioning any machine."""
+    if not isinstance(raw, dict) or set(raw) != hostnames:
+        raise ValueError("disk allowlist must cover exactly every inventory hostname")
+    plan = {name: validate_wipe_wwids(raw[name]) for name in sorted(hostnames)}
+    identities = [identity for disks in plan.values() for identity in disks]
+    if len(identities) != len(set(identities)):
+        raise ValueError("disk allowlist identities must be unique across machines")
+    return plan
+
+
 def _boot_one(
     db: Session,
     env: Environment,
@@ -98,6 +109,7 @@ def run_greenfield(
     wait_seconds: int | None = None,
     stop_after: str = "",
     replace_hosts: Any = None,
+    wipe_disk_wwids: Any = None,
 ) -> dict[str, Any]:
     """PXE/BYOI every inventory server, then ``run_deploy`` from hosts."""
     boot_mode = str(boot or "auto").strip().lower()
@@ -170,7 +182,7 @@ def run_greenfield(
         return out
 
     log(
-        f"[greenfield] DESTRUCTIVE: commission RAM disk wipes fixed disks, "
+        f"[greenfield] DESTRUCTIVE: commission RAM disk clears reviewed disk metadata, "
         f"then Talos, then OpenStack from hosts "
         f"(boot={boot_mode} dry_run={dry_run} hosts={len(servers)} "
         f"stop_after={stop or 'deploy'})"
@@ -239,9 +251,15 @@ def run_greenfield(
                     f"{ip}:{baremetal_service.TALOS_API_PORT} stop_after={stop or 'deploy'}"
                 )
         else:
+            try:
+                reviewed_disks = _wipe_plan(wipe_disk_wwids, set(servers))
+            except ValueError as exc:
+                return _stamp({"ok": False, "error": str(exc), "returncode": 2,
+                               "dry_run": False, "failed_at": "greenfield/disk-plan"})
             for hostname, node, _ip in plan:
                 started = baremetal_service.begin_commission(
-                    db, env, node, log=log, settings=settings, boot_now=False
+                    db, env, node, log=log, settings=settings, boot_now=False,
+                    wipe_disk_wwids=reviewed_disks[hostname],
                 )
                 if not started.get("ok"):
                     return _stamp(

@@ -4,6 +4,16 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.3
+
+Reviewed local-disk commissioning scope.
+
+- Require an exact OS-reconciled WWID allowlist before a real commissioning operation. Whole-cluster jobs validate every host plan before starting the first node.
+- Clear front and backup partition metadata only on the selected local writable disks. Missing, ambiguous, mounted, read-only or remote targets prevent all planned writes; unrelated disks are preserved.
+- Bind cached PXE commissioning profiles to the active node, token and disk plan. Stale, legacy or cancelled profiles fall back to local disk; authorization failures stop serving the profile.
+- Record the exact served profile against its environment-specific node even when an old environment contains the same MAC.
+- This change does not authorize or execute a physical rebuild and is not a whole-disk secure erase.
+
 ## 2026.10.27.2
 
 Consistent Talos installation configuration for mixed-disk fleets.

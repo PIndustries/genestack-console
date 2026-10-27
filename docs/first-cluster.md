@@ -176,6 +176,10 @@ In Guided setup, Servers can be BMC / Redfish or PXE. On Machines, record the ma
 
 Settings, then Config. Change what you need. Save. Each save is a version. Apply on this environment only when you are ready for the wipe. Deploy cluster asks you to confirm the wipe. It pushes the settings, network-boots Talos, then runs the Genestack pipeline: Kubernetes, then OpenStack. A server you did not select stays on its own disk. The log is Activity, then Jobs.
 
+Real commissioning requires a reviewed `wipe_disk_wwids` allowlist of exact OS-visible disk identifiers. A whole-cluster `genestack.greenfield` job takes an object keyed by every inventory hostname; `baremetal.node.provision` and `baremetal.node.next_boot` take the selected node's array. A complete fleet plan is checked before commissioning begins. Old callers without this plan stop before starting a wipe. Native guided plan submission remains a separate integration step.
+
+Commissioning clears the first and last 16 MiB on selected local writable disks; it is not a secure erase. A missing, ambiguous, mounted, read-only or remote target prevents all planned writes. Other disks, including attached remote volumes, are preserved. A reviewed wipe plan is separate from Talos's per-host installation target.
+
 Do not put the console's DHCP on a network other machines depend on.
 
 An ISO is rejected on this wipe path because an ISO does not wipe the disks. `baremetal.node.iso_boot` puts an ISO in the management-port virtual CD when the network card cannot PXE. That needs a management port. It is separate from booting a Talos ISO yourself and then choosing Talos is already installed.

@@ -70,6 +70,7 @@ _BAREMETAL_NODE_COLUMN_MIGRATIONS = {
     "boot_stage": "VARCHAR(32) DEFAULT 'new' NOT NULL",
     "commission_token": "VARCHAR(64)",
     "commission_report": "TEXT",
+    "commission_wipe_wwids": "TEXT",
     "hardware_report": "TEXT",
     "boot_log": "TEXT",
     "wiped_at": "TIMESTAMP",

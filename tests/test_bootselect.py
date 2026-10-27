@@ -31,7 +31,7 @@ def _report(**overrides):
         "product": "DL380",
         "token": "secret-token",
         "nics": [{"name": "eth0", "mac": "aa:bb:cc:dd:ee:10"}],
-        "disks": [{"name": "sda", "size_sectors": 100, "wiped": True}],
+        "disks": [{"name": "sda", "size_sectors": 131072, "wwid": "naa.60000000000000000000000000000001", "wiped": True}],
     }
     body.update(overrides)
     return body
@@ -53,10 +53,10 @@ def test_talos_script_has_no_machine_config_and_commission_carries_the_token():
     assert "talos.platform=metal" in talos
     assert "talos.config=" not in talos
     assert "gsc_wipe" not in talos
-    commission = render_commission_ipxe("http://10.10.0.1:8080", "abc")
+    commission = render_commission_ipxe("http://10.10.0.1:8080", "abcabcabcabcabcabc", ["naa.60000000000000000000000000000001"])
     assert "gsc_wipe=1" in commission
-    assert "gsc_token=abc" in commission
-    assert "gsc_report=http://10.10.0.1:8080/commission/abc" in commission
+    assert "gsc_token=abcabcabcabcabcabc" in commission
+    assert "gsc_report=http://10.10.0.1:8080/commission/abcabcabcabcabcabc" in commission
     assert render_profile_ipxe("nope", "http://10.10.0.1:8080", "abc") == render_disk_ipxe()
 
 
@@ -186,6 +186,7 @@ def test_ingest_accepts_one_wipe_and_a_replay_does_not_power_cycle(monkeypatch):
             next_boot="commission",
             boot_stage="commissioning",
             commission_token=token,
+            commission_wipe_wwids=["naa.60000000000000000000000000000001"],
         )
         db.add(node)
         db.commit()
@@ -244,6 +245,7 @@ def test_rejected_report_does_not_switch_the_profile(monkeypatch):
             next_boot="commission",
             boot_stage="commissioning",
             commission_token=token,
+            commission_wipe_wwids=["naa.60000000000000000000000000000001"],
         )
         db.add(node)
         db.commit()

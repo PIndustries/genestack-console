@@ -482,7 +482,7 @@ def _write_mac_profiles(
     root: Path, base_url: str, profiles: list[dict[str, Any]], log: LogFn | None
 ) -> tuple[bool, bool]:
     """Write ``mac/<mac>.ipxe``. Returns (changed, needs_commission_kernel)."""
-    from app.services.bootselect import mac_filename, render_profile_ipxe
+    from app.services.bootselect import mac_filename, render_profile_ipxe, profile_from_script
 
     mac_dir = root / "mac"
     mac_dir.mkdir(parents=True, exist_ok=True)
@@ -493,14 +493,15 @@ def _write_mac_profiles(
         if not filename:
             continue
         choice = str(profile.get("next_boot") or "disk").strip().lower()
-        if choice == "commission":
-            needs = True
         script = render_profile_ipxe(
             choice,
             base_url,
             str(profile.get("token") or ""),
             hostname=str(profile.get("name") or ""),
+            wipe_wwids=profile.get("wipe_wwids"),
+            node_id=profile.get("node_id"),
         )
+        needs |= profile_from_script(script) == "commission"
         changed |= _write_if_changed(mac_dir / filename, script, log)
     return changed, needs
 

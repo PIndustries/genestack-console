@@ -33,22 +33,35 @@ COMMISSION_FILES = ("vmlinuz-lts", "initramfs-lts", "modloop-lts")
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
 COMMISSION_SCRIPT = r"""#!/bin/sh
-# Genestack commission RAM disk. Does not mount hard drives.
+# Genestack commission RAM disk. Never mounts disks or infers a wipe target.
 echo "genestack commission start" >/dev/console
 report=""
 token=""
+allowed=""
 wipe=0
 for arg in $(cat /proc/cmdline); do
   case "$arg" in
     gsc_report=*) report="${arg#gsc_report=}" ;;
     gsc_token=*) token="${arg#gsc_token=}" ;;
+    gsc_allow_wwids=*) allowed="${arg#gsc_allow_wwids=}" ;;
     gsc_wipe=1) wipe=1 ;;
   esac
 done
 esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/[[:cntrl:]]//g'; }
-read_id() {
-  esc "$(cat "$1" 2>/dev/null || printf '%s' unknown)"
+read_id() { esc "$(cat "$1" 2>/dev/null || printf '%s' unknown)"; }
+wwid_for() {
+  value=$(cat "$1/wwid" 2>/dev/null || cat "$1/device/wwid" 2>/dev/null || true)
+  case "$value" in ''|*[!A-Za-z0-9._:+-]*) value="" ;; esac
+  printf '%s' "$value"
 }
+remote_disk() {
+  link=$(readlink -f "$1/device" 2>/dev/null || true)
+  case "$link" in */session[0-9]*/*) return 0 ;; esac
+  transport=$(cat "$1/device/transport" 2>/dev/null || true)
+  case "$transport" in iscsi|tcp|rdma|fc) return 0 ;; esac
+  return 1
+}
+mounted_disk() { grep -Eq "^/dev/$1(p?[0-9]+)? " /proc/mounts; }
 serial=$(read_id /sys/class/dmi/id/product_serial)
 vendor=$(read_id /sys/class/dmi/id/sys_vendor)
 product=$(read_id /sys/class/dmi/id/product_name)
@@ -60,30 +73,69 @@ for npath in /sys/class/net/*; do
   mac=$(cat "$npath/address" 2>/dev/null || true)
   [ -n "$mac" ] || continue
   [ "$mac" = "00:00:00:00:00:00" ] && continue
+  carrier=$(cat "$npath/carrier" 2>/dev/null || true)
+  link_up=null
+  [ "$carrier" = 1 ] && link_up=true
+  [ "$carrier" = 0 ] && link_up=false
   sep=","
   [ "$nfirst" = 1 ] && sep=""
   nfirst=0
-  nics="$nics$sep{\"name\":\"$(esc "$name")\",\"mac\":\"$(esc "$mac")\"}"
+  nics="$nics$sep{\"name\":\"$(esc "$name")\",\"mac\":\"$(esc "$mac")\",\"link_up\":$link_up}"
+done
+inventory=/tmp/gsc-disk-inventory
+selected=/tmp/gsc-selected-disks
+: > "$inventory"
+: > "$selected"
+# Inventory every candidate first. A missing or ambiguous target forbids ALL writes.
+for dpath in /sys/block/*; do
+  name=$(basename "$dpath")
+  case "$name" in loop*|ram*|fd*|sr*|nbd*|zram*|dm-*) continue ;; esac
+  rem=$(cat "$dpath/removable" 2>/dev/null || echo 1)
+  [ "$rem" = 0 ] || continue
+  size=$(cat "$dpath/size" 2>/dev/null || echo 0)
+  [ "$size" -gt 0 ] 2>/dev/null || continue
+  wwid=$(wwid_for "$dpath")
+  ro=$(cat "$dpath/ro" 2>/dev/null || echo 1)
+  remote=0
+  remote_disk "$dpath" && remote=1
+  mounted=0
+  mounted_disk "$name" && mounted=1
+  printf '%s|%s|%s|%s|%s|%s\n' "$name" "$wwid" "$size" "$remote" "$ro" "$mounted" >> "$inventory"
+done
+plan_valid=1
+case "$allowed" in ''|,*|*,|*,,*|*[!A-Za-z0-9,._:+-]*) plan_valid=0 ;; esac
+seen=","
+selected_count=0
+for identity in $(printf '%s' "$allowed" | tr ',' ' '); do
+  case "$seen" in *",$identity,"*) plan_valid=0 ;; esac
+  seen="$seen$identity,"
+  if ! awk -F'|' -v id="$identity" '
+    $2==id {count++; row=$1 "|" $2; valid=($3>=65536 && $4==0 && $5==0 && $6==0)}
+    END {if(count==1 && valid) print row; else exit 1}
+  ' "$inventory" >> "$selected"; then plan_valid=0; fi
+  selected_count=$((selected_count + 1))
 done
 disks=""
 dfirst=1
 wiped_all=1
 disk_count=0
-for dpath in /sys/block/*; do
-  name=$(basename "$dpath")
-  case "$name" in
-    loop*|ram*|fd*|sr*|nbd*|zram*) continue ;;
-  esac
-  rem=$(cat "$dpath/removable" 2>/dev/null || echo 1)
-  [ "$rem" = "0" ] || continue
-  size=$(cat "$dpath/size" 2>/dev/null || echo 0)
-  [ "$size" -gt 0 ] 2>/dev/null || continue
+wiped_count=0
+while IFS='|' read -r name wwid size remote ro mounted; do
+  dpath="/sys/block/$name"
   model=$(esc "$(cat "$dpath/device/model" 2>/dev/null || true)")
   seriald=$(esc "$(cat "$dpath/device/serial" 2>/dev/null || true)")
+  chosen=false
+  grep -Fqx "$name|$wwid" "$selected" && chosen=true
   wiped=false
-  if [ "$wipe" = 1 ]; then
-    if dd if=/dev/zero of="/dev/$name" bs=1048576 count=16 conv=fsync >/dev/null 2>&1; then
+  if [ "$wipe" = 1 ] && [ "$plan_valid" = 1 ] && [ "$chosen" = true ]; then
+    # Recheck identity and access immediately before writing selected metadata.
+    current=$(wwid_for "$dpath")
+    current_ro=$(cat "$dpath/ro" 2>/dev/null || echo 1)
+    if [ "$current" = "$wwid" ] && [ "$current_ro" = 0 ] && ! remote_disk "$dpath" && ! mounted_disk "$name" &&
+       dd if=/dev/zero of="/dev/$name" bs=1048576 count=16 conv=fsync >/dev/null 2>&1 &&
+       dd if=/dev/zero of="/dev/$name" bs=512 seek="$((size - 32768))" count=32768 conv=fsync >/dev/null 2>&1; then
       wiped=true
+      wiped_count=$((wiped_count + 1))
     else
       wiped_all=0
     fi
@@ -92,19 +144,21 @@ for dpath in /sys/block/*; do
   [ "$dfirst" = 1 ] && sep=""
   dfirst=0
   disk_count=$((disk_count + 1))
-  disks="$disks$sep{\"name\":\"$(esc "$name")\",\"size_sectors\":$size,\"model\":\"$model\",\"serial\":\"$seriald\",\"wiped\":$wiped}"
-done
+  remote_json=false
+  readonly_json=false
+  [ "$remote" = 1 ] && remote_json=true
+  [ "$ro" != 0 ] && readonly_json=true
+  disks="$disks$sep{\"name\":\"$(esc "$name")\",\"wwid\":\"$(esc "$wwid")\",\"size_sectors\":$size,\"model\":\"$model\",\"serial\":\"$seriald\",\"remote\":$remote_json,\"readonly\":$readonly_json,\"selected\":$chosen,\"wiped\":$wiped}"
+done < "$inventory"
 wipe_json=false
-if [ "$wipe" = 1 ] && [ "$wiped_all" = 1 ] && [ "$disk_count" -gt 0 ]; then
+if [ "$wipe" = 1 ] && [ "$plan_valid" = 1 ] && [ "$wiped_all" = 1 ] && [ "$selected_count" -gt 0 ] && [ "$wiped_count" = "$selected_count" ]; then
   wipe_json=true
 fi
 printf '{"wipe":%s,"serial":"%s","vendor":"%s","product":"%s","token":"%s","nics":[%s],"disks":[%s]}\n' \
-  "$wipe_json" "$serial" "$vendor" "$product" "$(esc "$token")" "$nics" "$disks" \
-  > /tmp/gsc-report.json
-echo "genestack commission report $report wipe=$wipe_json disks=$disk_count" >/dev/console
+  "$wipe_json" "$serial" "$vendor" "$product" "$(esc "$token")" "$nics" "$disks" > /tmp/gsc-report.json
+echo "genestack commission report wipe=$wipe_json selected=$selected_count disks=$disk_count" >/dev/console
 if [ -n "$report" ]; then
-  wget -q -O /tmp/gsc-out --header="Content-Type: application/json" \
-    --post-file=/tmp/gsc-report.json "$report" \
+  wget -q -O /tmp/gsc-out --header="Content-Type: application/json" --post-file=/tmp/gsc-report.json "$report" \
     || echo "genestack commission: report post failed" >/dev/console
 fi
 sleep 2
@@ -161,13 +215,32 @@ boot
 """
 
 
-def render_commission_ipxe(assets_base_url: str, token: str) -> str:
-    """RAM-disk commission. ``gsc_wipe=1`` clears fixed-disk headers."""
+def validate_wipe_wwids(value: Any) -> list[str]:
+    if not isinstance(value, list) or not 1 <= len(value) <= 64:
+        raise ValueError("A nonempty exact disk WWID allowlist is required before commissioning")
+    if any(not isinstance(v, str) or not re.fullmatch(r"(?:(?:naa|eui)\.|0x)?[0-9a-fA-F]{16,64}", v) for v in value):
+        raise ValueError("The commissioning disk allowlist requires exact WWIDs without wildcards")
+    if len(",".join(value)) > 1024:
+        raise ValueError("The commissioning disk allowlist exceeds the boot command-line budget")
+    canonical = [re.sub(r"^(?:naa\.|eui\.|0x)", "", v.lower()) for v in value]
+    if len(canonical) != len(set(canonical)):
+        raise ValueError("The commissioning disk allowlist contains duplicate identities")
+    return list(value)
+
+
+def render_commission_ipxe(assets_base_url: str, token: str, wipe_wwids: Any = None) -> str:
+    """An unbound or legacy profile must never boot the wipe image."""
+    try:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", str(token or "")):
+            return render_disk_ipxe()
+        allowed = ",".join(validate_wipe_wwids(wipe_wwids))
+    except ValueError:
+        return render_disk_ipxe()
     base = assets_base_url.rstrip("/")
     report = f"{base}/commission/{token}"
     return f"""#!ipxe
 # profile: commission
-kernel {base}/assets/commission/vmlinuz-lts modloop={base}/assets/commission/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=1 gsc_token={token} gsc_report={report} console=tty0 console=ttyS0,115200
+kernel {base}/assets/commission/vmlinuz-lts modloop={base}/assets/commission/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=1 gsc_allow_wwids={allowed} gsc_token={token} gsc_report={report} console=tty0 console=ttyS0,115200
 initrd {base}/assets/commission/initramfs-lts
 boot
 """
@@ -199,15 +272,21 @@ def render_profile_ipxe(
     assets_base_url: str,
     token: str | None,
     hostname: str | None = None,
+    wipe_wwids: Any = None,
+    node_id: str | None = None,
 ) -> str:
     choice = str(next_boot or "disk").strip().lower()
     if choice == "commission":
-        return render_commission_ipxe(assets_base_url, token or "")
-    if choice == "talos":
-        return render_talos_ipxe(assets_base_url)
-    if choice == "ubuntu":
-        return render_ubuntu_ipxe(assets_base_url, hostname)
-    return render_disk_ipxe()
+        script = render_commission_ipxe(assets_base_url, token or "", wipe_wwids)
+    elif choice == "talos":
+        script = render_talos_ipxe(assets_base_url)
+    elif choice == "ubuntu":
+        script = render_ubuntu_ipxe(assets_base_url, hostname)
+    else:
+        script = render_disk_ipxe()
+    if node_id and re.fullmatch(r"[A-Za-z0-9-]{1,64}", node_id):
+        script = script.replace("#!ipxe\n", f"#!ipxe\n# node-id: {node_id}\n", 1)
+    return script
 
 
 def profile_from_script(text: str) -> str:
@@ -267,6 +346,40 @@ def validate_report(body: Any, pxe_mac: str | None) -> tuple[bool, str]:
         seen = _macs_in_report(body)
         if expected not in seen:
             return False, "report NICs do not include the node PXE MAC"
+    return True, ""
+
+
+def validate_scoped_report(body: Any, pxe_mac: str | None, wipe_wwids: Any) -> tuple[bool, str]:
+    try:
+        expected = set(validate_wipe_wwids(wipe_wwids))
+    except ValueError as exc:
+        return False, str(exc)
+    if not isinstance(body, dict) or body.get("wipe") is not True:
+        return False, "report did not wipe the selected disk allowlist"
+    disks = body.get("disks")
+    if not isinstance(disks, list) or not disks:
+        return False, "report has no disks"
+    found, names = set(), set()
+    for disk in disks:
+        if not isinstance(disk, dict) or not isinstance(disk.get("name"), str) or not disk["name"] or disk["name"] in names:
+            return False, "invalid or duplicate disk entry"
+        names.add(disk["name"])
+        identity = disk.get("wwid")
+        if not isinstance(identity, str):
+            identity = ""
+        if identity in expected:
+            if identity in found:
+                return False, "disk allowlist identity is ambiguous"
+            if disk.get("wiped") is not True or disk.get("remote") or disk.get("readonly"):
+                return False, "a selected local writable disk was not wiped"
+            found.add(identity)
+        elif disk.get("wiped") is True:
+            return False, "a disk outside the allowlist was wiped"
+    if found != expected:
+        return False, "report does not cover the complete disk allowlist"
+    expected_mac = normalize_mac(pxe_mac)
+    if not expected_mac or expected_mac not in _macs_in_report(body):
+        return False, "report NICs do not include the node PXE MAC"
     return True, ""
 
 

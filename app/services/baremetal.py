@@ -35,7 +35,8 @@ from app.services.bootselect import (
     normalize_mac,
     profile_from_script,
     served_after_wipe,
-    validate_report,
+    validate_scoped_report,
+    validate_wipe_wwids,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.request_safety import under_root
@@ -75,6 +76,7 @@ def node_payload(node: BaremetalNode) -> dict[str, Any]:
             node.talos_served_at.isoformat() if node.talos_served_at else None
         ),
         "commission": commission_summary(node.commission_report),
+        "commission_wipe_wwids": list(node.commission_wipe_wwids or []),
         "hardware": node.hardware_report,
         "boot_log": list(node.boot_log or [])[-5:],
         "last_seen": node.last_seen.isoformat() if node.last_seen else None,
@@ -404,10 +406,12 @@ def boot_profiles(db: Session, env: Environment) -> list[dict[str, Any]]:
         profiles.append(
             {
                 "name": node.name,
+                "node_id": node.id,
                 "pxe_mac": node.pxe_mac,
                 "expected_ip": node.expected_ip,
                 "next_boot": node.next_boot or "disk",
                 "token": node.commission_token or "",
+                "wipe_wwids": node.commission_wipe_wwids,
             }
         )
     return profiles
@@ -427,6 +431,7 @@ def begin_commission(
     log: LogFn,
     settings: Settings | None = None,
     boot_now: bool = False,
+    wipe_disk_wwids: Any = None,
 ) -> dict[str, Any]:
     """Point this MAC at the wipe RAM disk and forget the previous report."""
     if not normalize_mac(node.pxe_mac):
@@ -436,6 +441,11 @@ def begin_commission(
             "node_id": node.id,
             "returncode": 2,
         }
+    try:
+        allowed = validate_wipe_wwids(wipe_disk_wwids)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "node_id": node.id, "returncode": 2}
+    node.commission_wipe_wwids = allowed
     node.next_boot = "commission"
     node.boot_stage = "commissioning"
     node.commission_token = secrets.token_hex(16)
@@ -471,6 +481,7 @@ def set_next_boot(
     log: LogFn,
     settings: Settings | None = None,
     replace_installed: bool = False,
+    wipe_disk_wwids: Any = None,
 ) -> dict[str, Any]:
     """Choose the next image for one MAC. ``boot_now`` power-cycles into it."""
     choice = str(target or "").strip().lower()
@@ -500,7 +511,7 @@ def set_next_boot(
         _remember_ubuntu_login(db, env, node.name, log)
     if choice == "commission":
         return begin_commission(
-            db, env, node, log=log, settings=settings, boot_now=boot_now
+            db, env, node, log=log, settings=settings, boot_now=boot_now, wipe_disk_wwids=wipe_disk_wwids
         )
     if choice == "talos" and node.wiped_at is None and not replace_installed:
         return {
@@ -615,27 +626,68 @@ def _find_node_by_mac(db: Session, mac: str) -> BaremetalNode | None:
     if not wanted:
         return None
     stmt = select(BaremetalNode).where(BaremetalNode.pxe_mac.is_not(None))
-    for node in db.scalars(stmt).all():
-        if normalize_mac(node.pxe_mac) == wanted:
-            return node
-    return None
+    matches = [node for node in db.scalars(stmt).all() if normalize_mac(node.pxe_mac) == wanted]
+    return matches[0] if len(matches) == 1 else None
 
 
-def record_boot_fetch(root: str, url_path: str) -> None:
-    """Remember which profile a MAC fetched. Called from the PXE HTTP server."""
+def guarded_commission_profile(root: str, url_path: str) -> str | None:
+    """Bind even a cached wipe profile to the current node/token/disk plan."""
+    from app.db import SessionLocal
+    from app.services.bootselect import render_disk_ipxe
+
+    filename = url_path.rstrip("/").rsplit("/", 1)[-1]
+    if not re.fullmatch(r"[0-9a-fA-F-]{17}\.ipxe", filename):
+        return render_disk_ipxe()
+    try:
+        path = under_root(Path(root) / "mac", filename)
+        if not path.is_file():
+            return render_disk_ipxe()
+        if path.stat().st_size > 8192:
+            return render_disk_ipxe()
+        script = path.read_text(encoding="utf-8")
+        if profile_from_script(script) != "commission":
+            return render_disk_ipxe() if "gsc_wipe=1" in script else script
+        bindings = re.findall(r"^# node-id: ([A-Za-z0-9-]{1,64})$", script, re.MULTILINE)
+        tokens = re.findall(r"(?:^|\s)gsc_token=([^\s]+)", script)
+        plans = re.findall(r"(?:^|\s)gsc_allow_wwids=([^\s]+)", script)
+        if len(bindings) != 1 or len(tokens) != 1 or len(plans) != 1:
+            return render_disk_ipxe()
+        allowed = validate_wipe_wwids(plans[0].split(","))
+        with SessionLocal() as db:
+            nodes = db.scalars(select(BaremetalNode).where(BaremetalNode.commission_token == tokens[0])).all()
+            if len(nodes) != 1:
+                return render_disk_ipxe()
+            node = nodes[0]
+            if (bindings[0] != node.id
+                or normalize_mac(node.pxe_mac) != normalize_mac(filename[:-5])
+                or node.next_boot != "commission" or node.boot_stage != "commissioning"
+                or allowed != validate_wipe_wwids(node.commission_wipe_wwids)):
+                return render_disk_ipxe()
+        return script
+    except (OSError, ValueError):
+        return render_disk_ipxe()
+
+
+def record_boot_fetch(root: str, url_path: str, *, script: str | None = None) -> None:
+    """Record the exact served snapshot, not a second read of a changing file."""
     from app.db import SessionLocal
 
     filename = url_path.rstrip("/").rsplit("/", 1)[-1]
     mac = filename[: -len(".ipxe")] if filename.endswith(".ipxe") else ""
-    profile = "unknown"
-    try:
-        script_path = under_root(Path(root) / "mac", filename)
-    except ValueError:
-        return
-    if script_path.is_file():
-        profile = profile_from_script(script_path.read_text(encoding="utf-8"))
+    if script is None:
+        try:
+            script_path = under_root(Path(root) / "mac", filename)
+        except ValueError:
+            return
+        if not script_path.is_file():
+            return
+        script = script_path.read_text(encoding="utf-8")
+    profile = profile_from_script(script)
     with SessionLocal() as db:
-        node = _find_node_by_mac(db, mac.replace("-", ":"))
+        binding = re.search(r"^# node-id: ([A-Za-z0-9-]{1,64})$", script, re.MULTILINE)
+        node = db.get(BaremetalNode, binding[1]) if binding else _find_node_by_mac(db, mac.replace("-", ":"))
+        if node is not None and normalize_mac(node.pxe_mac) != normalize_mac(mac):
+            node = None
         if node is None:
             return
         _append_boot_log(
@@ -690,7 +742,9 @@ def ingest_commission(token: str, body: Any) -> dict[str, Any]:
             "installed",
         ):
             return {"ok": True, "duplicate": True, "node_id": node.id}
-        ok, err = validate_report(body, node.pxe_mac)
+        if node.next_boot != "commission" or node.boot_stage != "commissioning":
+            return {"ok": False, "error": "commission token is no longer active", "node_id": node.id}
+        ok, err = validate_scoped_report(body, node.pxe_mac, node.commission_wipe_wwids)
         _append_boot_log(
             node,
             {
@@ -840,6 +894,7 @@ def provision(
     timeout_seconds: int = DEFAULT_PROVISION_TIMEOUT,
     poll_interval: float = DEFAULT_POLL_INTERVAL,
     stop_after: str = "",
+    wipe_disk_wwids: Any = None,
 ) -> dict[str, Any]:
     """Commission (wipe + report), then PXE Talos, then accept fresh maintenance.
 
@@ -882,7 +937,7 @@ def provision(
         }
 
     started = begin_commission(
-        db, env, node, log=log, settings=settings, boot_now=False
+        db, env, node, log=log, settings=settings, boot_now=False, wipe_disk_wwids=wipe_disk_wwids
     )
     if not started.get("ok"):
         return started

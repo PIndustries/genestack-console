@@ -271,11 +271,24 @@ class _PxeHttpHandler(SimpleHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path.startswith("/mac/") and path.endswith(".ipxe"):
             try:
-                from app.services.baremetal import record_boot_fetch
+                from app.services.baremetal import guarded_commission_profile, record_boot_fetch
 
+                guarded = guarded_commission_profile(self.directory, path)
+                if guarded is not None:
+                    record_boot_fetch(self.directory, path, script=guarded)
+                    payload = guarded.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 record_boot_fetch(self.directory, path)
             except Exception:
-                log.warning("pxe http: boot fetch log failed", exc_info=True)
+                # Never fall through to a cached destructive script on a DB failure.
+                self.send_error(503, "Boot profile authorization unavailable")
+                return
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
