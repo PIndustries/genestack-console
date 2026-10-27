@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.27.9
+
+Allow RAM inspection on the installer's shared PXE directory.
+
+- The Linux installer creates `data/pxe -> ../pxe` for the Console and optional sidecar to share boot files. The path guard previously rejected that layout before inspection could prepare its payload.
+- Support that exact sibling link while rejecting arbitrary links, chained escapes and per-agent path escapes. Keep normal in-directory installations working and use the same resolved root when restoring the PXE runtime.
+- Regression checks exercise actual inspection-file generation through the installer layout. Native cold-boot acceptance and the full cloud/LAMP journey remain separate live checks.
+
 ## 2026.10.27.8
 
 Configure the machine provisioning network from native setup.

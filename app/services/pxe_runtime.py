@@ -746,7 +746,14 @@ def start_from_db() -> dict[str, Any]:
             pxe_cfg = doc.get("pxe") if isinstance(doc, dict) else None
             if not isinstance(pxe_cfg, dict) or not pxe_cfg:
                 continue
-            root = Path(settings.data_dir) / "pxe"
+            from app.services.pxe_paths import provisioning_root
+
+            try:
+                root = provisioning_root(settings.data_dir)
+            except ValueError:
+                log.warning("PXE payload path rejected for env=%s", env.name)
+                applied.append({"environment": env.name, "ok": False, "error": "Invalid PXE payload path"})
+                continue
             nodes = _baremetal_nodes(doc)
             result = apply_pxe_cfg(pxe_cfg, nodes, root)
             applied.append({"environment": env.name, **result})

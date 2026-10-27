@@ -53,6 +53,7 @@ import httpx
 from app.config import Settings
 from app.services.job_runner import ImageDownloadError, download_factory_image
 from app.services.request_safety import under_root
+from app.services.pxe_paths import provisioning_root
 
 LogFn = Callable[[str], None]
 
@@ -526,7 +527,7 @@ def ensure_assets_and_config(
                     ),
                 }
             try:
-                root = under_root(Path(settings.data_dir) / "pxe", str(agent_id))
+                root = under_root(provisioning_root(settings.data_dir), str(agent_id))
             except ValueError:
                 return {"ok": False, "error": "invalid agent id"}
         else:
@@ -540,7 +541,7 @@ def ensure_assets_and_config(
                         "config to enable console-managed PXE provisioning"
                     ),
                 }
-            root = under_root(Path(settings.data_dir), "pxe")
+            root = provisioning_root(settings.data_dir)
 
         nodes = _baremetal_nodes(doc)
         seen_macs = {str(node.get("pxe_mac") or "").lower() for node in nodes}
@@ -747,7 +748,7 @@ def render_env_pxe_status(
         cfg = cred.pxe_config or {}
         agent_id = cred.id
         try:
-            root = under_root(Path(settings.data_dir) / "pxe", str(agent_id))
+            root = under_root(provisioning_root(settings.data_dir), str(agent_id))
         except ValueError:
             continue
         http_port = int(cfg.get("http_port") or DEFAULT_HTTP_PORT)
