@@ -9,6 +9,8 @@ The oldest GitHub Release is v2026.10.03. The source history starts two version 
 - Prepare a local deployer using the cloud's configured source directory instead
   of an unrelated legacy checkout at `/opt/genestack`. Preserve installed source,
   explicit advanced overrides and the separate SSH/agent filesystem defaults.
+- Pin the public installer's initial source archive to the same reviewed
+  revision used for fresh setup clones, retaining custom archive overrides.
 
 ## 2026.10.28.2-rc3
 

@@ -345,6 +345,17 @@ def test_remote_and_agent_defaults_do_not_reuse_console_host_paths():
         assert _resolve_params(env, {"genestack_path": "/explicit/source"}, local=local)["genestack_path"] == "/explicit/source"
 
 
+def test_public_installer_and_fresh_clone_use_the_same_reviewed_source():
+    import re
+    from pathlib import Path
+
+    from app.services.host_prepare import DEFAULT_REPO_REF, DEFAULT_REPO_URL
+
+    installer = Path(__file__).resolve().parents[1] / "scripts/genestack-console.sh"
+    match = re.search(r'GSC_GENESTACK_URL="\$\{GSC_GENESTACK_URL:-(.*?)\}"', installer.read_text())
+    assert match and match[1] == DEFAULT_REPO_URL + "/archive/" + DEFAULT_REPO_REF + ".tar.gz"
+
+
 @pytest.mark.parametrize("linked", [True, False])
 @pytest.mark.parametrize("empty", [True, False])
 def test_actual_empty_appliance_directory_is_cloned_not_treated_as_an_archive(
