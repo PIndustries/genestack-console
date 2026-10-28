@@ -581,3 +581,12 @@ def test_dry_lease_deletes_nothing(tmp_path):
     lease.release()
     assert target.read_text(encoding="utf-8") == GENERATED
     assert lease._entries == []
+
+
+
+def test_secret_lease_does_not_remove_uid_private_staged_kubeconfig(tmp_path):
+    path = tmp_path / 'kubeconfigs-1001' / 'env.yaml'
+    path.parent.mkdir(); path.write_text('fixture-not-a-real-credential')
+    lease = secret_lease.SecretLease(config_dir=tmp_path)
+    lease.note(path, kind='local'); lease.release()
+    assert path.exists()

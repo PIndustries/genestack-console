@@ -7,6 +7,8 @@ import stat
 import time
 from pathlib import Path
 
+import pytest
+
 from app.config import get_settings
 from app.models import Environment
 from app.services.crypto import encrypt_secret
@@ -95,7 +97,7 @@ def test_kubeconfig_blob_staged_0600_and_cleaned_up(tmp_path, monkeypatch):
 
     staged = Path(ctx.kubeconfig)
     assert staged.is_file()
-    assert staged.parent == tmp_path / "kubeconfigs"
+    assert staged.parent == tmp_path / f"kubeconfigs-{os.geteuid()}"
     assert staged.read_text(encoding="utf-8") == payload
     assert stat.S_IMODE(staged.stat().st_mode) == 0o600
     # The staging dir holds decrypted cluster credentials for every env — it
@@ -114,7 +116,7 @@ def test_kubeconfig_staging_dir_forced_0700_despite_umask(tmp_path, monkeypatch)
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     # Pre-create the dir with a permissive mode to simulate a loose umask /
     # pre-existing state — _stage_kubeconfig must tighten it, not inherit it.
-    kube_dir = tmp_path / "kubeconfigs"
+    kube_dir = tmp_path / f"kubeconfigs-{os.geteuid()}"
     kube_dir.mkdir(mode=0o755)
 
     payload = "apiVersion: v1\nclusters: []\n"
@@ -228,3 +230,25 @@ def test_kubeconfig_path_used_when_no_blob(tmp_path):
     assert ctx.kubeconfig == str(kube)
     ctx.cleanup()
     assert kube.is_file()  # host-path kubeconfig is never removed
+
+
+
+def test_sweep_cannot_fail_startup_on_inaccessible_legacy_directory(tmp_path, monkeypatch):
+    legacy = tmp_path / 'kubeconfigs'; legacy.mkdir()
+    own = tmp_path / f'kubeconfigs-{os.geteuid()}'; own.mkdir()
+    (own / 'leaked.yaml').write_text('fixture-not-a-real-credential')
+    original = Path.iterdir
+    def denied(path):
+        if path == legacy: raise PermissionError('Other service user owns this directory')
+        return original(path)
+    monkeypatch.setattr(Path, 'iterdir', denied)
+    assert sweep_staged_kubeconfigs(tmp_path) == 1
+
+
+def test_staging_rejects_symlink_and_keeps_other_user_directories_private(tmp_path, monkeypatch):
+    settings = get_settings(); monkeypatch.setattr(settings, 'data_dir', tmp_path)
+    target = tmp_path / 'foreign'; target.mkdir(mode=0o700)
+    staging = tmp_path / f'kubeconfigs-{os.geteuid()}'; staging.symlink_to(target)
+    with pytest.raises(PermissionError, match='symlink'):
+        build_context(_env(kubeconfig_data=encrypt_secret('fixture', settings)), settings)
+    assert not list(target.iterdir())
