@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db import SessionLocal, init_db
 from app.models import Environment, Job, JobStatus
-from app.services import collector, events, metrics
+from app.services import collector, console_activation, events, metrics
 from app.services.catalog import mutating_operation_ids
 from app.services.job_runner import (
     JobRunner,
@@ -208,6 +208,10 @@ def process_queued_jobs(
 
     processed = 0
     while True:
+        # Leave queued work untouched while the managed daemon activates a
+        # program update. A running handler finishes before this boundary.
+        if console_activation.pending(get_settings()):
+            break
         db = SessionLocal()
         try:
             candidate_ids = _queued_candidate_ids(db, limit)
@@ -217,6 +221,8 @@ def process_queued_jobs(
             break
         claimed_this_pass = 0
         for cid in candidate_ids:
+            if console_activation.pending(get_settings()):
+                break
             if _run_one(cid) is not None:
                 processed += 1
                 claimed_this_pass += 1
@@ -358,23 +364,29 @@ def run_daemon(
     ticks = 0
     last_sweep = -_RETENTION_SWEEP_INTERVAL_SECONDS  # first tick sweeps
     abandon_once = True
-    while True:
-        # Abandon prior-worker running jobs on the first tick only; later
-        # ticks must not fail jobs this process claimed.
-        process_queued_jobs(
-            limit=limit, once=False, abandon_running=abandon_once
-        )
-        abandon_once = False
-        if scheduler is not None:
-            scheduler.tick()
-        now = time.monotonic()
-        if now - last_sweep >= _RETENTION_SWEEP_INTERVAL_SECONDS:
-            last_sweep = now
-            run_retention_sweep_safe(settings)
-        ticks += 1
-        if max_ticks is not None and ticks >= max_ticks:
-            return 0
-        time.sleep(interval)
+    console_activation.publish_worker(settings)
+    try:
+        while True:
+            if console_activation.activate_if_idle(settings):
+                return 0
+            # Abandon prior-worker running jobs on the first tick only; later
+            # ticks must not fail jobs this process claimed.
+            process_queued_jobs(
+                limit=limit, once=False, abandon_running=abandon_once
+            )
+            abandon_once = False
+            if scheduler is not None:
+                scheduler.tick()
+            now = time.monotonic()
+            if now - last_sweep >= _RETENTION_SWEEP_INTERVAL_SECONDS:
+                last_sweep = now
+                run_retention_sweep_safe(settings)
+            ticks += 1
+            if max_ticks is not None and ticks >= max_ticks:
+                return 0
+            time.sleep(interval)
+    finally:
+        console_activation.withdraw_worker(settings)
 
 
 def main(argv: Optional[list[str]] = None) -> int:

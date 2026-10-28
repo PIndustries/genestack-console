@@ -19,6 +19,7 @@ import httpx
 from app import __version__
 from app.config import Settings
 from app.paths import frozen, host_prefix
+from app.services import console_activation
 
 log = logging.getLogger(__name__)
 
@@ -163,6 +164,26 @@ def apply_version(settings: Settings, version: str) -> dict[str, Any]:
     return _apply_locked(settings, version)
 
 
+def _validate_program(program: Path, version: str) -> bool:
+    """Reject incompatible or mislabeled programs before an idle activation."""
+    if not version:
+        return False
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("NUITKA_", "_NUITKA", "PYTHON"))
+        and key not in {"LD_LIBRARY_PATH", "LD_LIBRARY_PATH_ORIG", "LD_PRELOAD", "_MEIPASS2"}
+    }
+    try:
+        result = subprocess.run(
+            [str(program), "--version"], capture_output=True, text=True,
+            timeout=30, check=False, env=environment,
+        )
+        return result.returncode == 0 and bool(re.search(
+            r"(?<![A-Za-z0-9_.-])" + re.escape(version) + r"(?![A-Za-z0-9_.-])", result.stdout))
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def _apply_locked(settings: Settings, version: str | None) -> dict[str, Any]:
     if not _apply_lock.acquire(blocking=False):
         info = status(settings)
@@ -180,6 +201,15 @@ def _apply_locked(settings: Settings, version: str | None) -> dict[str, Any]:
 
 def _apply_binary_locked(settings: Settings, version: str | None = None) -> dict[str, Any]:
     info = status(settings)
+    if console_activation.pending(settings):
+        return {**info, "ok": True, "applied": False, "activation_queued": True,
+                "message": "an update is waiting for the managed worker"}
+    try:
+        busy = active_jobs()
+    except Exception:
+        return {**info, "ok": False, "applied": False, "message": "could not verify idle cloud jobs"}
+    if busy:
+        return {**info, "ok": False, "applied": False, "message": "wait for cloud jobs before updating"}
     chosen = str(version or "").strip()
     if chosen:
         url = release_binary_url(chosen)
@@ -206,10 +236,18 @@ def _apply_binary_locked(settings: Settings, version: str | None = None) -> dict
             }
     prefix = host_prefix()
     dest = prefix / "bin" / "genestack-console"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_name = tempfile.mkstemp(prefix="gsc-update-", dir=str(dest.parent))
-    os.close(tmp_fd)
-    tmp = Path(tmp_name)
+    managed = console_activation.worker_available(settings)
+    from app.services.bootc import installed as bootc_installed
+    if bootc_installed() and os.geteuid() != 0 and not managed:
+        return {**info, "ok": False, "applied": False,
+                "message": "managed update worker is not ready; retry after worker startup"}
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp_fd, tmp_name = tempfile.mkstemp(prefix="gsc-update-", dir=str(dest.parent))
+        os.close(tmp_fd)
+        tmp = Path(tmp_name)
+    except OSError:
+        return {**info, "ok": False, "applied": False, "message": "the update directory is not writable"}
     try:
         with httpx.Client(timeout=120.0, follow_redirects=True) as client:
             with client.stream("GET", url) as res:
@@ -228,6 +266,19 @@ def _apply_binary_locked(settings: Settings, version: str | None = None) -> dict
                 "message": "download is not a Linux ELF",
             }
         tmp.chmod(tmp.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        # Jobs may have arrived during the download. Never interrupt them.
+        if active_jobs():
+            tmp.unlink(missing_ok=True)
+            return {**info, "ok": False, "applied": False, "message": "cloud jobs started; update deferred"}
+        if not _validate_program(tmp, str(info.get("latest") or "")):
+            tmp.unlink(missing_ok=True)
+            return {**info, "ok": False, "applied": False,
+                    "message": "downloaded program cannot run here or does not match the requested version"}
+        if managed:
+            console_activation.queue(settings, tmp, str(info.get("latest") or ""))
+            return {**info, "ok": True, "applied": True, "restarted": True,
+                    "activation_queued": True, "path": str(dest),
+                    "message": "update downloaded; managed worker will activate it when idle"}
         os.replace(tmp, dest)
     except Exception as exc:  # noqa: BLE001
         tmp.unlink(missing_ok=True)
@@ -253,7 +304,7 @@ def _maybe_sudo(cmd: list[str]) -> list[str] | None:
     return list(cmd)
 
 
-def _restart_services() -> tuple[bool, str, bool]:
+def _restart_services(*, immediate: bool = False) -> tuple[bool, str, bool]:
     """Schedule a restart after this request returns.
 
     ``systemctl restart`` of the unit that is serving the request kills the
@@ -264,25 +315,26 @@ def _restart_services() -> tuple[bool, str, bool]:
     systemctl = shutil.which("systemctl")
     if not systemctl:
         return False, "binary replaced; systemctl not found", True
-    unit = Path("/etc/systemd/system/genestack-console.service")
-    if not unit.is_file():
+    if not console_activation.service_installed("genestack-console.service"):
         return False, "binary replaced; genestack-console.service is not installed", True
     services = ["genestack-console.service", "genestack-console-worker.service"]
     systemd_run = shutil.which("systemd-run")
     if systemd_run:
-        cmd = _maybe_sudo(
-            [
+        arguments = [
                 systemd_run,
                 f"--unit=genestack-console-restart-{os.getpid()}",
                 "--collect",
-                "--on-active=1s",
-                "--timer-property=AccuracySec=100ms",
+            ]
+        if immediate:
+            arguments += ["--wait", "--service-type=exec"]
+        else:
+            arguments += ["--on-active=1s", "--timer-property=AccuracySec=100ms"]
+        cmd = _maybe_sudo(arguments + [
                 "--",
                 systemctl,
                 "restart",
                 *services,
-            ]
-        )
+            ])
         if cmd is None:
             return False, "binary replaced; restart needs root", False
         try:
@@ -303,6 +355,8 @@ def _restart_services() -> tuple[bool, str, bool]:
             return False, f"binary replaced; restart failed: {detail[:200]}", False
         return False, "binary replaced; restart failed", False
     # No systemd-run. Detach a short sleep so this request can still answer.
+    if immediate:
+        return False, "managed activation requires systemd-run", False
     bash = shutil.which("bash")
     if not bash:
         return False, "binary replaced; could not schedule a restart", False
@@ -376,7 +430,7 @@ def watch_once(
         return {**current, "applied": False, "skipped": "watch off"}
     from app.services.bootc import installed as bootc_installed
 
-    if bootc_installed():
+    if bootc_installed() and not console_activation.worker_available(settings):
         return {**current, "applied": False, "skipped": "bootc"}
     if not current.get("update_available"):
         return {**current, "applied": False, "skipped": "current"}

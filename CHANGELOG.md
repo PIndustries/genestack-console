@@ -4,6 +4,20 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc1
+
+- Activate Console program updates through the existing managed root worker on
+  appliances and managed Linux installs. Finish running cloud jobs before
+  activation and retain queued jobs for the replacement worker.
+- Keep new claims paused until both managed services run the expected program
+  bytes. Validate staged paths and hashes, retain safe restart retries and
+  reject incompatible or incorrectly versioned downloads before activation.
+- Recognize vendor service units under `/usr/lib` and `/lib`, including in the
+  published installer, so a successful download also activates the new version.
+- Enable program update checks on fresh appliances with a supporting managed
+  worker. Preserve existing configuration and explicit watcher opt-outs; keep
+  legacy unsupported appliance workers disabled until migrated.
+
 ## 2026.10.28.1
 
 - Save the local agent token in the configured writable data directory on an

@@ -88,7 +88,23 @@ The appliance is a deploy host. It stays outside the cluster. Put the Genestack 
 
 On the appliance, open Settings. The version list shows this boot and the previous image. Upgrade runs `bootc upgrade` and reboots. Rollback runs `bootc rollback` and reboots. `config.yaml`, the database, and `/opt/genestack` stay.
 
-A machine that is not an appliance still updates the program file from `version.json`. Settings on that install downloads the version you pick. An appliance does not replace that file on its own. The image is the version.
+The Console program updates separately from the operating-system image. Its
+installed copy lives on the writable data filesystem. On managed installs the
+API downloads and checks the requested program, then the privileged worker
+activates it between cloud jobs. Running work finishes first; queued work is
+retained for the restarted worker. The claim gate stays closed until both
+managed services execute the expected program bytes. Existing account links,
+configuration, credentials and cloud state stay in place.
+
+New appliances enable the program update watcher. It follows `version.json`
+once the managed worker is ready. Existing configuration is preserved during
+updates and later boots. `update.watch: false` leaves activation to the update button. The
+downloaded program must run on this host and report the requested version.
+Older appliance workers without this protocol keep automatic program updates
+disabled; run the published installer with `--update` once to migrate them. If their
+configuration has `update.watch: false`, enable it explicitly to opt into
+automatic program updates.
+The installer recognizes both administrator-installed and vendor service units.
 
 A newer qcow2 on a later release is a new appliance. Import that file when you are creating another machine. Copying it over a disk that is already running would drop the database.
 

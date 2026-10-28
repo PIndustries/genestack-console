@@ -1,6 +1,7 @@
 #!/bin/bash
 # Seed the appliance data disk. A later boot leaves config.yaml and the
-# console binary alone. The appliance moves versions with bootc.
+# console binary alone. The managed worker activates later program updates;
+# bootc manages the operating-system image separately.
 set -euo pipefail
 
 PREFIX="${GSC_APPLIANCE_PREFIX:-/var/lib/genestack-console}"
@@ -56,7 +57,7 @@ sqlite_group: genestack
 update:
   url: https://github.com/PIndustries/genestack-console/releases/latest/download/version.json
   auto: false
-  watch: false
+  watch: true
 secret_key: ${secret}
 auth:
   api_keys:
