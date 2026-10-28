@@ -29,6 +29,8 @@ def run(self, handler, op, job, env, log, ctx, params, deadline, check_cancel,
                                        settings=self.settings, boot_now=boot_now)
     self.db.commit()
     if not result.get("ok") or dry or not boot_now:
+        if not result.get("ok") and not dry and boot_now:
+            hardware_inspection.disarm(self.db, node, node.commission_token)
         return result
     token = node.commission_token
     try:
