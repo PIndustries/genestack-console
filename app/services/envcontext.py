@@ -114,11 +114,10 @@ class EnvContext:
 
 
 def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
-    """Decrypt env.kubeconfig_data to a private file under kubeconfigs/ (0600).
+    """Decrypt to a private 0600 file in this service user's 0700 directory.
 
-    The staging directory is 0700: it holds decrypted cluster credentials for
-    every environment, so only the console user may list/read it even while a
-    job is mid-flight and the file is on disk.
+    API and privileged worker use different UIDs. Neither must depend on being
+    able to enumerate or chmod the other user's private staging directory.
 
     One file per context. The collector and every cluster read stage a
     kubeconfig and delete it when they return. A shared name is rewritten or
@@ -126,10 +125,14 @@ def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
     through to http://localhost:8080.
     """
     raw = decrypt_secret(env.kubeconfig_data, settings) or ""
-    target_dir = settings.data_dir / "kubeconfigs"
+    target_dir = settings.data_dir / f"kubeconfigs-{os.geteuid()}"
+    if target_dir.is_symlink():
+        raise PermissionError("Credential staging directory must not be a symlink")
     os.makedirs(target_dir, mode=0o700, exist_ok=True)
     # makedirs applies the mode subject to umask, and does not touch a
     # pre-existing dir — chmod explicitly so the 0700 guarantee holds either way.
+    if target_dir.stat().st_uid != os.geteuid():
+        raise PermissionError("Credential staging directory belongs to another service user")
     os.chmod(target_dir, 0o700)
     target = target_dir / f"{env.id}.{uuid.uuid4().hex}.yaml"
     target.write_text(raw, encoding="utf-8")
@@ -140,7 +143,7 @@ def _stage_kubeconfig(env: Environment, settings: Settings) -> str:
 def sweep_staged_kubeconfigs(
     data_dir: Path | str, *, older_than_seconds: float | None = None
 ) -> int:
-    """Delete leftover staged kubeconfig files under <data_dir>/kubeconfigs.
+    """Delete this service user’s leftover staged kubeconfig files.
 
     Per-job cleanup (EnvContext.cleanup) removes the file it staged, but a
     crash between staging and cleanup leaks the decrypted credentials on disk.
@@ -153,23 +156,30 @@ def sweep_staged_kubeconfigs(
     job that may still be running in the worker, which is a separate process.
     Deleting it makes the next kubectl fall through to http://localhost:8080.
     """
-    kube_dir = Path(data_dir) / "kubeconfigs"
-    if not kube_dir.is_dir():
-        return 0
     cutoff = None
     if older_than_seconds is not None and older_than_seconds > 0:
         cutoff = time.time() - older_than_seconds
     removed = 0
-    for entry in kube_dir.iterdir():
-        if not entry.is_file():
-            continue
+    # Sweep legacy files only when they belong to this user. A root worker may
+    # have created the legacy directory before the unprivileged API restarted.
+    for kube_dir in (Path(data_dir) / f"kubeconfigs-{os.geteuid()}", Path(data_dir) / "kubeconfigs"):
         try:
-            if cutoff is not None and entry.stat().st_mtime >= cutoff:
+            if kube_dir.is_symlink() or not kube_dir.is_dir() or kube_dir.stat().st_uid != os.geteuid():
                 continue
-            entry.unlink()
-            removed += 1
+            entries = list(kube_dir.iterdir())
         except OSError as exc:
-            log.warning("failed to sweep staged kubeconfig %s: %s", entry, exc)
+            log.warning("cannot sweep credential staging directory %s: %s", kube_dir, exc)
+            continue
+        for entry in entries:
+            try:
+                if not entry.is_file():
+                    continue
+                if cutoff is not None and entry.stat().st_mtime >= cutoff:
+                    continue
+                entry.unlink()
+                removed += 1
+            except OSError as exc:
+                log.warning("failed to sweep staged kubeconfig %s: %s", entry, exc)
     return removed
 
 

@@ -13,6 +13,7 @@ A dry run records nothing and deletes nothing.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -64,7 +65,7 @@ def _allowed(path: str, config_dir: Path | None) -> bool:
     if name in _PROTECTED_NAMES:
         return False
     # Staged console kubeconfigs under data_dir/kubeconfigs are EnvContext's.
-    if len(parts) >= 2 and parts[-2] == "kubeconfigs":
+    if len(parts) >= 2 and (parts[-2] == "kubeconfigs" or re.fullmatch(r"kubeconfigs-[0-9]+", parts[-2])):
         return False
     cfg = _posix(str(config_dir)) if config_dir is not None else None
     home_ssh = _posix(str(Path.home() / ".ssh"))
