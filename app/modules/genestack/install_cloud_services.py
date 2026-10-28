@@ -6,6 +6,7 @@ import json
 import shutil
 import time
 
+import yaml
 from sqlalchemy import select
 
 from app.models import Job, JobStatus
@@ -45,7 +46,15 @@ def run(
     executor,
     agent_env_id,
 ):
-    from app.services import cloud_services, cluster_network, deploy, envconfig
+    from app.services import (
+        cloud_services,
+        cluster_network,
+        deploy,
+        envconfig,
+        reviewed_cluster,
+        talos,
+        talos_compute,
+    )
     from app.services import genestack_bridge as bridge
     from app.services.osclient import OpenStackError, client_from_context
 
@@ -110,6 +119,31 @@ def run(
             for n in nodes["items"]
         ):
             raise ValueError("An existing provider uplink requires advanced network review")
+        compute = sorted(
+            name for name, server in doc["servers"].items() if "compute" in server["roles"]
+        )
+        for name in compute:
+            ip = doc["servers"][name]["ip"]
+            inspected = command(
+                [
+                    talos.talosctl_command(),
+                    "--nodes",
+                    ip,
+                    "--endpoints",
+                    ip,
+                    "--talosconfig",
+                    str(ctx.config_dir / "talos/talosconfig"),
+                    "read",
+                    "/proc/cpuinfo",
+                ],
+                30,
+            )
+            if inspected.get("returncode") != 0:
+                raise ValueError("Cannot inspect the reviewed compute CPU")
+            doc = talos_compute.configure(doc, name, inspected.get("stdout") or "")
+        reviewed_cluster.validate_talos_configuration(
+            doc, env, temporary_root=self.settings.data_dir / "installation-preflight", log=log
+        )
         if not original.get("cloud_services"):
             existing = command(
                 ["kubectl", "-n", "openstack", "get", "deployments,statefulsets", "-o", "json"], 30
@@ -156,6 +190,31 @@ def run(
                 job.created_by or "system",
                 expected_version=version,
             )
+        for name in compute:
+            ip = doc["servers"][name]["ip"]
+            base = [
+                talos.talosctl_command(),
+                "--nodes",
+                ip,
+                "--endpoints",
+                ip,
+                "--talosconfig",
+                str(ctx.config_dir / "talos/talosconfig"),
+            ]
+            patch = yaml.safe_dump_all(talos_compute.documents(name, doc["talos"], doc["servers"]))
+            patched = command(
+                [*base, "patch", "machineconfig", "--patch", patch, "--mode=no-reboot"], 60
+            )
+            if patched.get("returncode") != 0:
+                raise ValueError("Cannot configure Talos-managed compute modules without rebooting")
+            limit = time.monotonic() + 60
+            while True:
+                ready = command([*base, "read", "/sys/class/misc/kvm/dev"], 10)
+                if ready.get("returncode") == 0 and ":" in (ready.get("stdout") or ""):
+                    break
+                if time.monotonic() >= limit:
+                    raise ValueError("The reviewed compute node has not exposed its KVM device")
+                time.sleep(2)
         result = deploy.run_deploy(
             self.db,
             env,
@@ -185,6 +244,23 @@ def run(
                 error="Required private cloud services failed: "
                 + ", ".join(result["optional_failed"]),
             )
+        # Availability can still refer to an old pod while an anti-affinity
+        # rollout is stuck. Require the updated operator deployments too.
+        for name in ["mariadb-operator", "mariadb-operator-webhook"]:
+            updated = command(
+                [
+                    "kubectl",
+                    "-n",
+                    "mariadb-system",
+                    "rollout",
+                    "status",
+                    "deployment/" + name,
+                    "--timeout=300s",
+                ],
+                310,
+            )
+            if updated.get("returncode") != 0:
+                raise ValueError("The database operator update has not completed")
         # Helm success is insufficient: use the same authenticated APIs as the apps.
         with client_from_context(ctx) as cloud:
             cloud.list_projects()

@@ -108,7 +108,7 @@ def configure(original, environment_id):
     database = min(8, max(2, remaining // (quorum * 4)))
     rabbit = min(4, max(2, remaining // (quorum * 8)))
     glance = min(20, max(4, remaining // 4))
-    requested = cinder + quorum * (database + rabbit) + glance + 4
+    requested = cinder + quorum * (database + rabbit) + glance + replicas + 6
     if requested > usable:
         raise ValueError("Measured data storage capacity cannot fit the cloud service volumes")
     plan = {
@@ -119,13 +119,19 @@ def configure(original, environment_id):
         "pool_end": str(selected[-1]),
         "service_replicas": replicas,
         "quorum_replicas": quorum,
+        "cache_gib": 1,
         "database_gib": database,
         "rabbit_gib": rabbit,
         "image_gib": glance,
         "storage_requested_gib": requested,
         "storage_usable_gib": usable,
     }
-    if prior and prior != plan:
+    # Correcting reserve accounting must not resize retained service volumes.
+    if prior and any(
+        key not in plan or value != plan[key]
+        for key, value in prior.items()
+        if key != "storage_requested_gib"
+    ):
         raise ValueError(
             "Cloud service sizing changed; review advanced configuration before replacing retained volumes"
         )
@@ -221,6 +227,29 @@ def rendered_files(doc):
             ],
         }
     )
+    files["kustomize/mariadb-operator/overlay/kustomization.yaml"] = dumps(
+        {
+            "resources": ["../base"],
+            "patches": [
+                {
+                    "target": {"group": "apps", "version": "v1", "kind": "Deployment"},
+                    "patch": yaml.safe_dump(
+                        [
+                            {
+                                "op": "add",
+                                "path": "/spec/strategy",
+                                "value": {
+                                    "type": "RollingUpdate",
+                                    "rollingUpdate": {"maxSurge": 0, "maxUnavailable": 1},
+                                },
+                            }
+                        ],
+                        sort_keys=False,
+                    ),
+                }
+            ],
+        }
+    )
     quorum = plan["quorum_replicas"]
     database = {
         "apiVersion": "k8s.mariadb.com/v1alpha1",
@@ -313,3 +342,90 @@ def compatible_infrastructure(source, helper):
     if count != 1:
         raise ValueError("Unrecognized provider annotation; update the deployer before continuing")
     return source.replace("kubectl annotate \\", "kubectl annotate --overwrite \\")
+
+
+def finish_rendered_files(doc, files):
+    """Keep autoscalers within this cloud and retain other rendered patches."""
+    plan = doc.get("cloud_services")
+    if not plan:
+        return
+    replicas = plan["service_replicas"]
+    for service in ["keystone", "placement", "glance", "nova", "neutron", "cinder"]:
+        key = "kustomize/" + service + "/overlay/kustomization.yaml"
+        overlay = yaml.safe_load(files.get(key, "resources: [../base]"))
+        overlay.setdefault("patches", []).append(
+            {
+                "target": {"group": "autoscaling", "kind": "HorizontalPodAutoscaler"},
+                "patch": yaml.safe_dump(
+                    [
+                        {"op": "add", "path": "/spec/minReplicas", "value": replicas},
+                        {"op": "add", "path": "/spec/maxReplicas", "value": min(6, replicas * 2)},
+                    ],
+                    sort_keys=False,
+                ),
+            }
+        )
+        files[key] = yaml.safe_dump(overlay, sort_keys=False)
+    key = "kustomize/memcached/overlay/kustomization.yaml"
+    overlay = yaml.safe_load(files.get(key, "resources: [../base]"))
+    overlay.setdefault("patches", []).append(
+        {
+            "target": {
+                "group": "apps",
+                "version": "v1",
+                "kind": "StatefulSet",
+                "name": "memcached-memcached",
+            },
+            "patch": yaml.safe_dump(
+                [
+                    {
+                        "op": "test",
+                        "path": "/spec/volumeClaimTemplates/0/metadata/name",
+                        "value": "memcached-data",
+                    },
+                    {
+                        "op": "add",
+                        "path": "/spec/volumeClaimTemplates/0/spec/resources/requests/storage",
+                        "value": str(plan.get("cache_gib", 1)) + "Gi",
+                    },
+                ],
+                sort_keys=False,
+            ),
+        }
+    )
+    files[key] = yaml.safe_dump(overlay, sort_keys=False)
+    key = "kustomize/libvirt/overlay/kustomization.yaml"
+    overlay = yaml.safe_load(files.get(key, "resources: [../base]"))
+    overlay.setdefault("patches", []).append(
+        {
+            "patch": yaml.safe_dump(
+                {
+                    "apiVersion": "apps/v1",
+                    "kind": "DaemonSet",
+                    "metadata": {"name": "libvirt-libvirt-default"},
+                    "spec": {
+                        "template": {
+                            "spec": {
+                                "initContainers": [
+                                    {"name": "libvirt-init-modules", "$patch": "delete"}
+                                ],
+                                "volumes": [
+                                    {"name": "etc-modprobe-d", "$patch": "delete"},
+                                    {"name": "host-rootfs", "$patch": "delete"},
+                                    {
+                                        "name": "etc-libvirt-qemu",
+                                        "hostPath": {
+                                            "path": "/var/lib/libvirt/config/qemu",
+                                            "type": "DirectoryOrCreate",
+                                        },
+                                    },
+                                ],
+                            }
+                        }
+                    },
+                },
+                sort_keys=False,
+            )
+        }
+    )
+    files[key] = yaml.safe_dump(overlay, sort_keys=False)

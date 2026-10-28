@@ -145,3 +145,54 @@ def test_database_operator_and_webhooks_fit_the_actual_control_nodes():
         assert operator["ha"]["replicas"] == count
         assert operator["webhook"]["ha"]["replicas"] == count
         assert operator["certController"]["ha"]["replicas"] == count
+
+
+def test_operator_rollout_can_replace_a_pod_when_all_eligible_nodes_are_occupied():
+    import yaml
+
+    from app.services.cloud_services import configure, rendered_files
+
+    configured, _ = configure(document(), "owned-environment")
+    body = yaml.safe_load(
+        rendered_files(configured)["kustomize/mariadb-operator/overlay/kustomization.yaml"]
+    )
+    patch = yaml.safe_load(body["patches"][0]["patch"])
+    strategy = patch[0]["value"]
+    assert strategy["rollingUpdate"]["maxSurge"] == 0
+    assert strategy["rollingUpdate"]["maxUnavailable"] == 1
+
+
+def test_cache_and_glance_temporary_claims_fit_the_reserved_data_budget():
+    import yaml
+
+    from app.services.cloud_services import configure, finish_rendered_files, rendered_files
+
+    configured, plan = configure(document(), "owned-environment")
+    files = rendered_files(configured)
+    finish_rendered_files(configured, files)
+    overlay = yaml.safe_load(files["kustomize/memcached/overlay/kustomization.yaml"])
+    patch = yaml.safe_load(overlay["patches"][0]["patch"])
+    assert patch[0]["op"] == "test" and patch[0]["value"] == "memcached-data"
+    assert patch[1]["value"] == "1Gi"
+    assert plan["storage_requested_gib"] == 42 + 8 + 4 + 10 + 2 + 1 + 2 + 1 + 1
+    prior = copy.deepcopy(configured)
+    prior["cloud_services"].pop("cache_gib")
+    prior["cloud_services"]["storage_requested_gib"] = 68
+    corrected, after = configure(prior, "owned-environment")
+    assert after["database_gib"] == plan["database_gib"]
+    assert corrected["storage"]["longhorn_cinder"]["capacity_gib"] == 42
+
+
+def test_cloud_autoscalers_preserve_the_managed_cinder_overlay():
+    import yaml
+
+    from app.services.cloud_services import configure, finish_rendered_files
+
+    configured, _ = configure(document(), "owned-environment")
+    key = "kustomize/cinder/overlay/kustomization.yaml"
+    files = {key: "resources: [../base]\npatches: [{path: retained-cinder-storage.yaml}]\n"}
+    finish_rendered_files(configured, files)
+    overlay = yaml.safe_load(files[key])
+    assert overlay["patches"][0]["path"] == "retained-cinder-storage.yaml"
+    hpa = yaml.safe_load(overlay["patches"][1]["patch"])
+    assert [p["value"] for p in hpa] == [1, 2]

@@ -254,6 +254,8 @@ def _rook_overlay_kustomization(external_pvc: bool = False) -> str:
 # efi_bootloader_path is the OVH BYOI EFI path (default \EFI\BOOT\BOOTX64.EFI).
 KNOWN_TALOS_KEYS = frozenset(
     {
+
+        "compute_kernel_modules",
         "cluster_name",
         "install_disk",
         "install_disk_selectors",
@@ -1776,6 +1778,10 @@ def render_to_files(
             if private_key:
                 files[".ssh/id_ed25519"] = private_key + "\n"
                 files[".ssh/id_ed25519.pub"] = env.ssh_public_key + "\n"
+
+    from app.services.cloud_services import finish_rendered_files
+
+    finish_rendered_files(doc, files)
 
     return files
 

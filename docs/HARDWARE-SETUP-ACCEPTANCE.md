@@ -261,3 +261,13 @@ Kubernetes-proxied OpenStack APIs used by the apps authenticate successfully,
 compute registers healthy, and the first private LAMP instance passes HTTP,
 database persistence, reboot and cleanup checks. Source-candidate tests do not
 replace the final fresh packaged-image replay.
+
+
+The live single-node continuation also exposed a blocked database-operator
+rollout, fixed minimum-two API autoscalers, a host `/etc/modprobe.d` write on
+Talos, and an unbudgeted 20 GiB cache claim. The guided profile constrains
+operator rollouts/autoscalers, prepares CPU-specific KVM through Talos
+`KernelModuleConfig`, places persistent libvirt definitions under `/var`, and
+budgets a 1 GiB cache plus the temporary/backup claims. Actual Helm/Kustomize
+renders and the Talos 1.14.2 kernel-module schema were validated independently.
+These checks precede live compute and LAMP acceptance; they are not release proof.
