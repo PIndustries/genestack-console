@@ -4,6 +4,28 @@ Hardware discovery is the first step of deployment, not proof of a working syste
 The normal operator flow must use the native apps through the hosted portal;
 backend API tests and direct diagnostic scripts are supporting checks only.
 
+## Current acceptance status (2026-10-28)
+
+The first-customer source candidate passed real iPhone simulator setup on owned
+blank virtual hardware, including UEFI inspection, reviewed Talos/Kubernetes
+installation, private networking, retained storage and OpenStack service setup.
+Independent reads confirmed healthy compute and volume workers and completed
+bootstrap jobs.
+
+The subsequent full native workload run passed all eight independent gates:
+image checksum/activation, managed-volume creation, primary VM boot and exact
+startup bytes, volume/security attachment, private HTTP/PHP/database response,
+unchanged database content on the mounted volume after a changed boot ID,
+server removal, and complete native resource cleanup. A second VM created in
+the app supplied the private HTTP probe and verified a 2 MiB transfer checksum.
+No fallback cleanup was used in the successful run.
+
+Earlier cloud retries included diagnostic repairs; they do not prove a pristine
+packaged deployment. The final fresh packaged-image replay is still required.
+This is single-node virtual acceptance, not heterogeneous/multi-node capacity or
+physical DFW rebuild acceptance. External VM networking remains explicitly
+outside the isolated private-network test.
+
 ## Implemented in this branch
 
 - Register a machine's BMC credentials, PXE MAC and reserved provisioning IP using
@@ -16,7 +38,7 @@ backend API tests and direct diagnostic scripts are supporting checks only.
 - Preserve remote deployer paths and export that environment's inventory path.
 - Report unavailable health probes explicitly instead of failing with HTTP 500.
 
-## Still required before app-driven deployment is accepted
+## Acceptance checklist
 
 1. Reconcile physical BMC disks with OS-visible devices, RAID logical volumes and
    stable WWIDs. Exclude attached remote volumes and read-only/virtual media.

@@ -4,31 +4,31 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
-## Unreleased
+## 2026.10.28.1-rc1
 
-- Fix actual UEFI firmware boot: select the EFI iPXE loader from the client's
-  advertised architecture instead of sending the BIOS loader to every machine.
-  Keep the subsequent iPXE HTTP chain and reject unsupported firmware types.
-- Own a read-only TFTP helper restricted to the system bootloader directory and
-  selected machine interface. Include dnsmasq/iPXE in appliance prerequisites,
-  and fail provisioning preparation before a reboot if its services cannot start.
-- Revoke an unfinished inspection token on cancellation or timeout without
-  changing a newer run or a completed inventory report.
-- A real UEFI boot started from the iPhone simulator fetched its loader over
-  TFTP, loaded the RAM inventory image over HTTP, returned exact disk WWIDs and
-  assigned an address without manual entry. Both virtual disks matched their
-  pre-boot byte/hole baselines afterward. This is source-candidate inspection
-  evidence; Talos/OpenStack installation and LAMP acceptance remain open.
-
-- Expose unused dedicated Ethernet ports to native setup, including ports with
-  only IPv6 link-local addresses. Suggest an unused private subnet and reject
-  existing IPv4/IPv6 uplinks, routed ports, bridge/bond members and virtual links.
-- Add an explicit administrator job to configure the selected port by its fresh
-  hardware fingerprint. Persist an exact-MAC networkd configuration, enable
-  outbound masquerading, verify the management route remains unchanged and
-  roll back a failed setup. This action does not start DHCP or reboot machines.
-- A real iPhone simulator test configured and saved the new port on the owned
-  appliance candidate. Whole-cluster installation and LAMP acceptance remain open.
+- Continue native first-time setup from an empty deployer through installation
+  review, Talos/Kubernetes bootstrap, networking, persistent storage and private
+  OpenStack services. Follow and resume the existing job without repeating a
+  completed disk erase.
+- Offer unused dedicated Ethernet ports and configure the selected port by its
+  fresh hardware fingerprint. Persist exact-MAC settings, enable outbound
+  masquerading, preserve the management route and roll back failed setup.
+- Serve the correct BIOS or UEFI PXE loader through a ready, read-only TFTP helper.
+  Include provisioning prerequisites in the appliance and revoke unfinished
+  inspection tokens safely on cancellation or timeout.
+- Match installation disks by OS-reconciled WWID. Use reviewed data disks for
+  storage and size replicas and service reservations from measured hardware;
+  retain owned storage identities across retries.
+- Install and verify private cluster networking and pod DNS. Leave VM provider
+  uplinks unconfigured until an operator explicitly supplies an external network.
+- Prepare retained Longhorn-backed Cinder exports with stable service ownership.
+  Reject foreign resources or changed retained sizing and verify compute and
+  block-storage bootstrap before declaring service setup complete.
+- Adapt the recognized upstream libvirt startup for Talos, isolate its runtime
+  from the host system bus and remove the unused immutable-root multipath mount
+  from the guided NFS profile. Preserve cgroup placement and scoped mounts.
+- Pin fresh public source preparation to the reviewed upstream revision. Keep
+  explicit advanced source overrides and preserve existing checkouts.
 
 ## 2026.10.27.13
 
