@@ -119,7 +119,7 @@ def test_render_boot_ipxe_chains_per_mac_and_talos_stays_separate():
     talos = bootselect.render_talos_ipxe("http://10.10.0.1:8080")
     assert (
         "kernel http://10.10.0.1:8080/assets/vmlinuz "
-        "talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200" in talos
+        "talos.platform=metal init_on_alloc=1 slab_nomerge pti=on console=tty0 console=ttyS0,115200" in talos
     )
     assert "initrd http://10.10.0.1:8080/assets/initramfs.xz" in talos
     assert talos.rstrip().endswith("boot")

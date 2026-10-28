@@ -179,6 +179,9 @@ def for_environment(db, env) -> dict[str, Any]:
         current[1].version if current else 0,
     )
     result["supports_plan_save"] = True
+    result["supports_cluster_install"] = not bool(env.deployer_ssh_host)
+    record = (current[0].get("hardware_installation") or {}) if current else {}
+    result["installation_job_id"] = record.get("installation_job_id") if isinstance(record, dict) else None
     result["saved_plan_matches"] = _saved_matches(current, result)
     return result
 
@@ -203,7 +206,7 @@ def _saved_matches(current, result) -> bool:
     candidate = {
         k: v
         for k, v in result.items()
-        if k not in ("supports_plan_save", "saved_plan_matches", "fingerprint")
+        if k not in ("supports_plan_save", "saved_plan_matches", "fingerprint", "supports_cluster_install", "installation_job_id")
     }
     candidate["config_version"] = original["config_version"]
     digest = hashlib.sha256(
@@ -244,7 +247,7 @@ def save_review(db, env, actor: str, fingerprint: str, expected_version: int):
         "saved_version": expected_version + 1,
         "reviewed_fingerprint": fingerprint,
         "reviewed_plan": {
-            k: v for k, v in result.items() if k not in ("supports_plan_save", "saved_plan_matches")
+            k: v for k, v in result.items() if k not in ("supports_plan_save", "saved_plan_matches", "supports_cluster_install", "installation_job_id")
         },
         "reviewed_by": actor,
         "reviewed_at": datetime.now(UTC).isoformat(),

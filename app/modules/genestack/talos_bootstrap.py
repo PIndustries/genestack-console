@@ -102,6 +102,8 @@ def run(
             agent_env_id=agent_env_id,
             db=self.db,
             replace_hosts=params.get("replace_hosts") if isinstance(params, dict) else None,
+            check_cancel=check_cancel,
+            deadline=deadline,
         )
     except envconfig_service.ConfigValidationError as exc:
         log(f"[talos] {exc}")

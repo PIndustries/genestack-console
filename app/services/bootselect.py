@@ -211,7 +211,7 @@ def render_talos_ipxe(assets_base_url: str, assets_path: str = "assets") -> str:
 # profile: talos
 # Talos metal maintenance boot. The console pushes config over port 50000
 # only after a commission report has wiped the fixed disks.
-kernel {base}/{assets_path}/vmlinuz talos.platform=metal ip=dhcp console=tty0 console=ttyS0,115200
+kernel {base}/{assets_path}/vmlinuz talos.platform=metal init_on_alloc=1 slab_nomerge pti=on console=tty0 console=ttyS0,115200
 initrd {base}/{assets_path}/initramfs.xz
 boot
 """

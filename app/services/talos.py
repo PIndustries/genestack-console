@@ -658,6 +658,17 @@ def network_patch_yaml(doc: dict[str, Any]) -> str:
             },
         },
     ]
+    talos_settings = doc.get("talos") or {}
+    nameservers = talos_settings.get("nameservers")
+    if nameservers:
+        documents.append({"apiVersion": "v1alpha1", "kind": "ResolverConfig",
+                          "nameservers": [{"address": str(ipaddress.ip_address(value))} for value in nameservers]})
+    if talos_settings.get("cni") == "kube-ovn":
+        documents.extend([
+            {"apiVersion": "v1alpha1", "kind": "KubeNetworkConfig",
+             "podSubnets": [GENESTACK_OVN_POD_CIDR], "serviceSubnets": ["10.233.0.0/18"]},
+            {"apiVersion": "v1alpha1", "kind": "KubeFlannelCNIConfig", "$patch": "delete"},
+        ])
     nodeports = nodeport_bind_cidrs_from_doc(doc)
     if nodeports:
         documents.append(
@@ -1100,6 +1111,13 @@ def build_talos_plan(
                 }},
             })
             patch = yaml.safe_dump_all(documents, sort_keys=False)
+        from app.services.talos_storage import node_documents
+
+        storage_documents = node_documents(node["hostname"], talos_cfg, servers_doc)
+        if storage_documents:
+            documents = list(yaml.safe_load_all(patch)) if patch else []
+            documents.extend(storage_documents)
+            patch = yaml.safe_dump_all(documents, sort_keys=False)
         argv = [
             ctl,
             "apply-config",
@@ -1439,6 +1457,28 @@ def insecure_maintenance(ip: str, log: LogFn | None = None) -> bool:
         log=log,
     )
     return state == "maintenance"
+
+
+def _bootstrap_with_retry(argv: list[str], *, timeout: int, check_cancel=None, deadline=None, **kwargs) -> dict[str, Any]:
+    """An authenticated API can answer before install/reboot and etcd are ready."""
+    stop = min(time.monotonic() + min(timeout, 900), deadline or float("inf"))
+    while True:
+        if check_cancel:
+            check_cancel()
+        remaining = stop - time.monotonic()
+        if remaining <= 0:
+            return {"returncode": 124, "stderr": "Timed out waiting for Talos bootstrap readiness"}
+        result = bridge.run_command(argv, timeout=max(1, min(30, int(remaining))), **kwargs)
+        if result.get("returncode") in (0, None) or result.get("dry_run") or _bootstrap_already_done(result):
+            return result
+        text = _joined_output(result).lower()
+        temporary = "bootstrap is not available yet" in text or any(marker in text for marker in _DOWN_MARKERS)
+        if not temporary:
+            return result
+        log = kwargs.get("log")
+        if log:
+            log("[talos] Waiting for installation/reboot and etcd bootstrap readiness")
+        time.sleep(min(5, max(0, stop - time.monotonic())))
 
 
 def _bootstrap_already_done(result: dict[str, Any]) -> bool:
@@ -1911,6 +1951,8 @@ def run_talos_bootstrap(
     agent_env_id: str | None = None,
     db: Any | None = None,
     replace_hosts: Any = None,
+    check_cancel=None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Run the talos bootstrap plan over the agent/ssh executor via the bridge.
 
@@ -2034,7 +2076,11 @@ def run_talos_bootstrap(
                 commands = prepared["commands"]
                 total = len(commands)
         for command in commands:
-            result = bridge.run_command(
+            if check_cancel:
+                check_cancel()
+            run_command = _bootstrap_with_retry if command["phase"] == "bootstrap" and not dry_run else bridge.run_command
+            retry_control = {"check_cancel": check_cancel, "deadline": deadline} if run_command is _bootstrap_with_retry else {}
+            result = run_command(
                 [str(a) for a in command["argv"]],
                 cwd=plan["workdir"],
                 timeout=timeout,
@@ -2044,6 +2090,7 @@ def run_talos_bootstrap(
                 remote_env=remote_env,
                 agent_env_id=agent_env_id,
                 log=log,
+                **retry_control,
             )
             rc = result.get("returncode")
             if (

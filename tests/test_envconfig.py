@@ -1985,3 +1985,12 @@ def test_servers_static_endpoint_persists_source_and_service_name(
         json={"hostname": f"bad-{_suffix()}", "source": "webhook"},
     )
     assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.parametrize('guided,expected', [(True, '10.233.0.0/18'), (False, '10.96.0.0/12')])
+def test_kube_ovn_service_cidr_matches_generated_talos_cluster(guided, expected):
+    env = Environment(id='env-cidr', name='env-cidr')
+    doc = {'provider': 'talos', 'talos': {'cni': 'kube-ovn'} if guided else {}}
+    files = envconfig_service.render_to_files(doc, env)
+    body = yaml.safe_load(files['helm-configs/kube-ovn/console-rendered.yaml'])
+    assert body['ipv4']['SVC_CIDR'] == expected

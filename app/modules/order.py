@@ -81,6 +81,8 @@ CATALOG_ORDER = (
     "hosts.microk8s.install",
     "hosts.kubespray.adopt",
     "genestack.provisioning_interface",
+    "genestack.install_reviewed_cluster",
+    "genestack.resume_reviewed_cluster",
 )
 
 

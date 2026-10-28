@@ -254,6 +254,9 @@ KNOWN_TALOS_KEYS = frozenset(
         "cluster_name",
         "install_disk",
         "install_disk_selectors",
+        "data_disk_selectors",
+        "nameservers",
+        "cni",
         "image_url",
         "install_image",
         "efi_bootloader_path",
@@ -267,7 +270,7 @@ KNOWN_TALOS_KEYS = frozenset(
 # ovh: vRack fabric for dedicated/Rise dual-NIC (attach + 802.1q on the private NIC).
 KNOWN_OVH_KEYS = frozenset({"vrack", "vlan_id", "private_cidr"})
 TALOS_LIST_KEYS = frozenset(
-    {"cluster_cidrs", "public_ingress_ports", "public_management_cidrs"}
+    {"cluster_cidrs", "public_ingress_ports", "public_management_cidrs", "nameservers"}
 )
 
 # Helm values kube-ovn needs on Talos (read-only /etc). Docs: k8s-cni-kube-ovn.md
@@ -613,8 +616,15 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
                 install_disk_selectors(talos, data.get("servers") or {})
             except ValueError as exc:
                 raise ConfigValidationError(str(exc)) from exc
+        if "data_disk_selectors" in talos:
+            from app.services.talos_storage import data_disk_selectors
+
+            try:
+                data_disk_selectors(talos, data.get("servers") or {})
+            except ValueError as exc:
+                raise ConfigValidationError(str(exc)) from exc
         for key in KNOWN_TALOS_KEYS:
-            if talos.get(key) is None or key == "install_disk_selectors":
+            if talos.get(key) is None or key in ("install_disk_selectors", "data_disk_selectors"):
                 continue
             if key in TALOS_LIST_KEYS:
                 if not isinstance(talos[key], list):
@@ -1611,10 +1621,16 @@ def render_to_files(
             if isinstance(loaded, dict):
                 existing = loaded
         merged = dict(TALOS_KUBE_OVN_HELM)
+        # Guided kube-ovn installations generate this service CIDR in Talos too.
+        # Preserve the legacy Talos default for existing non-guided clusters.
+        selected = doc.get("talos") or {}
+        if selected.get("cni") == "kube-ovn":
+            merged["ipv4"] = {"SVC_CIDR": "10.233.0.0/18"}
+        defaults = dict(merged)
         merged.update(existing)
         for nested in ("cni_conf", "ipv4"):
             if isinstance(existing.get(nested), dict):
-                base = dict(TALOS_KUBE_OVN_HELM.get(nested) or {})
+                base = dict(defaults.get(nested) or {})
                 base.update(existing[nested])
                 merged[nested] = base
         network = doc.get("network")
