@@ -40,8 +40,10 @@ import hashlib
 import hmac as hmac_mod
 import ipaddress
 import logging
+import os
 import secrets
 import shlex
+import tempfile
 import threading
 import time
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -1128,11 +1130,11 @@ def _resolve_seed_environment(
 
 def seed_default_local_agent(
     db: Session,
-    token_dir: Path,
+    token_dir: Path | None = None,
     settings: "Settings | None" = None,
 ) -> None:
     """Create the 'local-agent' credential and write its token to disk for the
-    docker-compose local-agent container.
+    local agent, using the configured writable data directory by default.
 
     Environment selection is tenancy-aware and deterministic:
       1. ``agent.default_environment_id`` (config override), if it exists.
@@ -1151,6 +1153,9 @@ def seed_default_local_agent(
         from app.config import get_settings
 
         settings = get_settings()
+
+    if token_dir is None:
+        token_dir = Path(settings.data_dir)
 
     env, reason, env_count = _resolve_seed_environment(db, settings)
     if env is None:
@@ -1204,16 +1209,32 @@ def seed_default_local_agent(
         )
         return
 
-    # First-time seed for a tenancy-determined environment: create credential.
-    _cred, token = create_credential(db, env.id, name=name)
-
-    # Write token to shared volume (owner-only — raw bearer for the local agent).
+    # Fail before creating a credential when the configured state is unwritable.
     token_dir.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(token, encoding="utf-8")
+    temporary: Path | None = None
+    published = False
     try:
-        token_file.chmod(0o600)
-    except OSError:
-        log.warning("could not chmod 0600 %s", log_field(token_file))
+        # Startup commits unrelated recovery work even if this seed fails. Keep
+        # credential creation and token publication in their own savepoint.
+        with db.begin_nested():
+            _cred, token = create_credential(db, env.id, name=name)
+            fd, temporary_name = tempfile.mkstemp(prefix=".local-agent-", dir=token_dir)
+            temporary = Path(temporary_name)
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                output.write(token)
+                output.flush()
+                os.fsync(output.fileno())
+            # Publish complete owner-only bytes without overwriting a token left
+            # by another process or an earlier installation.
+            os.link(temporary, token_file)
+            published = True
+    except Exception:
+        if published:
+            token_file.unlink(missing_ok=True)
+        raise
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     log.info(
         "seeded local-agent credential for environment %s (%s); token written to %s",
         log_field(env.id),
