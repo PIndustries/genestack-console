@@ -416,6 +416,23 @@ def _pipeline_command(
     is applied with ``--overwrite``. An empty port removes that annotation.
     """
     config = ctx.config_dir
+    # The guided Talos flow keeps libvirt's cgroup placement but cannot use
+    # systemd-run: Talos has no host systemd bus. Preserve the normal chart
+    # and Kustomize pipeline, adapting only its recognized startup script.
+    if not dry_run and local and config is not None and script == "bin/install-libvirt.sh":
+        renderer = config / "runtime/libvirt-talos-post-render.sh"
+        if renderer.is_file():
+            source = (ctx.genestack_root / script).read_text()
+            marker = '--post-renderer "$GENESTACK_OVERRIDES_DIR/kustomize/kustomize.sh"'
+            if source.count(marker) != 1:
+                raise ValueError("Unrecognized libvirt installer; review Talos compatibility")
+            replacement = (
+                '--post-renderer /bin/bash --post-renderer-args '
+                '"$GENESTACK_OVERRIDES_DIR/runtime/libvirt-talos-post-render.sh"'
+            )
+            scoped = config / "runtime/install-libvirt.sh"
+            scoped.write_text(source.replace(marker, replacement))
+            return ["bash", str(scoped)]
     if (
         dry_run
         or not local
@@ -434,7 +451,14 @@ def _pipeline_command(
         from app.services.cloud_services import compatible_infrastructure
 
         scoped_script = config / 'runtime/setup-infrastructure.sh'
-        scoped_script.write_text(compatible_infrastructure(source_script.read_text(), scoped_helper))
+        adapted = compatible_infrastructure(source_script.read_text(), scoped_helper)
+        if (config / "runtime/libvirt-talos-post-render.sh").is_file():
+            libvirt = _pipeline_command("bin/install-libvirt.sh", ctx, dry_run=False, local=True)
+            pattern = r"(?m)^(?:/opt/genestack|" + re.escape(root) + r")/bin/install-libvirt\.sh\s*$"
+            adapted, count = re.subn(pattern, lambda _: shlex.join(libvirt), adapted)
+            if count != 1:
+                raise ValueError("Unrecognized infrastructure libvirt invocation")
+        scoped_script.write_text(adapted)
         source_script = scoped_script
     envoy = f"{root}/bin/setup-envoy-gateway.sh"
     longhorn = f"{root}/bin/install-longhorn.sh"

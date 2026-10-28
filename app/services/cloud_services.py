@@ -183,7 +183,10 @@ def rendered_files(doc):
         return {}
     domain = doc["network"]["gateway_domain"]
     dumps = lambda body: yaml.safe_dump(body, sort_keys=False)
-    files = {"runtime/site-network.sh": (package_root() / "app/assets/site-network.sh").read_text()}
+    files = {
+        "runtime/" + name: (package_root() / "app/assets" / name).read_text()
+        for name in ["site-network.sh", "libvirt-talos-post-render.sh"]
+    }
     pools = []
     for name, addresses in [
         ("gateway-api-internal", [plan["endpoint_ip"] + "/32"]),

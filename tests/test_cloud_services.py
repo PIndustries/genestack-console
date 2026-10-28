@@ -196,3 +196,31 @@ def test_cloud_autoscalers_preserve_the_managed_cinder_overlay():
     assert overlay["patches"][0]["path"] == "retained-cinder-storage.yaml"
     hpa = yaml.safe_load(overlay["patches"][1]["patch"])
     assert [p["value"] for p in hpa] == [1, 2]
+
+
+def test_guided_libvirt_keeps_the_normal_post_renderer_after_talos_adaptation(tmp_path):
+    from types import SimpleNamespace
+    from app.services.cloud_services import configure, rendered_files
+    from app.services.deploy import _pipeline_command
+
+    doc, _ = configure(document(), 'owned-environment')
+    files = rendered_files(doc)
+    config = tmp_path / 'config'
+    root = tmp_path / 'core'
+    (config / 'runtime').mkdir(parents=True)
+    (root / 'bin').mkdir(parents=True)
+    (config / 'runtime/libvirt-talos-post-render.sh').write_text(files['runtime/libvirt-talos-post-render.sh'])
+    installer = root / 'bin/install-libvirt.sh'
+    original = '#!/bin/bash\nhelm upgrade --post-renderer "$GENESTACK_OVERRIDES_DIR/kustomize/kustomize.sh" --post-renderer-args "libvirt/overlay"\n'
+    installer.write_text(original)
+    ctx = SimpleNamespace(config_dir=config, genestack_root=root)
+    argv = _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=False, local=True)
+    adapted = (config / 'runtime/install-libvirt.sh').read_text()
+    assert argv == ['bash', str(config / 'runtime/install-libvirt.sh')]
+    assert '--post-renderer /bin/bash' in adapted
+    assert '--post-renderer-args "libvirt/overlay"' in adapted
+    assert installer.read_text() == original
+    assert _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=True, local=True) == ['bash', 'bin/install-libvirt.sh']
+    installer.write_text('unrecognized installer')
+    with pytest.raises(ValueError, match='Unrecognized libvirt'):
+        _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=False, local=True)
