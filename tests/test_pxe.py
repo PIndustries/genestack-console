@@ -314,24 +314,10 @@ def test_disk_profile_writes_an_exit_script_and_does_not_download(tmp_path, monk
 
 
 def test_commission_profile_fetches_assets_without_the_network(tmp_path, monkeypatch):
-    import hashlib
-
     from app.services import commission_assets
-    from tests.test_commission_assets import image
+    from tests.test_commission_assets import downloader, image
 
-    seen: list[str] = []
-    payload = image()
-
-    def fake(url, log, dest_dir, filename=None, max_bytes=0):
-        name = filename or "asset"
-        seen.append(name)
-        dest = Path(dest_dir) / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(payload)
-        return dest, hashlib.sha256(payload).hexdigest()
-
-    monkeypatch.setattr(commission_assets, "download_factory_image", fake)
-    monkeypatch.setattr(commission_assets, "ALPINE_ISO_SHA256", hashlib.sha256(payload).hexdigest())
+    seen = downloader(monkeypatch, image())
     env = SimpleNamespace(name="bm-env")
     result = pxe.ensure_assets_and_config(
         env,
@@ -350,7 +336,7 @@ def test_commission_profile_fetches_assets_without_the_network(tmp_path, monkeyp
         apply_runtime=False,
     )
     assert result["ok"] is True, result
-    assert seen == ["alpine-standard-" + bootselect.ALPINE_VERSION + "-x86_64.iso"]
+    assert seen == [commission_assets.ALPINE_ISO_URL, commission_assets.ALPINE_NETBOOT_URL]
     assert (tmp_path / "pxe/assets/commission" / bootselect.ALPINE_VERSION / "apks/x86_64/APKINDEX.tar.gz").is_file()
     script = (tmp_path / "pxe" / "mac" / "aa-bb-cc-dd-ee-01.ipxe").read_text()
     assert "gsc_wipe=1" in script

@@ -667,6 +667,10 @@ def ensure_assets_and_config(
             from app.services.pxe_runtime import apply_pxe_cfg
 
             runtime = apply_pxe_cfg(pxe_cfg, nodes, root)
+            from app.services import pxe_owner
+
+            if not pxe_owner.ready(runtime) and pxe_owner.address_in_use(runtime):
+                runtime = pxe_owner.reload_api_owner(str(getattr(env, "id", "")), settings)
             _log(
                 log,
                 "[pxe] hub L2 runtime applied "

@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import tarfile
 from pathlib import Path
 
 import pycdlib
@@ -34,33 +35,43 @@ def image(include_packages=True):
 
 def downloader(monkeypatch, data):
     calls = []
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+        for name, value in [("vmlinuz-lts", b"kernel"), ("initramfs-lts", b"physical network drivers"), ("modloop-lts", b"modules")]:
+            info = tarfile.TarInfo("boot/" + name)
+            info.size = len(value)
+            archive.addfile(info, io.BytesIO(value))
+    netboot = buf.getvalue()
     monkeypatch.setattr(commission_assets, "ALPINE_ISO_SHA256", hashlib.sha256(data).hexdigest())
+    monkeypatch.setattr(commission_assets, "ALPINE_NETBOOT_SHA256", hashlib.sha256(netboot).hexdigest())
 
     def download(url, log, directory, filename, max_bytes):
         calls.append(url)
         target = Path(directory) / filename
-        target.write_bytes(data)
-        return target, hashlib.sha256(data).hexdigest()
+        payload = netboot if url == commission_assets.ALPINE_NETBOOT_URL else data
+        target.write_bytes(payload)
+        return target, hashlib.sha256(payload).hexdigest()
 
     monkeypatch.setattr(commission_assets, "download_factory_image", download)
     return calls
 
 
-def test_one_verified_iso_provides_boot_and_signed_local_repository(tmp_path, monkeypatch):
+def test_verified_netboot_provides_physical_drivers_and_iso_provides_local_repository(tmp_path, monkeypatch):
     calls = downloader(monkeypatch, image())
     first = commission_assets.fetch(tmp_path)
     assert first["ok"] and first["changed"]
     destination = tmp_path / "assets/commission" / bootselect.ALPINE_VERSION
     assert (destination / "vmlinuz-lts").read_bytes() == b"kernel"
+    assert (destination / "initramfs-lts").read_bytes() == b"physical network drivers"
     assert (destination / "apks/x86_64/APKINDEX.tar.gz").read_bytes() == b"signed index"
     assert (destination / "apks/x86_64/alpine-base-3.24.3-r0.apk").is_file()
     assert commission_assets.cached(destination)
     assert commission_assets.fetch(tmp_path)["changed"] is False
-    assert len(calls) == 1
+    assert len(calls) == 2
     # Corrupt cached data is not reused as a complete boot image.
     (destination / "vmlinuz-lts").write_bytes(b"corrupt")
     assert commission_assets.fetch(tmp_path)["changed"]
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert (destination / "vmlinuz-lts").read_bytes() == b"kernel"
 
 
@@ -71,6 +82,40 @@ def test_digest_mismatch_never_publishes_boot_assets(tmp_path, monkeypatch):
     assert not result["ok"]
     assert "SHA256" in result["error"]
     assert not (tmp_path / "assets/commission" / bootselect.ALPINE_VERSION).exists()
+
+
+def test_netboot_digest_mismatch_preserves_previous_assets(tmp_path, monkeypatch):
+    downloader(monkeypatch, image())
+    destination = tmp_path / "assets/commission" / bootselect.ALPINE_VERSION
+    destination.mkdir(parents=True)
+    (destination / "initramfs-lts").write_bytes(b"previous")
+    monkeypatch.setattr(commission_assets, "ALPINE_NETBOOT_SHA256", "0" * 64)
+    result = commission_assets.fetch(tmp_path)
+    assert not result["ok"] and "netboot SHA256" in result["error"]
+    assert (destination / "initramfs-lts").read_bytes() == b"previous"
+    assert not (destination / commission_assets.MANIFEST).exists()
+
+
+def test_netboot_rejects_links_duplicates_and_missing_payloads(tmp_path):
+    import pytest
+
+    for failure in ["link", "duplicate", "missing"]:
+        archive_path = tmp_path / (failure + ".tar.gz")
+        with tarfile.open(archive_path, "w:gz") as archive:
+            for name in bootselect.COMMISSION_FILES:
+                if failure == "missing" and name == "initramfs-lts":
+                    continue
+                info = tarfile.TarInfo("boot/" + name)
+                if failure == "link" and name == "initramfs-lts":
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = "/etc/passwd"
+                else:
+                    info.size = 4
+                archive.addfile(info, io.BytesIO(b"test") if info.isfile() else None)
+                if failure == "duplicate" and name == "initramfs-lts":
+                    archive.addfile(info, io.BytesIO(b"test"))
+        with pytest.raises(ValueError):
+            commission_assets.extract_netboot(archive_path, tmp_path, {"files": {}})
 
 
 def test_missing_base_packages_preserves_existing_payload(tmp_path, monkeypatch):
@@ -92,6 +137,7 @@ def test_inspection_and_wipe_boot_with_deployer_local_packages():
         bootselect.render_commission_ipxe(base, token, ["naa.6000000000000001"]),
     ]:
         assert "ip=dhcp" in script
+        assert "BOOTIF=01-${net0/mac:hexhyp}" in script
         assert (
             "alpine_repo=" + base + "/assets/commission/" + bootselect.ALPINE_VERSION + "/apks"
             in script
@@ -135,7 +181,7 @@ def test_malformed_cache_manifest_is_repaired(tmp_path, monkeypatch):
     )
     assert not commission_assets.cached(destination)
     assert commission_assets.fetch(tmp_path)["ok"]
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 def test_failed_publish_restores_previous_payload_and_retry_recovers(tmp_path, monkeypatch):
