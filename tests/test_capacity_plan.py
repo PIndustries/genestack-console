@@ -218,3 +218,21 @@ def test_dfw_mirrored_system_volume_wins_equal_capacity_raid0_tiebreak(raid_type
     assert len(allocation["candidate_data_disks"]) == 4
     assert allocation["os_inventory_verified"] is os_verified
     assert node == before, "Proposing the existing mirror must not reconfigure RAID"
+
+
+def test_dfw_controller3_keeps_the_larger_firmware_boot_mirror_for_system():
+    # This real machine's firmware boot order places its 3 TB RAID 1 LUN
+    # before the 800 GB RAID 0 LUN. Capacity alone is not the boot preference.
+    node = machine(name="no-role-inference")
+    mirror = "600508b1001c72fb48dc1742e16aa183"
+    striped = "600508b1001cc255e7d2a290e265dc1b"
+    node["hardware"]["logical_volumes"] = [
+        {"unique_identifier": striped, "raid_type": "0", "capacity_bytes": 800109625344,
+         "health": "OK", "state": "Enabled"},
+        {"unique_identifier": mirror, "raid_type": "1", "capacity_bytes": 3000558944256,
+         "health": "OK", "state": "Enabled"},
+    ]
+    allocation = propose([node])["allocations"][0]
+    assert allocation["proposed_boot_disk_identifier"] == mirror
+    assert allocation["candidate_data_disks"] == [{"serial": None, "unique_identifier": striped,
+                                                  "capacity_bytes": 800109625344}]
