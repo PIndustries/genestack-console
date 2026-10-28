@@ -113,7 +113,7 @@ def test_appliance_image_takes_an_ssh_key_from_cloud_init():
     assert "--host 0.0.0.0" in service
     prepare = (IMAGE / "prepare.sh").read_text(encoding="utf-8")
     assert "host: 0.0.0.0" in prepare
-    assert "watch: false" in prepare
+    assert "watch: true" in prepare
     assert "SSH is off." in prepare
     iso_install = (IMAGE / "iso" / "iso-install.sh").read_text(encoding="utf-8")
     assert "bootc install to-disk" in iso_install
@@ -145,6 +145,7 @@ def test_prepare_writes_config_once_and_keeps_the_binary(tmp_path: Path):
 
     subprocess.run(["bash", str(PREPARE)], check=True, env=env)
     config = (prefix / "config.yaml").read_text(encoding="utf-8")
+    assert "watch: true" in config
     assert "secret_key:" in config
     assert "host: 0.0.0.0" in config
     assert "REPLACE_ME" not in config
@@ -153,6 +154,9 @@ def test_prepare_writes_config_once_and_keeps_the_binary(tmp_path: Path):
     assert binary.read_text(encoding="utf-8").startswith("#!/bin/sh")
     assert stat.S_IMODE((prefix / "config.yaml").stat().st_mode) == 0o600
 
+    # An operator opt-out must survive later boots.
+    config = config.replace("watch: true", "watch: false")
+    (prefix / "config.yaml").write_text(config, encoding="utf-8")
     image_bin.write_text("#!/bin/sh\necho replaced\n", encoding="utf-8")
     subprocess.run(["bash", str(PREPARE)], check=True, env=env)
     assert binary.read_text(encoding="utf-8").startswith("#!/bin/sh\necho appliance")

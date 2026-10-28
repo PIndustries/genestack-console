@@ -57,7 +57,7 @@ sqlite_group: genestack
 update:
   url: https://github.com/PIndustries/genestack-console/releases/latest/download/version.json
   auto: false
-  watch: false
+  watch: true
 secret_key: ${secret}
 auth:
   api_keys:

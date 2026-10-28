@@ -96,11 +96,14 @@ retained for the restarted worker. The claim gate stays closed until both
 managed services execute the expected program bytes. Existing account links,
 configuration, credentials and cloud state stay in place.
 
-The default update watcher follows `version.json` once the managed worker is
-ready. `update.watch: false` leaves activation to the update button. The
+New appliances enable the program update watcher. It follows `version.json`
+once the managed worker is ready. Existing configuration is preserved during
+updates and later boots. `update.watch: false` leaves activation to the update button. The
 downloaded program must run on this host and report the requested version.
 Older appliance workers without this protocol keep automatic program updates
-disabled; run the published installer with `--update` once to migrate them.
+disabled; run the published installer with `--update` once to migrate them. If their
+configuration has `update.watch: false`, enable it explicitly to opt into
+automatic program updates.
 The installer recognizes both administrator-installed and vendor service units.
 
 A newer qcow2 on a later release is a new appliance. Import that file when you are creating another machine. Copying it over a disk that is already running would drop the database.

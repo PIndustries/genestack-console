@@ -14,8 +14,9 @@ The oldest GitHub Release is v2026.10.03. The source history starts two version 
   reject incompatible or incorrectly versioned downloads before activation.
 - Recognize vendor service units under `/usr/lib` and `/lib`, including in the
   published installer, so a successful download also activates the new version.
-- Allow default program update checks on appliances with a supporting managed
-  worker. Keep legacy unsupported appliance workers disabled until migrated.
+- Enable program update checks on fresh appliances with a supporting managed
+  worker. Preserve existing configuration and explicit watcher opt-outs; keep
+  legacy unsupported appliance workers disabled until migrated.
 
 ## 2026.10.28.1
 
