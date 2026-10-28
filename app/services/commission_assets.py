@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import shutil
+import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -15,6 +16,8 @@ import pycdlib
 from app.services.bootselect import (
     ALPINE_ISO_SHA256,
     ALPINE_ISO_URL,
+    ALPINE_NETBOOT_SHA256,
+    ALPINE_NETBOOT_URL,
     ALPINE_VERSION,
     COMMISSION_FILES,
 )
@@ -40,7 +43,9 @@ def cached(dest: Path) -> bool:
         entries = document["files"]
         if not isinstance(entries, dict):
             return False
-        if document["iso_sha256"] != ALPINE_ISO_SHA256 or not 4 <= len(entries) <= MAX_FILES:
+        if (document["iso_sha256"] != ALPINE_ISO_SHA256
+            or document.get("netboot_sha256") != ALPINE_NETBOOT_SHA256
+            or not 4 <= len(entries) <= MAX_FILES):
             return False
         if not set(COMMISSION_FILES).issubset(entries):
             return False
@@ -96,6 +101,38 @@ def extract(archive: Path, destination: Path) -> dict[str, Any]:
     return {"version": ALPINE_VERSION, "iso_sha256": ALPINE_ISO_SHA256, "files": entries}
 
 
+def extract_netboot(archive: Path, destination: Path, manifest: dict[str, Any]) -> None:
+    """The ISO initramfs lacks physical NIC drivers; use its matching netboot release.
+
+    Stream only the three known regular payloads, never archive paths or links.
+    Keep the ISO's signed local APK repository for an offline node boot.
+    """
+    found: set[str] = set()
+    total = 0
+    with tarfile.open(archive, "r:gz") as payload:
+        for member in payload:
+            name = member.name.removeprefix("./")
+            if name not in COMMISSION_FILES and name not in {"boot/" + n for n in COMMISSION_FILES}:
+                continue
+            target = PurePosixPath(name).name
+            if not member.isfile() or target in found or not 0 < member.size <= MAX_BYTES:
+                raise ValueError("Invalid or duplicate Alpine netboot payload")
+            total += member.size
+            if total > MAX_BYTES:
+                raise ValueError("Alpine netboot payload exceeds extraction limit")
+            stream = payload.extractfile(member)
+            if stream is None:
+                raise ValueError("Missing Alpine netboot payload")
+            output = destination / target
+            with stream, output.open("wb") as writer:
+                shutil.copyfileobj(stream, writer)
+            manifest["files"][target] = {"bytes": output.stat().st_size, "sha256": digest(output)}
+            found.add(target)
+    if found != set(COMMISSION_FILES):
+        raise ValueError("Alpine netboot archive lacks required boot files")
+    manifest["netboot_sha256"] = ALPINE_NETBOOT_SHA256
+
+
 def fetch(root: Path, log=None) -> dict[str, Any]:
     parent = root / "assets" / "commission"
     parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +142,7 @@ def fetch(root: Path, log=None) -> dict[str, Any]:
         if cached(destination):
             return {"ok": True, "changed": False, "version": ALPINE_VERSION}
         archive = parent / ("alpine-standard-" + ALPINE_VERSION + "-x86_64.iso")
+        netboot = parent / ("alpine-netboot-" + ALPINE_VERSION + "-x86_64.tar.gz")
         stage = Path(tempfile.mkdtemp(prefix=".prepare-", dir=parent))
         previous = stage.with_name(stage.name + "-previous")
         published = False
@@ -116,6 +154,11 @@ def fetch(root: Path, log=None) -> dict[str, Any]:
             if digest(archive) != ALPINE_ISO_SHA256:
                 raise ValueError("Alpine ISO SHA256 does not match the pinned release")
             manifest = extract(archive, stage)
+            if not netboot.is_file() or digest(netboot) != ALPINE_NETBOOT_SHA256:
+                download_factory_image(ALPINE_NETBOOT_URL, log, parent, filename=netboot.name, max_bytes=MAX_BYTES)
+            if digest(netboot) != ALPINE_NETBOOT_SHA256:
+                raise ValueError("Alpine netboot SHA256 does not match the pinned release")
+            extract_netboot(netboot, stage, manifest)
             (stage / MANIFEST).write_text(json.dumps(manifest))
             if destination.exists():
                 destination.rename(previous)
@@ -129,6 +172,7 @@ def fetch(root: Path, log=None) -> dict[str, Any]:
             if log:
                 log("[pxe] verified RAM boot and local package repository " + ALPINE_VERSION)
             archive.unlink(missing_ok=True)
+            netboot.unlink(missing_ok=True)
             return {"ok": True, "changed": True, "version": ALPINE_VERSION}
         except Exception as exc:  # noqa: BLE001 -- preparation disarms boot on failure
             return {

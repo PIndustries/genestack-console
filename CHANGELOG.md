@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc3
+
+- Boot hardware inspection and commissioning with the matching, checksum-pinned
+  Alpine netboot payload. Its early physical NIC drivers allow real servers to
+  fetch the deployer's local signed packages and send their disk inventory.
+- Bind early DHCP to the NIC that fetched the machine's boot profile. Invalidate
+  the older ISO-only boot cache and retain previous assets if preparation fails.
+
 ## 2026.10.28.2-rc2
 
 - Reuse the API's existing provisioning runtime when a worker finds the PXE

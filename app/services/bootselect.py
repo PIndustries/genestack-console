@@ -30,6 +30,11 @@ ALPINE_ISO_URL = (
     "alpine-standard-3.24.3-x86_64.iso"
 )
 ALPINE_ISO_SHA256 = "1629ffe7308d4f3d3eeeed3a97d09ad62293f6d37ef3e483a7306077fdac12be"
+ALPINE_NETBOOT_URL = (
+    "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/"
+    "alpine-netboot-3.24.3-x86_64.tar.gz"
+)
+ALPINE_NETBOOT_SHA256 = "0228553464c9588ffeb63ec04d26abb5f79405006b74574034394199af47dab4"
 COMMISSION_FILES = ("vmlinuz-lts", "initramfs-lts", "modloop-lts")
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
@@ -242,7 +247,7 @@ def render_commission_ipxe(assets_base_url: str, token: str, wipe_wwids: Any = N
     report = f"{base}/commission/{token}"
     return f"""#!ipxe
 # profile: commission
-kernel {base}/assets/commission/{ALPINE_VERSION}/vmlinuz-lts ip=dhcp alpine_repo={base}/assets/commission/{ALPINE_VERSION}/apks modloop={base}/assets/commission/{ALPINE_VERSION}/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=1 gsc_allow_wwids={allowed} gsc_token={token} gsc_report={report} console=tty0 console=ttyS0,115200
+kernel {base}/assets/commission/{ALPINE_VERSION}/vmlinuz-lts ip=dhcp BOOTIF=01-${{net0/mac:hexhyp}} alpine_repo={base}/assets/commission/{ALPINE_VERSION}/apks modloop={base}/assets/commission/{ALPINE_VERSION}/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=1 gsc_allow_wwids={allowed} gsc_token={token} gsc_report={report} console=tty0 console=ttyS0,115200
 initrd {base}/assets/commission/{ALPINE_VERSION}/initramfs-lts
 boot
 """
@@ -254,7 +259,7 @@ def render_inspection_ipxe(assets_base_url: str, token: str) -> str:
     base = assets_base_url.rstrip("/")
     return f"""#!ipxe
 # profile: inspect
-kernel {base}/assets/commission/{ALPINE_VERSION}/vmlinuz-lts ip=dhcp alpine_repo={base}/assets/commission/{ALPINE_VERSION}/apks modloop={base}/assets/commission/{ALPINE_VERSION}/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=0 gsc_token={token} gsc_report={base}/commission/{token} console=tty0 console=ttyS0,115200
+kernel {base}/assets/commission/{ALPINE_VERSION}/vmlinuz-lts ip=dhcp BOOTIF=01-${{net0/mac:hexhyp}} alpine_repo={base}/assets/commission/{ALPINE_VERSION}/apks modloop={base}/assets/commission/{ALPINE_VERSION}/modloop-lts apkovl={base}/assets/commission.apkovl.tar.gz gsc_wipe=0 gsc_token={token} gsc_report={base}/commission/{token} console=tty0 console=ttyS0,115200
 initrd {base}/assets/commission/{ALPINE_VERSION}/initramfs-lts
 boot
 """
