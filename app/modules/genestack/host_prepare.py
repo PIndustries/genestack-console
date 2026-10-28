@@ -29,7 +29,7 @@ OPERATION = {
         _p(
             "repo_ref",
             False,
-            "Branch/tag checked out on a fresh clone, or when update=true (default main)",
+            "Advanced branch/tag/commit override for a fresh clone (default reviewed public revision; custom repositories use main)",
         ),
         _p(
             "genestack_path",

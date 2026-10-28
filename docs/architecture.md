@@ -275,16 +275,21 @@ hand, run over the ssh executor. Ordered steps, stop-on-first-failure:
    when absent; an existing checkout gets `git fetch` only (never a pull —
    the branch is left as-is); `checkout <repo_ref>` runs only on a fresh
    clone.
-3. **Bootstrap** — `sudo -n -E bash bootstrap.sh` with `GENESTACK_CONFIG`
-   pointing at the env's config dir (`-n` because ssh runs BatchMode).
+3. **Bootstrap** — the shipped, digest-logged preparation script runs through
+   `sudo -n -E`, with `GENESTACK_CONFIG` pointing at this environment's config
+   directory. It prepares the deployer account's runtime without depending on
+   the HTTP API process's Python environment.
 4. **Verify** — the skeleton exists: provider file, inventory dir, and
    helm-configs dir under the config dir.
 
-Params `repo_url` / `repo_ref` / `genestack_path` / `config_dir` default from
-the env (metadata `repo_url`, `genestack_path`, `genestack_config_dir`) then
-to rackerlabs/genestack@main, `/opt/genestack`, `/etc/genestack`. The
-workflow's connect step reports the prepared state from the latest
-host_prepare job, and the UI offers a **Prepare host** button there.
+The repository URL defaults from environment metadata, then to the public
+rackerlabs/genestack repository. Fresh public clones use the reviewed immutable
+revision recorded in `DEFAULT_REPO_REF`; custom repositories retain `main` as
+their default. An explicit `repo_ref` remains an advanced override. The remote
+clone path defaults to `/opt/genestack`; the configuration directory defaults
+from the environment, then to `/etc/genestack`. Existing checkouts are preserved.
+The workflow's connect step reports the latest preparation job, and the UI offers
+**Prepare host** there.
 
 ## Verify and day-2 operations
 

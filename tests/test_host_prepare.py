@@ -97,7 +97,7 @@ def test_host_prepare_dry_run_logs_plan_in_order_executes_nothing(
 
     log_text = _job_log(client, admin_headers, job["id"])
     clone = "git clone --recurse-submodules https://github.com/rackerlabs/genestack /opt/genestack"
-    checkout = "git -C /opt/genestack checkout main"
+    checkout = "git -C /opt/genestack checkout b445a65cf0b3852b5d95cba98563fbef4810ff0e"
     bootstrap = "managed deployer bootstrap sha256="
     assert clone in log_text
     assert checkout in log_text
@@ -107,6 +107,30 @@ def test_host_prepare_dry_run_logs_plan_in_order_executes_nothing(
     assert "[dry-run] command not executed" in log_text
     # GENESTACK_CONFIG is exported for the bootstrap step
     assert "GENESTACK_CONFIG" in log_text
+
+
+@pytest.mark.parametrize(
+    ("params", "expected_ref"),
+    [
+        ({}, "b445a65cf0b3852b5d95cba98563fbef4810ff0e"),
+        (
+            {"repo_url": "https://github.com/rackerlabs/genestack.git"},
+            "b445a65cf0b3852b5d95cba98563fbef4810ff0e",
+        ),
+        ({"repo_url": "https://git.example.com/genestack.git"}, "main"),
+        ({"repo_ref": "reviewed/operator-override"}, "reviewed/operator-override"),
+    ],
+)
+def test_fresh_prepare_pins_public_recipe_without_overriding_custom_sources(
+    client, admin_headers, monkeypatch, params, expected_ref
+):
+    env = _create_env(client, admin_headers, dry_run=False)
+    captured = _capture_commands(monkeypatch, rc_rules={"test -d /opt/genestack": 1})
+    response = _prepare_job(client, admin_headers, env["id"], params=params)
+    assert response.status_code == 201, response.text
+    job = response.json()
+    assert job["status"] == "success", job["error"]
+    assert f"git -C /opt/genestack checkout {expected_ref}" in _scripts(captured)
 
 
 def test_host_prepare_missing_git_preflight_fails(client, admin_headers, monkeypatch):

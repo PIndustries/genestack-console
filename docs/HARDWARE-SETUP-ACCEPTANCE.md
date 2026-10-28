@@ -311,3 +311,11 @@ Nova bootstrap jobs. Otherwise it repeats the complete setup. The live iPhone
 retry exercised this gate and resumed at block storage. Final success also
 requires the compute/storage rollout and bootstrap jobs, all compute services,
 a healthy Cinder volume worker, usable VM sizes and the managed volume type.
+
+
+Fresh public deployer preparation checks out the immutable upstream revision used
+by this acceptance candidate (`b445a65cf0b3852b5d95cba98563fbef4810ff0e`), rather
+than whichever commit `main` contains on installation day. Explicit advanced refs
+remain available; custom repositories retain their existing default. Preparation
+never switches or resets an existing checkout. Fresh packaged-image replay must
+verify the pinned default as well as the Console binary version.
