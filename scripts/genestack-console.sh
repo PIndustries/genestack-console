@@ -1739,7 +1739,9 @@ restart_console_units() {
     info "binary replaced. systemctl is not on this host, so the services were not restarted."
     return 0
   fi
-  if [ ! -f /etc/systemd/system/genestack-console.service ]; then
+  if [ ! -f /etc/systemd/system/genestack-console.service ] &&
+     [ ! -f /usr/lib/systemd/system/genestack-console.service ] &&
+     [ ! -f /lib/systemd/system/genestack-console.service ]; then
     info "binary replaced. genestack-console.service is not installed, so nothing was restarted."
     return 0
   fi

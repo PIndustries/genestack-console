@@ -39,20 +39,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-
 from app.models import (
     AuditLog,
-    EnvMutex,
     Environment,
-    HostVM,
+    EnvMutex,
     Job,
     JobLogChunk,
     JobStatus,
 )
 from app.schemas import OperationSpec
 from app.services import genestack_bridge as bridge
-from app.services import agent_relay
-from app.services import logredact
+from app.services import logredact, secret_lease
 from app.services.catalog import (
     all_secret_param_names,
     get_operation,
@@ -61,7 +58,6 @@ from app.services.catalog import (
     validate_params,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
-from app.services import secret_lease
 from app.services.envcontext import EnvContext, build_context
 from app.services.request_safety import under_root
 
@@ -714,6 +710,16 @@ class JobRunner:
 
     def run_job(self, job: Job) -> Job:
         """Execute a queued job synchronously."""
+        from app.services import console_activation
+
+        if console_activation.pending(self.settings):
+            # Also cover an inline caller or a claim racing the update request.
+            # The replacement worker will resume this job after activation.
+            if job.status in {JobStatus.queued, JobStatus.running}:
+                job.status = JobStatus.queued
+                job.started_at = None
+                self.db.commit()
+            return job
         op = get_operation(job.operation)
         actor = job.created_by or "system"
 
