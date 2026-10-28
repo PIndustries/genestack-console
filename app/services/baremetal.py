@@ -271,14 +271,14 @@ def pxe_boot(
     log: LogFn,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """One-shot PXE of this MAC's current next-boot image, then ForceRestart.
+    """One-shot PXE of the selected image, starting or restarting the machine.
 
     The image is whatever ``next_boot`` already selected: commission, Talos,
     or an iPXE exit to the local disk. This does not change that choice.
     """
     if dry_run:
         log(
-            f"[dry-run] would set one-shot PXE boot and force-restart node={node.name} "
+            f"[dry-run] would set one-shot PXE boot and start or restart node={node.name} "
             f"bmc={node.bmc_host}; state -> booting"
         )
         return {
@@ -290,6 +290,13 @@ def pxe_boot(
         }
     password = decrypt_secret(node.bmc_password, settings)
     try:
+        state = redfish.power_state(node.bmc_host, node.bmc_username, password or "")
+        action = {"on": "restart", "off": "on"}.get(state.strip().lower())
+        if action is None:
+            raise redfish.RedfishError(
+                "Cannot initiate PXE while the machine power state is "
+                f"{state!r}; wait for On or Off and retry"
+            )
         redfish.set_pxe_boot(node.bmc_host, node.bmc_username, password or "")
         readback = ""
         try:
@@ -298,7 +305,7 @@ def pxe_boot(
             )
         except redfish.RedfishError as exc:
             log(f"[baremetal] pxe override readback failed for {node.name}: {exc}")
-        redfish.power(node.bmc_host, node.bmc_username, password or "", "restart")
+        reset_type = redfish.power(node.bmc_host, node.bmc_username, password or "", action)
     except redfish.RedfishError as exc:
         log(f"[baremetal] pxe_boot node={node.name} failed: {exc}")
         return {"ok": False, "error": str(exc), "node_id": node.id, "returncode": 2}
@@ -307,13 +314,14 @@ def pxe_boot(
     db.flush()
     log(
         f"[baremetal] pxe_boot node={node.name} next={node.next_boot or 'disk'}: "
-        f"one-shot PXE set (readback {readback or 'unknown'}), ForceRestart sent"
+        f"one-shot PXE set (readback {readback or 'unknown'}), {reset_type} sent"
     )
     return {
         "ok": True,
         "dry_run": False,
         "node_id": node.id,
         "state": node.state,
+        "reset_type": reset_type,
         "message": f"PXE boot initiated for {node.name}",
     }
 
