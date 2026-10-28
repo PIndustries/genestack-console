@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc6
+
+- Prefer an existing healthy mirrored RAID logical volume for the system disk
+  when proposing a new cloud. Keep the other logical volumes available for
+  storage and retain OS-visible WWID verification before installation. This
+  fixes real DFW arrays where equal-size RAID 0 data volumes sorted ahead of
+  the firmware’s RAID 1 boot volume. RAID configuration is never changed.
+
 ## 2026.10.28.2-rc5
 
 - Start powered-off servers when booting inspection or installation through the

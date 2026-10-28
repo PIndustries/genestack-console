@@ -101,7 +101,14 @@ def propose(nodes: list[dict[str, Any]], *, now: datetime | None = None) -> dict
             and math.isfinite(d["capacity_bytes"])
             and d["capacity_bytes"] >= 64 * 1024**3
         ]
-        healthy.sort(key=lambda d: (d["capacity_bytes"], d["serial"]))
+        # Existing mirrored logical volumes are the system-disk default. Equal
+        # sized RAID 0 data volumes must not win solely by WWID ordering (as on
+        # the real DFW arrays). This only proposes a disk; it never changes RAID.
+        mirrors = {"1", "raid1", "10", "raid10", "1+0", "raid1+0"}
+        healthy.sort(key=lambda d: (
+            0 if logical and str(d.get("raid_type") or "").strip().lower() in mirrors else 1,
+            d["capacity_bytes"], d["serial"],
+        ))
         if not healthy:
             blockers.append(f"{name}: a healthy, uniquely identified boot disk is required")
         serials = [d["serial"] for d in healthy]

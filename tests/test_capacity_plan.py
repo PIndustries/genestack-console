@@ -185,3 +185,36 @@ def test_unknown_logical_disk_identity_does_not_fall_back_to_raid_members():
     assert plan["allocations"][0]["proposed_boot_disk_serial"] is None
     assert plan["allocations"][0]["proposed_boot_disk_identifier"] is None
     assert plan["allocations"][0]["candidate_data_disks"] == []
+
+
+@pytest.mark.parametrize("raid_type", ["1", "RAID1", "1+0", "RAID10"])
+@pytest.mark.parametrize("os_verified", [False, True])
+def test_dfw_mirrored_system_volume_wins_equal_capacity_raid0_tiebreak(raid_type, os_verified):
+    # The real DFW storage machines have a firmware boot entry for the RAID 1
+    # logical volume and four equally sized RAID 0 data volumes. Sorting only
+    # capacity/WWID incorrectly selected the third logical drive as the OS disk.
+    node = machine(name="arbitrary-name")
+    mirror = "600508b1001cef0ab851d126b6b3b611"
+    identities = [mirror, "600508b1001cf4dccb56aab04725af5c",
+                  "600508b1001c2b3a24c9aadba135def4", "600508b1001cc606b6a5da4e861dcd57",
+                  "600508b1001ce07721ab8f4c7e0288cb"]
+    node["hardware"].update(serial="physical-machine", nics=[{"mac": node["mac"], "link_status": "LinkUp"}],
+        logical_volumes=[{"unique_identifier": identity, "raid_type": raid_type if identity == mirror else "0",
+                          "capacity_bytes": 400054812672, "health": "OK", "state": "Enabled"}
+                         for identity in identities])
+    if os_verified:
+        node["os_inventory"] = {"source": "ram-inspection", "observed_at": datetime.now(UTC).isoformat(),
+            "serial": "physical-machine", "hardware_modified": False, "wipe": False,
+            "nics": [{"mac": node["mac"], "link_up": True}],
+            "disks": [{"name": f"sd{index}", "wwid": "naa."+identity, "size_sectors": 781357232,
+                       "remote": False, "readonly": False, "wiped": False}
+                      for index, identity in enumerate(identities)]}
+    before = copy.deepcopy(node)
+    allocation = propose([node])["allocations"][0]
+    prefix = "naa." if os_verified else ""
+    assert allocation["proposed_boot_disk_identifier"] == prefix+mirror
+    assert {d["unique_identifier"] for d in allocation["candidate_data_disks"]} == {
+        prefix+identity for identity in identities if identity != mirror}
+    assert len(allocation["candidate_data_disks"]) == 4
+    assert allocation["os_inventory_verified"] is os_verified
+    assert node == before, "Proposing the existing mirror must not reconfigure RAID"
