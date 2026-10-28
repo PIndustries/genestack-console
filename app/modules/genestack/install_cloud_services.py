@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import time
 
+import httpx
 import yaml
 from sqlalchemy import select
 
-from app.models import Job, JobStatus
+from app.models import Job, JobLogChunk, JobStatus
 
 HANDLERS = ("genestack_install_cloud_services",)
 OPERATION = {
@@ -215,6 +217,111 @@ def run(
                 if time.monotonic() >= limit:
                     raise ValueError("The reviewed compute node has not exposed its KVM device")
                 time.sleep(2)
+        from_stage = "infrastructure"
+        previous = self.db.scalar(
+            select(Job)
+            .where(
+                Job.environment_id == env.id,
+                Job.operation == OPERATION["id"],
+                Job.status == JobStatus.failed,
+                Job.dry_run.is_(False),
+            )
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        )
+        if previous is not None:
+            chunks = self.db.scalars(
+                select(JobLogChunk.body).where(
+                    JobLogChunk.job_id == previous.id,
+                    JobLogChunk.body.contains("[deploy] pushed config version="),
+                )
+            ).all()
+            applied_versions = [
+                int(v)
+                for text in chunks
+                for v in re.findall(r"\[deploy\] pushed config version=(\d+)\b", text)
+            ]
+            if cloud_services.storage_retry_candidate(
+                previous.error, applied_versions, version, doc == original
+            ):
+                try:
+                    with client_from_context(ctx) as cloud:
+                        cloud.list_projects()
+                        cloud.list_images()
+                        cloud.list_networks()
+                        services = cloud.list_compute_services()
+                        core_ready = {s.get("host") for s in services} == set(compute) and all(
+                            s.get("state") == "up" and s.get("status") == "enabled"
+                            for s in services
+                        )
+                    runtime = command(
+                        [
+                            "kubectl",
+                            "-n",
+                            "openstack",
+                            "rollout",
+                            "status",
+                            "daemonset/libvirt-libvirt-default",
+                            "--timeout=5s",
+                        ],
+                        10,
+                    )
+                    marker = command(
+                        [
+                            "kubectl",
+                            "-n",
+                            "openstack",
+                            "get",
+                            "daemonset",
+                            "libvirt-libvirt-default",
+                            "-o=jsonpath={.spec.template.metadata.annotations.genestack\\.dev/libvirt-talos-runtime}",
+                        ],
+                        10,
+                    )
+                    mount = command(
+                        [
+                            "kubectl",
+                            "-n",
+                            "openstack",
+                            "get",
+                            "daemonset",
+                            "libvirt-libvirt-default",
+                            "-o=jsonpath={.spec.template.spec.volumes[?(@.name=='run')].hostPath.path}",
+                        ],
+                        10,
+                    )
+                    bootstrap = command(
+                        [
+                            "kubectl",
+                            "-n",
+                            "openstack",
+                            "wait",
+                            "--for=condition=complete",
+                            "--timeout=5s",
+                            "job/nova-cell-setup",
+                            "job/nova-bootstrap",
+                        ],
+                        10,
+                    )
+                    runtime_matches = (
+                        marker.get("returncode") == 0
+                        and (marker.get("stdout") or "").strip()
+                        == cloud_services.libvirt_runtime_digest()
+                        and mount.get("returncode") == 0
+                        and (mount.get("stdout") or "").strip() == "/run/libvirt"
+                    )
+                    if (
+                        core_ready
+                        and runtime_matches
+                        and runtime.get("returncode") == 0
+                        and bootstrap.get("returncode") == 0
+                    ):
+                        from_stage = "platform-extras"
+                        log(
+                            "[cloud] Earlier services and their applied configuration are verified; retrying block storage"
+                        )
+                except (OpenStackError, httpx.HTTPError):
+                    log("[cloud] Earlier services need verification; repeating full cloud setup")
         result = deploy.run_deploy(
             self.db,
             env,
@@ -227,7 +334,7 @@ def run(
             ssh_target=None,
             remote_env={},
             settings=self.settings,
-            from_stage="infrastructure",
+            from_stage=from_stage,
             until_stage="platform-extras",
             include_testing=False,
             deadline=deadline,
@@ -261,21 +368,62 @@ def run(
             )
             if updated.get("returncode") != 0:
                 raise ValueError("The database operator update has not completed")
+        for resource in [
+            "daemonset/libvirt-libvirt-default",
+            "deployment/cinder-api",
+            "deployment/cinder-scheduler",
+            "deployment/cinder-volume",
+        ]:
+            ready = command(
+                ["kubectl", "-n", "openstack", "rollout", "status", resource, "--timeout=300s"], 310
+            )
+            if ready.get("returncode") != 0:
+                raise ValueError("A required compute or storage workload is not ready: " + resource)
+        bootstrapped = command(
+            [
+                "kubectl",
+                "-n",
+                "openstack",
+                "wait",
+                "--for=condition=complete",
+                "--timeout=300s",
+                "job/nova-cell-setup",
+                "job/nova-bootstrap",
+                "job/cinder-bootstrap",
+            ],
+            310,
+        )
+        if bootstrapped.get("returncode") != 0:
+            raise ValueError("The compute and managed storage bootstrap jobs must complete")
         # Helm success is insufficient: use the same authenticated APIs as the apps.
         with client_from_context(ctx) as cloud:
             cloud.list_projects()
             cloud.list_images()
             cloud.list_networks()
             cloud.list_volumes()
-            services = cloud.list_compute_services()
-            if not any(
-                s.get("binary") == "nova-compute"
-                and s.get("state") == "up"
-                and s.get("status") == "enabled"
-                for s in services
-            ):
-                raise ValueError("OpenStack compute is not yet registered and healthy")
-            flavor = cloud_services.ensure_initial_flavor(cloud, doc)
+            limit = time.monotonic() + 180
+            last_error = None
+            while True:
+                check_cancel()
+                error = cloud_services.readiness_error(
+                    doc,
+                    cloud.list_compute_services(),
+                    cloud.json("GET", "volume", cloud._cinder_path("os-services")).get(
+                        "services", []
+                    ),
+                    cloud.list_flavors(),
+                    cloud.json("GET", "volume", cloud._cinder_path("types")).get(
+                        "volume_types", []
+                    ),
+                )
+                if error is None:
+                    break
+                if error != last_error:
+                    log("[cloud] " + error)
+                    last_error = error
+                if time.monotonic() >= limit:
+                    raise ValueError(error)
+                time.sleep(3)
         self.write_audit(
             actor=job.created_by or "system",
             action="env.install_cloud_services",
@@ -289,7 +437,6 @@ def run(
             "ok": True,
             "dry_run": False,
             "cloud_services_ready": True,
-            "initial_flavor": flavor,
             "message": "Private cloud APIs and compute are ready. Create a private network and your first server",
         }
     except (ValueError, OSError, OpenStackError) as error:

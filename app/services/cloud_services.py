@@ -19,34 +19,39 @@ def _default(tree, path, value):
     tree.setdefault(path[-1], value)
 
 
-def ensure_initial_flavor(cloud, doc):
-    """An empty new cloud needs one usable VM choice; preserve existing catalogs."""
-    existing = cloud.list_flavors()
-    if existing:
-        return {"created": False}
-    machines = [
-        m for m in doc["hardware_installation"]["reviewed_plan"]["machines"]
-        if "compute" in m["roles"]
-    ]
-    if not machines:
-        raise ValueError("A first VM size requires reviewed compute hardware")
-    machine = max(machines, key=lambda m: (m["memory_gib"], m["cpu_threads"]))
-    # Leave capacity for the cloud services and additional guests. This is a
-    # starting choice, not a reservation or a change to Nova's allocation ratios.
-    ram = min(2048, int(machine["memory_gib"] * 1024 / 8) // 512 * 512)
-    cores = min(2, max(1, machine["cpu_threads"] // 8))
-    boot = [d["capacity_bytes"] for d in machine["disks"] if d["purpose"] == "boot"]
-    disk = min(16, max(boot, default=0) // 1024**3 // 4)
-    if ram < 512 or disk < 4:
-        raise ValueError("Reviewed compute capacity cannot fit a safe starting VM size")
-    flavor = cloud.flavor_create(name="gs.small", vcpus=cores, ram=ram, disk=disk)
-    expected = {"id": flavor.get("id"), "name": "gs.small", "vcpus": cores, "ram": ram, "disk": disk}
-    if not expected["id"] or not any(
-        all(row.get(key) == value for key, value in expected.items())
-        for row in cloud.list_flavors()
+def libvirt_runtime_digest():
+    return hashlib.sha256(
+        (package_root() / "app/assets/libvirt-talos-post-render.sh").read_bytes()
+    ).hexdigest()
+
+
+def storage_retry_candidate(error, applied_versions, current_version, unchanged):
+    """Only resume the isolated storage failure against the exact applied config."""
+    return (
+        error == "Required private cloud services failed: platform-extras/cinder"
+        and unchanged
+        and set(applied_versions) == {current_version}
+    )
+
+
+def readiness_error(doc, computes, storage_services, flavors, volume_types):
+    expected = {name for name, server in doc["servers"].items() if "compute" in server["roles"]}
+    if {s.get("host") for s in computes} != expected or not all(
+        s.get("state") == "up" and s.get("status") == "enabled" for s in computes
     ):
-        raise ValueError("The starting VM size was not confirmed by the compute API")
-    return {"created": True, **expected}
+        return "OpenStack compute has not registered every reviewed node"
+    if not any(
+        s.get("binary") == "cinder-volume"
+        and s.get("state") == "up"
+        and s.get("status") == "enabled"
+        for s in storage_services
+    ):
+        return "The managed block storage worker is not healthy"
+    if not any(f.get("vcpus", 0) and f.get("ram", 0) and f.get("disk", 0) for f in flavors):
+        return "The compute bootstrap has not supplied a starting VM size"
+    if not any(t.get("name") == "genestack" for t in volume_types):
+        return "The managed volume type is not ready"
+    return None
 
 
 def configure(original, environment_id):
@@ -427,6 +432,38 @@ def finish_rendered_files(doc, files):
         }
     )
     files[key] = yaml.safe_dump(overlay, sort_keys=False)
+    # The selected backend is NFS. Talos has no writable host /etc/multipath,
+    # and the worker does not need the block-storage multipath configuration.
+    key = "kustomize/cinder/overlay/kustomization.yaml"
+    overlay = yaml.safe_load(files.get(key, "resources: [../base]"))
+    overlay.setdefault("patches", []).append(
+        {
+            "patch": yaml.safe_dump(
+                {
+                    "apiVersion": "apps/v1",
+                    "kind": "Deployment",
+                    "metadata": {"name": "cinder-volume"},
+                    "spec": {
+                        "template": {
+                            "spec": {
+                                "volumes": [{"name": "etcmultipath", "$patch": "delete"}],
+                                "containers": [
+                                    {
+                                        "name": "cinder-volume",
+                                        "volumeMounts": [
+                                            {"mountPath": "/etc/multipath", "$patch": "delete"}
+                                        ],
+                                    }
+                                ],
+                            }
+                        }
+                    },
+                },
+                sort_keys=False,
+            )
+        }
+    )
+    files[key] = yaml.safe_dump(overlay, sort_keys=False)
     key = "kustomize/libvirt/overlay/kustomization.yaml"
     overlay = yaml.safe_load(files.get(key, "resources: [../base]"))
     overlay.setdefault("patches", []).append(
@@ -440,9 +477,7 @@ def finish_rendered_files(doc, files):
                         "template": {
                             "metadata": {
                                 "annotations": {
-                                    "genestack.dev/libvirt-talos-runtime": hashlib.sha256(
-                                        (package_root() / "app/assets/libvirt-talos-post-render.sh").read_bytes()
-                                    ).hexdigest()
+                                    "genestack.dev/libvirt-talos-runtime": libvirt_runtime_digest()
                                 }
                             },
                             "spec": {
@@ -477,7 +512,7 @@ def finish_rendered_files(doc, files):
                                         },
                                     },
                                 ],
-                            }
+                            },
                         }
                     },
                 },

@@ -200,104 +200,119 @@ def test_cloud_autoscalers_preserve_the_managed_cinder_overlay():
 
 def test_guided_libvirt_keeps_the_normal_post_renderer_after_talos_adaptation(tmp_path):
     from types import SimpleNamespace
+
     from app.services.cloud_services import configure, rendered_files
     from app.services.deploy import _pipeline_command
 
-    doc, _ = configure(document(), 'owned-environment')
+    doc, _ = configure(document(), "owned-environment")
     files = rendered_files(doc)
-    config = tmp_path / 'config'
-    root = tmp_path / 'core'
-    (config / 'runtime').mkdir(parents=True)
-    (root / 'bin').mkdir(parents=True)
-    (config / 'runtime/libvirt-talos-post-render.sh').write_text(files['runtime/libvirt-talos-post-render.sh'])
-    installer = root / 'bin/install-libvirt.sh'
+    config = tmp_path / "config"
+    root = tmp_path / "core"
+    (config / "runtime").mkdir(parents=True)
+    (root / "bin").mkdir(parents=True)
+    (config / "runtime/libvirt-talos-post-render.sh").write_text(
+        files["runtime/libvirt-talos-post-render.sh"]
+    )
+    installer = root / "bin/install-libvirt.sh"
     original = '#!/bin/bash\nhelm upgrade --post-renderer "$GENESTACK_OVERRIDES_DIR/kustomize/kustomize.sh" --post-renderer-args "libvirt/overlay"\n'
     installer.write_text(original)
     ctx = SimpleNamespace(config_dir=config, genestack_root=root)
-    argv = _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=False, local=True)
-    adapted = (config / 'runtime/install-libvirt.sh').read_text()
-    assert argv == ['bash', str(config / 'runtime/install-libvirt.sh')]
-    assert '--post-renderer /bin/bash' in adapted
+    argv = _pipeline_command("bin/install-libvirt.sh", ctx, dry_run=False, local=True)
+    adapted = (config / "runtime/install-libvirt.sh").read_text()
+    assert argv == ["bash", str(config / "runtime/install-libvirt.sh")]
+    assert "--post-renderer /bin/bash" in adapted
     assert '--post-renderer-args "libvirt/overlay"' in adapted
     assert installer.read_text() == original
-    assert _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=True, local=True) == ['bash', 'bin/install-libvirt.sh']
-    installer.write_text('unrecognized installer')
-    with pytest.raises(ValueError, match='Unrecognized libvirt'):
-        _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=False, local=True)
+    assert _pipeline_command("bin/install-libvirt.sh", ctx, dry_run=True, local=True) == [
+        "bash",
+        "bin/install-libvirt.sh",
+    ]
+    installer.write_text("unrecognized installer")
+    with pytest.raises(ValueError, match="Unrecognized libvirt"):
+        _pipeline_command("bin/install-libvirt.sh", ctx, dry_run=False, local=True)
 
 
 def test_libvirt_startup_update_replaces_pods_with_subpath_config_mounts():
     import hashlib
+
     import yaml
+
     from app.paths import package_root
     from app.services.cloud_services import configure, finish_rendered_files, rendered_files
 
-    doc, _ = configure(document(), 'owned-environment')
+    doc, _ = configure(document(), "owned-environment")
     files = rendered_files(doc)
     finish_rendered_files(doc, files)
-    overlay = yaml.safe_load(files['kustomize/libvirt/overlay/kustomization.yaml'])
-    patch = yaml.safe_load(overlay['patches'][0]['patch'])
-    annotations = patch['spec']['template']['metadata']['annotations']
-    assert annotations['genestack.dev/libvirt-talos-runtime'] == hashlib.sha256(
-        (package_root() / 'app/assets/libvirt-talos-post-render.sh').read_bytes()
-    ).hexdigest()
+    overlay = yaml.safe_load(files["kustomize/libvirt/overlay/kustomization.yaml"])
+    patch = yaml.safe_load(overlay["patches"][0]["patch"])
+    annotations = patch["spec"]["template"]["metadata"]["annotations"]
+    assert (
+        annotations["genestack.dev/libvirt-talos-runtime"]
+        == hashlib.sha256(
+            (package_root() / "app/assets/libvirt-talos-post-render.sh").read_bytes()
+        ).hexdigest()
+    )
 
 
 def test_libvirt_shares_only_its_own_runtime_sockets_with_talos():
     import yaml
+
     from app.services.cloud_services import configure, finish_rendered_files, rendered_files
 
-    doc, _ = configure(document(), 'owned-environment')
+    doc, _ = configure(document(), "owned-environment")
     files = rendered_files(doc)
     finish_rendered_files(doc, files)
-    overlay = yaml.safe_load(files['kustomize/libvirt/overlay/kustomization.yaml'])
-    patch = yaml.safe_load(overlay['patches'][0]['patch'])['spec']['template']['spec']
-    volume = next(v for v in patch['volumes'] if v['name'] == 'run')
-    assert volume['hostPath'] == {'path': '/run/libvirt', 'type': 'DirectoryOrCreate'}
-    for container in patch['containers']:
-        assert {'mountPath': '/run', '$patch': 'delete'} in container['volumeMounts']
-        assert {'name': 'run', 'mountPath': '/run/libvirt'} in container['volumeMounts']
+    overlay = yaml.safe_load(files["kustomize/libvirt/overlay/kustomization.yaml"])
+    patch = yaml.safe_load(overlay["patches"][0]["patch"])["spec"]["template"]["spec"]
+    volume = next(v for v in patch["volumes"] if v["name"] == "run")
+    assert volume["hostPath"] == {"path": "/run/libvirt", "type": "DirectoryOrCreate"}
+    for container in patch["containers"]:
+        assert {"mountPath": "/run", "$patch": "delete"} in container["volumeMounts"]
+        assert {"name": "run", "mountPath": "/run/libvirt"} in container["volumeMounts"]
 
 
-def test_first_flavor_is_confirmed_and_created_only_for_an_empty_cloud():
-    from app.services.cloud_services import ensure_initial_flavor
+def test_storage_retry_requires_the_exact_applied_unchanged_configuration():
+    from app.services.cloud_services import storage_retry_candidate
 
-    class Cloud:
-        def __init__(self, existing=()): self.rows = list(existing); self.calls = []
-        def list_flavors(self): return self.rows
-        def flavor_create(self, **values):
-            self.calls.append(values)
-            self.rows.append({'id': 'created-id', **values})
-            return self.rows[-1]
-
-    doc = document()
-    machine = doc['hardware_installation']['reviewed_plan']['machines'][0]
-    machine['disks'].append({'purpose': 'boot', 'capacity_bytes': 80 * 1024**3})
-    cloud = Cloud()
-    result = ensure_initial_flavor(cloud, doc)
-    assert result == {'created': True, 'id': 'created-id', 'name': 'gs.small', 'vcpus': 2, 'ram': 2048, 'disk': 16}
-    assert ensure_initial_flavor(cloud, doc) == {'created': False}
-    assert len(cloud.calls) == 1
-    custom = Cloud([{'id': 'custom', 'name': 'customer-size'}])
-    assert ensure_initial_flavor(custom, doc) == {'created': False}
-    assert not custom.calls
-    machine['memory_gib'] = 8
-    machine['cpu_threads'] = 4
-    machine['disks'][-1]['capacity_bytes'] = 40 * 1024**3
-    smaller = ensure_initial_flavor(Cloud(), doc)
-    assert (smaller['vcpus'], smaller['ram'], smaller['disk']) == (1, 1024, 10)
+    error = "Required private cloud services failed: platform-extras/cinder"
+    assert storage_retry_candidate(error, [7], 7, True)
+    assert not storage_retry_candidate(error, [], 7, True)
+    assert not storage_retry_candidate(error, [6], 7, True)
+    assert not storage_retry_candidate(error, [6, 7], 7, True)
+    assert not storage_retry_candidate(error, [7], 7, False)
+    assert not storage_retry_candidate("deploy failed at core/glance", [7], 7, True)
 
 
-def test_first_flavor_requires_confirmation_and_real_boot_capacity():
-    from app.services.cloud_services import ensure_initial_flavor
+def test_guided_nfs_worker_does_not_require_host_multipath_configuration():
+    import yaml
 
-    class Unconfirmed:
-        def list_flavors(self): return []
-        def flavor_create(self, **values): return {'id': 'not-confirmed'}
+    from app.services.cloud_services import configure, finish_rendered_files, rendered_files
 
-    doc = document()
-    with pytest.raises(ValueError, match='capacity'):
-        ensure_initial_flavor(Unconfirmed(), doc)
-    doc['hardware_installation']['reviewed_plan']['machines'][0]['disks'].append({'purpose': 'boot', 'capacity_bytes': 80 * 1024**3})
-    with pytest.raises(ValueError, match='confirmed'):
-        ensure_initial_flavor(Unconfirmed(), doc)
+    doc, _ = configure(document(), "owned-environment")
+    files = rendered_files(doc)
+    finish_rendered_files(doc, files)
+    overlay = yaml.safe_load(files["kustomize/cinder/overlay/kustomization.yaml"])
+    patches = [yaml.safe_load(p["patch"]) for p in overlay["patches"] if "patch" in p]
+    worker = next(p for p in patches if isinstance(p, dict) and p.get("kind") == "Deployment")
+    spec = worker["spec"]["template"]["spec"]
+    assert {"name": "etcmultipath", "$patch": "delete"} in spec["volumes"]
+    assert {"mountPath": "/etc/multipath", "$patch": "delete"} in spec["containers"][0][
+        "volumeMounts"
+    ]
+
+
+def test_readiness_requires_every_compute_and_the_real_managed_storage_worker():
+    from app.services.cloud_services import readiness_error
+
+    doc = document(3)
+    computers = [{"host": f"node-{i}", "state": "up", "status": "enabled"} for i in range(3)]
+    storage = [{"binary": "cinder-volume", "state": "up", "status": "enabled"}]
+    flavors = [{"vcpus": 1, "ram": 2048, "disk": 20}]
+    types = [{"name": "genestack"}]
+    assert readiness_error(doc, computers, storage, flavors, types) is None
+    assert "every reviewed" in readiness_error(doc, computers[:1], storage, flavors, types)
+    assert "storage worker" in readiness_error(doc, computers, [], flavors, types)
+    assert "starting VM" in readiness_error(doc, computers, storage, [], types)
+    assert "volume type" in readiness_error(doc, computers, storage, flavors, [])
+    computers[0]["status"] = "disabled"
+    assert "every reviewed" in readiness_error(doc, computers, storage, flavors, types)

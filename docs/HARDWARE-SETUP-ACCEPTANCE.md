@@ -292,8 +292,22 @@ adapter digest on the pod template ensures subPath-mounted script updates also
 replace existing pods. Diagnostic pod restarts do not count as automatic
 rollout acceptance.
 
-The new Nova API also reported an empty flavor catalog. Guided completion
-creates and independently re-reads one starting `gs.small` size only when the
-catalog is empty. CPU, memory and root-disk bounds come from a reviewed compute
-machine. Existing user sizes are preserved. The real app-driven VM journey must
-still demonstrate this choice and its volume/reboot behavior.
+The Nova API initially reported an empty flavor catalog before its bootstrap
+job finished. The completed bootstrap supplied the standard sizes, so the
+experiment that created a separate initial flavor was removed. Acceptance must
+wait for bootstrap completion rather than infer missing defaults from an
+intermediate state.
+
+The next live failure was an unused Cinder multipath host mount trying to
+create `/etc/multipath` on Talos's immutable root. The guided NFS profile
+removes that mount while retaining its single-writer strategy, owner annotation
+and data/configuration mounts. The actual pinned Cinder chart and Kustomize
+output passed these assertions.
+
+A storage-only retry requires the precise prior Cinder failure, an unchanged
+configuration with the same recorded pushed version, healthy core APIs, every
+reviewed compute service, the matching healthy libvirt runtime, and completed
+Nova bootstrap jobs. Otherwise it repeats the complete setup. The live iPhone
+retry exercised this gate and resumed at block storage. Final success also
+requires the compute/storage rollout and bootstrap jobs, all compute services,
+a healthy Cinder volume worker, usable VM sizes and the managed volume type.
