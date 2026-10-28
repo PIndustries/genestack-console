@@ -144,3 +144,41 @@ The node's provisioning address came from its actual DHCP lease. Independent
 byte/hole baselines verified both virtual disks were unchanged. A cancelled run
 now revokes only its own unfinished inspection token so it can be retried safely.
 The full cloud installer and workload acceptance are still separate steps.
+
+## Reviewed cluster installation and continuation
+
+A saved, OS-reconciled plan can explicitly authorize the first cluster install.
+The native confirmation identifies every machine and exact boot/storage WWID.
+The worker rechecks BMC identity, validates actual generated Talos configurations
+with the installed Talos CLI, and compares the saved configuration version before
+recording authorization. Only then can commissioning run. Existing clusters are
+rejected by this first-install action.
+
+Data disks use exact-WWID Talos user volumes and stable Longhorn disk paths.
+Replication defaults are bounded by the number of measured storage machines.
+The native app follows the real installation job and restores it after reopening.
+This action stops after the cluster bootstrap; it does not claim that OpenStack
+or customer workloads are ready.
+
+The first native-triggered installation accepted commissioning and loaded Talos,
+but exposed missing mandatory kernel security arguments and a kernel DHCP wait
+before the NIC driver loaded. Correcting those arguments reached maintenance in
+about 20 seconds on the owned virtual test machine. The subsequent real install
+created the system partitions and the selected data volume, then exposed a
+bootstrap timing race during the install reboot. The bootstrap command now waits
+through that explicit temporary error and transport interruption, with a bounded
+retry deadline and cancellation checks; identity errors remain fatal.
+
+A failed authorized installation can continue through a separate operation.
+It validates the same environment, stopped job, machines, addresses, roles and
+exact disk selectors, rechecks management identity and compares configuration
+versions again. It never invokes commissioning. Actual native continuation
+preserved the original commissioning timestamp and report digest. The next
+native continuation completed bootstrap and saved the cluster connection. An
+independent authenticated Kubernetes read found the fresh expected node and its
+measured CPU/memory; Talos reported the system partitions and chosen data volume
+ready. The node correctly reports uninitialized CNI until infrastructure setup.
+A cold-reopen regression then found that an existing Kubernetes connection hid
+unfinished setup; the corrected native navigation retained setup and the completed
+job without offering another erase or continuation. OpenStack/LAMP acceptance,
+all-node readiness after CNI, and fresh packaged replay remain required.

@@ -1065,6 +1065,8 @@ def run_deploy(
                     agent_env_id=agent_env_id,
                     db=db,
                     replace_hosts=replace_hosts,
+                    check_cancel=check_cancel,
+                    deadline=deadline,
                 )
             except envconfig_service.ConfigValidationError as exc:
                 log(f"[deploy] FAILED at hosts/talos — {exc}")

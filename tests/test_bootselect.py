@@ -51,6 +51,8 @@ def test_chain_exits_for_an_unknown_mac_and_disk_does_not_wipe():
 def test_talos_script_has_no_machine_config_and_commission_carries_the_token():
     talos = render_talos_ipxe("http://10.10.0.1:8080")
     assert "talos.platform=metal" in talos
+    assert all(argument in talos for argument in ("init_on_alloc=1", "slab_nomerge", "pti=on"))
+    assert "ip=dhcp" not in talos  # Talos userspace owns DHCP; kernel IP-Config can stall before modular NIC drivers load.
     assert "talos.config=" not in talos
     assert "gsc_wipe" not in talos
     commission = render_commission_ipxe("http://10.10.0.1:8080", "abcabcabcabcabcabc", ["naa.60000000000000000000000000000001"])

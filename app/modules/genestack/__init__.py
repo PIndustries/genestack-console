@@ -22,6 +22,8 @@ class GenestackModule(Module):
         "host_prepare",
         "host_setup",
         "provisioning_interface",
+        "install_reviewed_cluster",
+        "resume_reviewed_cluster",
         "services_list",
         "cluster_status",
         "pipeline_run",
