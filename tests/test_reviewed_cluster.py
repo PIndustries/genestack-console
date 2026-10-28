@@ -79,6 +79,25 @@ def test_changed_bmc_identity_cannot_retarget_a_saved_review(reviewed, monkeypat
         assert node.wiped_at is None
 
 
+def test_management_identity_accepts_case_insensitive_bmc_mac(reviewed, monkeypatch):
+    from app.services import redfish
+
+    eid, nid, plan, _ = reviewed
+    with SessionLocal() as db:
+        env = db.get(Environment, eid)
+        node = db.get(BaremetalNode, nid)
+        fresh = copy.deepcopy(node.hardware_report)
+        fresh['nics'] = [
+            {**nic, 'mac': str(nic.get('mac') or '').upper()}
+            for nic in fresh.get('nics', [])
+        ]
+        monkeypatch.setattr(redfish, 'hardware_inventory', lambda *a, **k: fresh)
+        reviewed_cluster.verify_management_identity(
+            db, env, plan, settings=None, check_cancel=lambda: None
+        )
+        assert node.wiped_at is None
+
+
 def test_authorization_is_versioned_and_exposes_existing_job_instead_of_duplicate_start(reviewed):
     eid, _, plan, params = reviewed
     with SessionLocal() as db:

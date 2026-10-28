@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from app.services import envconfig, hardware_installation, talos
+from app.services.bootselect import normalize_mac
 
 
 def configuration(db, env, params: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -79,7 +80,9 @@ def verify_management_identity(db, env, plan, *, settings, check_cancel) -> None
                                    decrypt_secret(node.bmc_password, settings), check=check_cancel)
         if (fresh.get('serial') != before.get('serial')
             or (before.get('system_uuid') and fresh.get('system_uuid') != before['system_uuid'])
-            or machine['mac'] not in {n.get('mac') for n in fresh.get('nics', [])}):
+            or normalize_mac(machine['mac']) not in {
+                normalize_mac(n.get('mac')) for n in fresh.get('nics', []) if isinstance(n, dict)
+            }):
             raise ValueError('A management target changed. Discover and inspect it again before installation')
         disks = lambda report: sorted((str(d.get('serial')), d.get('capacity_bytes')) for d in report.get('drives', []))
         if disks(fresh) != disks(before):
