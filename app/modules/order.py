@@ -83,6 +83,7 @@ CATALOG_ORDER = (
     "genestack.provisioning_interface",
     "genestack.install_reviewed_cluster",
     "genestack.resume_reviewed_cluster",
+    "genestack.install_cluster_network",
 )
 
 

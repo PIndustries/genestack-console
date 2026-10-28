@@ -1634,8 +1634,8 @@ def render_to_files(
                 base.update(existing[nested])
                 merged[nested] = base
         network = doc.get("network")
-        if isinstance(network, dict) and network.get("container_interface"):
-            iface = str(network["container_interface"]).strip()
+        if (isinstance(network, dict) and network.get("container_interface")) or selected.get("cni") == "kube-ovn":
+            iface = str((network or {}).get("container_interface") or "").strip()
             pinned = "" if _LEGACY_KERNEL_IFACE.fullmatch(iface) else iface
             networking = merged.get("networking")
             if not isinstance(networking, dict):

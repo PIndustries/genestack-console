@@ -182,3 +182,28 @@ A cold-reopen regression then found that an existing Kubernetes connection hid
 unfinished setup; the corrected native navigation retained setup and the completed
 job without offering another erase or continuation. OpenStack/LAMP acceptance,
 all-node readiness after CNI, and fresh packaged replay remain required.
+
+## First cluster network and DNS acceptance
+
+The native setup continues from successful bootstrap to a scoped networking job.
+Before changes, the job checks that the connected Kubernetes node names and
+InternalIPs match the reviewed machines. It labels the measured control planes,
+reconciles kube-ovn through the normal pinned install script, and waits for the
+controller, nodes and CoreDNS. Automatic interface selection clears the inherited
+bridge pin rather than guessing a NIC on the deployer.
+
+The real first run made the node Ready but exposed a separate pod-network fault:
+host-network controllers worked while CoreDNS and the diagnostic pod could not
+reach the Kubernetes API. An explicit node-fabric CIDR had excluded the pod/join
+ranges from the generated firewall policy. Guided kube-ovn configurations now
+include those private ranges in the firewall while retaining narrow node address
+selection and default-deny public ingress. Existing reviewed nodes reconcile this
+policy with a no-reboot Talos patch after offline validation.
+
+Repeated native simulator runs passed the actual job and controller/node/DNS
+readiness. A functional lookup from a normal, non-host-network diagnostic pod
+resolved the real Kubernetes service IP. That lookup is now part of the job's
+success check too, with the diagnostic workload required ready first. The same
+fresh node identity, boot/data disks and original commissioning report were
+preserved. These are source-candidate results; storage/OpenStack/LAMP acceptance
+and final fresh packaged replay remain separate requirements.

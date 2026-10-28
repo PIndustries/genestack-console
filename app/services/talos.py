@@ -816,6 +816,10 @@ def firewall_yaml(doc: dict[str, Any]) -> str:
     internet.
     """
     cidrs = cluster_cidrs_from_doc(doc)
+    if (doc.get("talos") or {}).get("cni") == "kube-ovn":
+        # Explicit node-fabric CIDRs must not exclude traffic originating in
+        # the configured pod/join networks (CoreDNS needs the host API).
+        cidrs = list(dict.fromkeys([*cidrs, GENESTACK_OVN_POD_CIDR, "10.233.0.0/18", KUBE_OVN_JOIN_CIDR]))
     docs: list[dict[str, Any]] = [
         {
             "apiVersion": "v1alpha1",
