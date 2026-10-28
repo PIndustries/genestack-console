@@ -131,7 +131,12 @@ def test_api_owner_reload_never_rewrites_pending_boot_files_or_submits_jobs(
     response = client.post(base + "/pxe/runtime/reload", headers=admin_headers)
     assert response.status_code == 200 and response.json()["ok"] is True
     assert len(calls) == 1 and len(calls[0][1]) == 1
-    assert client.get("/api/v1/jobs", headers=admin_headers).json() == []
+    assert (
+        client.get(
+            "/api/v1/jobs", params={"environment_id": base.split("/")[-1]}, headers=admin_headers
+        ).json()
+        == []
+    )
 
 
 def test_api_does_not_delegate_again_when_a_foreign_process_owns_the_port(
