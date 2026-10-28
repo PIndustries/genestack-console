@@ -271,3 +271,13 @@ operator rollouts/autoscalers, prepares CPU-specific KVM through Talos
 budgets a 1 GiB cache plus the temporary/backup claims. Actual Helm/Kustomize
 renders and the Talos 1.14.2 kernel-module schema were validated independently.
 These checks precede live compute and LAMP acceptance; they are not release proof.
+
+A subsequent live retry exposed libvirt's `systemd-run` dependency on a Talos
+host without a systemd bus. The scoped Helm post-renderer preserves cgroup
+placement, adapts only the two recognized libvirt startup ConfigMaps, then
+continues through the normal Kustomize renderer. An unknown startup layout
+stops before applying manifests. The pinned chart render verified that all
+other resources remain identical and that the adapted shell syntax is valid.
+Both runtime helpers are included in the built source wheel and the compiled
+binary's existing assets directory. Live compute, persistent guest workload
+and fresh packaged-image acceptance are still required.
