@@ -163,7 +163,7 @@ async def lifespan(app: FastAPI):
         try:
             from app.services.agents import seed_default_local_agent
 
-            seed_default_local_agent(db, Path("/app/data"))
+            seed_default_local_agent(db)
             log.info("local-agent seed complete")
         except Exception:
             log.exception("local-agent seed failed (non-fatal)")

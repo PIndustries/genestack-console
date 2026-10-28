@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.1-rc2
+
+- Save the local agent token in the configured writable data directory on an
+  immutable appliance, rather than the Docker-specific `/app/data` path.
+- Roll back credential creation if token publication fails, while preserving
+  unrelated startup recovery work and existing agent credentials. Publish only
+  complete, owner-readable token files and never overwrite an existing token.
+
 ## 2026.10.28.1-rc1
 
 - Continue native first-time setup from an empty deployer through installation

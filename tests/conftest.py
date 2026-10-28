@@ -33,7 +33,7 @@ os.close(_CFG_FD)
 
 _test_config = {
     "dry_run": True,
-    "data_dir": str(Path(_DB_PATH).parent / "console-test-data"),
+    "data_dir": str(Path(_DB_PATH).with_suffix(".data")),
     "database_url": f"sqlite:///{_DB_PATH}",
     "auth": {
         "api_keys": {
@@ -155,4 +155,5 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
             os.unlink(path)
         except OSError:
             pass
+    shutil.rmtree(Path(_DB_PATH).with_suffix(".data"), ignore_errors=True)
     shutil.rmtree(_GENESTACK_ROOT, ignore_errors=True)

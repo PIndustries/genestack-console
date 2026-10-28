@@ -244,3 +244,134 @@ def test_seed_writes_token_mode_0600(seed_db, tmp_path):
     assert token_file.is_file()
     mode = token_file.stat().st_mode & 0o777
     assert mode == 0o600, f"expected 0600, got {oct(mode)}"
+
+
+def test_seed_defaults_to_configured_writable_data_directory(seed_db, tmp_path):
+    env = _make_env("appliance")
+    seed_db.add(env)
+    seed_db.commit()
+    state = tmp_path / "writable-state"
+
+    agents.seed_default_local_agent(seed_db, settings=_settings(data_dir=state))
+    seed_db.commit()
+
+    token_file = state / "local-agent-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
+    assert _local_credential(seed_db, env.id).token_hash == _sha256(token_file.read_text())
+
+
+def test_failed_token_directory_does_not_commit_orphan_credential(seed_db, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    env = _make_env("appliance")
+    seed_db.add(env)
+    seed_db.commit()
+    state = tmp_path / "readonly-state"
+    original = Path.mkdir
+
+    def readonly(path, *args, **kwargs):
+        if path == state:
+            raise OSError("read-only test filesystem")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", readonly)
+    with pytest.raises(OSError):
+        agents.seed_default_local_agent(seed_db, state, settings=_settings())
+    # Startup catches the seed error and commits other recovery work.
+    seed_db.commit()
+    assert _cred_count(seed_db, env.id) == 0
+
+
+def test_failed_token_write_rolls_back_only_seed(seed_db, tmp_path, monkeypatch):
+    env = _make_env("before-seed")
+    seed_db.add(env)
+    seed_db.commit()
+    env.name = "unrelated-recovery-work"
+
+    def fail_sync(_fd):
+        raise OSError("injected write failure")
+
+    monkeypatch.setattr(agents.os, "fsync", fail_sync)
+    with pytest.raises(OSError):
+        agents.seed_default_local_agent(seed_db, tmp_path, settings=_settings())
+    seed_db.commit()
+    assert _cred_count(seed_db, env.id) == 0
+    assert seed_db.get(Environment, env.id).name == "unrelated-recovery-work"
+    assert not (tmp_path / "local-agent-token").exists()
+
+
+
+def test_existing_unclaimed_token_is_never_overwritten(seed_db, tmp_path):
+    env = _make_env("appliance")
+    seed_db.add(env)
+    seed_db.commit()
+    token_file = tmp_path / "local-agent-token"
+    token_file.write_text("existing-private-token")
+    with pytest.raises(FileExistsError):
+        agents.seed_default_local_agent(seed_db, tmp_path, settings=_settings())
+    seed_db.commit()
+    assert token_file.read_text() == "existing-private-token"
+    assert _cred_count(seed_db, env.id) == 0
+    assert not list(tmp_path.glob(".local-agent-*"))
+
+
+def test_api_cold_start_uses_writable_state_with_readonly_app(tmp_path):
+    """Run the real lifespan in a separate process, preserving the suite's loop."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    config = yaml.safe_load(Path(os.environ["CONSOLE_CONFIG"]).read_text())
+    config["database_url"] = f"sqlite:///{tmp_path / 'cold.db'}"
+    config["data_dir"] = str(tmp_path / "state")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config))
+    script = r'''
+import asyncio
+from pathlib import Path
+from unittest.mock import patch
+from sqlalchemy import select
+from app.config import get_settings
+from app.db import init_db, SessionLocal
+from app.main import app, lifespan
+from app.models import AgentCredential, Environment
+from app.services.agents import hash_token
+
+init_db()
+with SessionLocal() as db:
+    if not db.scalar(select(Environment)):
+        db.add(Environment(id="cold-start", name="cold-start"))
+        db.commit()
+original_mkdir = Path.mkdir
+
+def immutable_app(path, *args, **kwargs):
+    if str(path) == "/app" or str(path).startswith("/app/"):
+        raise OSError("read-only appliance root")
+    return original_mkdir(path, *args, **kwargs)
+
+async def run():
+    with patch.object(Path, "mkdir", immutable_app), \
+         patch("app.services.talosctl_install.start_ensure"), \
+         patch("app.services.pxe_runtime.start_from_db"), \
+         patch("app.services.pxe_runtime.stop_all"):
+        async with lifespan(app):
+            token_file = get_settings().data_dir / "local-agent-token"
+            assert token_file.is_file(), "startup did not publish local-agent state"
+            assert token_file.stat().st_mode & 0o777 == 0o600
+            with SessionLocal() as db:
+                credential = db.scalar(select(AgentCredential).where(AgentCredential.name == "local-agent"))
+                assert credential is not None
+                assert credential.token_hash == hash_token(token_file.read_text())
+asyncio.run(run())
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env={**os.environ, "CONSOLE_CONFIG": str(config_path)},
+        capture_output=True,
+        text=True,
+        timeout=40,
+    )
+    assert result.returncode == 0, result.stderr
