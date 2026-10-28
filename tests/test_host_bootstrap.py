@@ -196,3 +196,11 @@ def test_missing_appliance_runtime_fails_without_using_os_python(tmp_path, monke
     monkeypatch.setattr(bootstrap, "DEPLOYER_PYTHON", tmp_path / "missing-python")
     with pytest.raises(RuntimeError, match="isolated Python"):
         bootstrap.deployment_python(immutable=True)
+
+
+def test_mutable_deployer_installs_network_probe_and_completion_dependencies(monkeypatch):
+    monkeypatch.setattr(bootstrap.shutil, "which", lambda name: "/usr/bin/" + name if name == "apt-get" else None)
+    commands = []
+    bootstrap.prepare_os(commands.append, immutable=False)
+    install = next(command for command in commands if command[:2] == ["apt-get", "install"])
+    assert "iputils-arping" in install and "bash-completion" in install

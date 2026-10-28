@@ -234,3 +234,30 @@ claim and volume identities are checked independently across retries.
 
 These are fresh single-node source-candidate results. OpenStack services, VM/LAMP
 workloads, guest-data persistence/reboot and final packaged replay remain required.
+
+
+## Private cloud service continuation
+
+The guided setup continues after the verified cluster network and retained
+storage with `genestack.install_cloud_services`. It checks the exact reviewed
+Kubernetes node names and addresses, refuses an existing provider uplink or
+unrelated cloud workloads, and uses the private provisioning LAN. New service
+VIPs are outside DHCP and checked for address conflicts before reservation.
+No external VM network is created by this continuation.
+
+Defaults size service replicas, database/message-queue quorum and persistent
+claims from measured machines and reviewed data disks. A single-node cloud uses
+one database/message-queue replica; it does not claim high availability. Existing
+service sizing and retained storage identities must survive retries.
+
+The infrastructure wrapper recognizes the upstream network setup block and uses
+the shipped node-interface helper. Unknown layouts stop for an update instead of
+guessing a deployer NIC. The first live app test found a missing command-completion
+directory in the minimal deployer; updated preparation includes that dependency
+and the continuation repairs the directory before the upstream CLI install.
+
+Acceptance remains open until the app-submitted job completes and the same
+Kubernetes-proxied OpenStack APIs used by the apps authenticate successfully,
+compute registers healthy, and the first private LAMP instance passes HTTP,
+database persistence, reboot and cleanup checks. Source-candidate tests do not
+replace the final fresh packaged-image replay.

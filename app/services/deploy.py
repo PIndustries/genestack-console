@@ -428,6 +428,14 @@ def _pipeline_command(
     root = str(ctx.genestack_root)
     if any(char in cfg or char in root for char in "|&\\\n'\"`$"):
         return ["bash", script]
+    source_script = ctx.genestack_root / script
+    scoped_helper = config / 'runtime/site-network.sh'
+    if scoped_helper.is_file():
+        from app.services.cloud_services import compatible_infrastructure
+
+        scoped_script = config / 'runtime/setup-infrastructure.sh'
+        scoped_script.write_text(compatible_infrastructure(source_script.read_text(), scoped_helper))
+        source_script = scoped_script
     envoy = f"{root}/bin/setup-envoy-gateway.sh"
     longhorn = f"{root}/bin/install-longhorn.sh"
     # An empty ACME_EMAIL makes the unquoted -e swallow -d, and the read
@@ -469,7 +477,7 @@ def _pipeline_command(
         "printf '%s\\n' 'talos_prepare() { "
         "if [ -n \"${GENESTACK_TALOS_PREPARE:-}\" ]; then "
         "bash \"${GENESTACK_TALOS_PREPARE}\"; fi; }'\n"
-        f"sed {shlex.quote(sed_expr)} {shlex.quote(root + '/' + script)}\n"
+        f"sed {shlex.quote(sed_expr)} {shlex.quote(str(source_script))}\n"
         "} | bash\n"
     )
     return ["bash", "-c", program]

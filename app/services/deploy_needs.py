@@ -259,7 +259,11 @@ def collect(
         )
     container = _text(network.get("container_interface"))
     compute = _text(network.get("compute_interface"))
-    if not container or not compute:
+    if network.get("interfaces") == "automatic":
+        if container or compute:
+            needs.append(_need("interfaces", blocks=True, missing="Automatic interfaces conflict with saved overrides.",
+                               detail="Clear explicit interfaces before selecting automatic node networking."))
+    elif not container or not compute:
         needs.append(
             _need(
                 "interfaces",

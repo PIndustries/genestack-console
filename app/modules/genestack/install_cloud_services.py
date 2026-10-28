@@ -1,0 +1,224 @@
+"""Complete the private cloud after the reviewed cluster network and storage."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import time
+
+from sqlalchemy import select
+
+from app.models import Job, JobStatus
+
+HANDLERS = ("genestack_install_cloud_services",)
+OPERATION = {
+    "id": "genestack.install_cloud_services",
+    "name": "Install private cloud services",
+    "description": "Size and install OpenStack on the reviewed nodes, retaining their existing storage and keeping provider networks unconfigured.",
+    "required_role": "admin",
+    "backend": "genestack",
+    "mutating": True,
+    "params": [],
+    "handler": "genestack_install_cloud_services",
+    "timeout_seconds": 21600,
+}
+
+
+def run(
+    self,
+    handler,
+    op,
+    job,
+    env,
+    log,
+    ctx,
+    params,
+    deadline,
+    check_cancel,
+    dry,
+    timeout,
+    gs_root,
+    ans_root,
+    extra_env,
+    ssh_target,
+    remote_env,
+    executor,
+    agent_env_id,
+):
+    from app.services import cloud_services, cluster_network, deploy, envconfig
+    from app.services import genestack_bridge as bridge
+    from app.services.osclient import OpenStackError, client_from_context
+
+    if env is None or ssh_target or agent_env_id or ctx.config_dir is None:
+        return {
+            "ok": False,
+            "error": "Guided cloud installation requires the local deployer appliance",
+            "returncode": 2,
+        }
+    try:
+        original, version = cluster_network.configuration(self.db, env)
+        storage = self.db.scalar(
+            select(Job)
+            .where(
+                Job.environment_id == env.id, Job.operation == "genestack.install_cluster_storage"
+            )
+            .order_by(Job.created_at.desc())
+            .limit(1)
+        )
+        if storage is None or storage.status != JobStatus.success or storage.dry_run is not False:
+            raise ValueError("Complete the real persistent storage check before cloud services")
+        doc, plan = cloud_services.configure(original, env.id)
+        if dry:
+            return {"ok": True, "dry_run": True, "proposal": plan, "hardware_modified": False}
+        path = ctx.ensure_kubeconfig()
+        if not path:
+            raise ValueError("This cloud has no stored Kubernetes connection")
+        scoped = dict(extra_env or {}, KUBECONFIG=path)
+        scoped.update(envconfig.doc_env(doc))
+        scoped["ENVOY_GATEWAY_CONFIG_FILE"] = str(ctx.config_dir / "envoy-gateways.yaml")
+
+        def command(argv, limit=60):
+            check_cancel()
+            remaining = int((deadline or (time.monotonic() + limit)) - time.monotonic())
+            if remaining <= 0:
+                raise ValueError("Cloud installation deadline exceeded")
+            return bridge.run_command(
+                argv,
+                cwd=gs_root,
+                timeout=min(limit, remaining),
+                dry_run=False,
+                extra_env=scoped,
+                log=log,
+            )
+
+        result = command(["kubectl", "get", "nodes", "-o", "json", "--request-timeout=20s"], 30)
+        if result.get("returncode") != 0:
+            raise ValueError("Cannot verify the reviewed cloud nodes")
+        nodes = json.loads(result.get("stdout") or "{}")
+        cluster_network.verified_nodes(doc, nodes)
+        if any(
+            not any(
+                c.get("type") == "Ready" and c.get("status") == "True"
+                for c in n.get("status", {}).get("conditions", [])
+            )
+            for n in nodes["items"]
+        ):
+            raise ValueError("Every reviewed node must be Ready before cloud services")
+        # An inherited external bridge is never repurposed by this guided path.
+        if any(
+            n["metadata"].get("annotations", {}).get("ovn.openstack.org/ports")
+            for n in nodes["items"]
+        ):
+            raise ValueError("An existing provider uplink requires advanced network review")
+        if not original.get("cloud_services"):
+            existing = command(
+                ["kubectl", "-n", "openstack", "get", "deployments,statefulsets", "-o", "json"], 30
+            )
+            if existing.get("returncode") != 0:
+                raise ValueError(
+                    "Cannot check for existing cloud services before first installation"
+                )
+            workloads = json.loads(existing.get("stdout") or "{}").get("items") or []
+            if any(w["metadata"]["name"] != "genestack-cinder-data" for w in workloads):
+                raise ValueError(
+                    "Existing cloud services require advanced review before guided installation"
+                )
+        if not shutil.which("arping"):
+            raise ValueError(
+                "Prepare an updated deployer with the private-address conflict check tool"
+            )
+        # Only new reservations are probed. A retained MetalLB VIP responds on retries.
+        if not original.get("cloud_services"):
+            import ipaddress
+
+            first = ipaddress.IPv4Address(plan["endpoint_ip"])
+            interface = str(doc["pxe"]["interface"])
+            for offset in range(8):
+                result = command(
+                    ["arping", "-D", "-c", "2", "-w", "3", "-I", interface, str(first + offset)], 8
+                )
+                if result.get("returncode") != 0:
+                    raise ValueError(
+                        "A proposed private service address is already in use; review the network"
+                    )
+        # The upstream Envoy CLI writes its optional completion here. Minimal
+        # immutable deployers may predate the image's bash-completion package.
+        completion = command(["install", "-d", "-m", "0755", "/etc/bash_completion.d"], 10)
+        if completion.get("returncode") != 0:
+            raise ValueError("Cannot prepare the deployer's command completion directory")
+        if envconfig.get_current(self.db, env)[1].version != version:
+            raise ValueError("Configuration changed; review before installing cloud services")
+        if doc != original:
+            envconfig.put_version(
+                self.db,
+                env,
+                envconfig._dump(doc),
+                job.created_by or "system",
+                expected_version=version,
+            )
+        result = deploy.run_deploy(
+            self.db,
+            env,
+            ctx,
+            log,
+            dry_run=False,
+            skip_push=False,
+            timeout=timeout,
+            extra_env=scoped,
+            ssh_target=None,
+            remote_env={},
+            settings=self.settings,
+            from_stage="infrastructure",
+            until_stage="platform-extras",
+            include_testing=False,
+            deadline=deadline,
+            check_cancel=check_cancel,
+            parallelism=1,
+        )
+        if not result.get("ok"):
+            return dict(result, cloud_services_ready=False)
+        if result.get("optional_failed"):
+            return dict(
+                result,
+                ok=False,
+                cloud_services_ready=False,
+                error="Required private cloud services failed: "
+                + ", ".join(result["optional_failed"]),
+            )
+        # Helm success is insufficient: use the same authenticated APIs as the apps.
+        with client_from_context(ctx) as cloud:
+            cloud.list_projects()
+            cloud.list_images()
+            cloud.list_networks()
+            cloud.list_volumes()
+            services = cloud.list_compute_services()
+            if not any(
+                s.get("binary") == "nova-compute"
+                and s.get("state") == "up"
+                and s.get("status") == "enabled"
+                for s in services
+            ):
+                raise ValueError("OpenStack compute is not yet registered and healthy")
+        self.write_audit(
+            actor=job.created_by or "system",
+            action="env.install_cloud_services",
+            resource_type="environment",
+            resource_id=env.id,
+            environment_id=env.id,
+            details={"private_network_only": True, "service_replicas": plan["service_replicas"]},
+            success=True,
+        )
+        return {
+            "ok": True,
+            "dry_run": False,
+            "cloud_services_ready": True,
+            "message": "Private cloud APIs and compute are ready. Create a private network and your first server",
+        }
+    except (ValueError, OSError, OpenStackError) as error:
+        return {
+            "ok": False,
+            "dry_run": False,
+            "cloud_services_ready": False,
+            "error": str(error),
+            "returncode": 2,
+        }

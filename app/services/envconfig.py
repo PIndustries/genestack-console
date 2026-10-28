@@ -163,6 +163,7 @@ KNOWN_TOP_LEVEL_KEYS = frozenset(
         "ovh",
         "registry",
         "hardware_installation",
+        "cloud_services",
     }
 )
 
@@ -186,6 +187,7 @@ KNOWN_NETWORK_KEYS = frozenset(
         "gateway_domain",
         "acme_email",
         "hyperconverged",
+        "interfaces",
         "container_interface",
         "compute_interface",
         "ovn",
@@ -1607,6 +1609,10 @@ def render_to_files(
         files["manifests/longhorn/longhorn-namespace.yaml"] = _dump({"apiVersion": "v1", "kind": "Namespace",
             "metadata": {"name": "longhorn-system", "labels": {"pod-security.kubernetes.io/enforce": "privileged"}}})
 
+    from app.services.cloud_services import rendered_files as cloud_service_files
+
+    files.update(cloud_service_files(doc))
+
     components = doc.get("components")
     if components is not None:
         files["openstack-components.yaml"] = _dump({"components": components})
@@ -1812,6 +1818,8 @@ def doc_env(doc: dict[str, Any]) -> dict[str, str]:
     network = doc.get("network")
     if not isinstance(network, dict):
         return env
+    if network.get("interfaces") == "automatic":
+        env["GENESTACK_NETWORK_INTERFACES"] = "automatic"
     for key, var in (
         ("gateway_domain", "GATEWAY_DOMAIN"),
         ("acme_email", "ACME_EMAIL"),
