@@ -204,6 +204,7 @@ KNOWN_STORAGE_KEYS = frozenset(
         "cinder_backend_name",
         "cinder_worker_name",
         "longhorn_cinder",
+        "replication_factor",
         "ceph",
     }
 )
@@ -580,6 +581,9 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
             for key in storage
             if key not in KNOWN_STORAGE_KEYS
         )
+        replicas = storage.get("replication_factor")
+        if replicas is not None and (isinstance(replicas, bool) or not isinstance(replicas, int) or not 1 <= replicas <= 20):
+            raise ConfigValidationError("storage.replication_factor must be an integer from 1 to 20")
         from app.services.managed_cinder import settings as managed_cinder_settings
 
         try:
@@ -1593,6 +1597,16 @@ def render_to_files(
         )
         files["inventory/inventory.yaml"] = _dump(inventory)
 
+    storage = doc.get("storage") or {}
+    if isinstance(storage, dict) and storage.get("replication_factor") is not None:
+        from app.services.cluster_storage import storage_classes
+
+        names = {"general": "longhorn-general-storageclass.yaml", "general-multi-attach": "longhorn-general-multi-attach-storageclass.yaml"}
+        for definition in storage_classes(env.id, storage["replication_factor"]):
+            files["manifests/longhorn/" + names[definition["metadata"]["name"]]] = _dump(definition)
+        files["manifests/longhorn/longhorn-namespace.yaml"] = _dump({"apiVersion": "v1", "kind": "Namespace",
+            "metadata": {"name": "longhorn-system", "labels": {"pod-security.kubernetes.io/enforce": "privileged"}}})
+
     components = doc.get("components")
     if components is not None:
         files["openstack-components.yaml"] = _dump({"components": components})
@@ -1792,6 +1806,9 @@ def doc_env(doc: dict[str, Any]) -> dict[str, str]:
     Absent keys are simply not exported.
     """
     env: dict[str, str] = {}
+    storage = doc.get("storage") or {}
+    if isinstance(storage, dict) and storage.get("replication_factor") is not None:
+        env["LONGHORN_STORAGE_REPLICAS"] = str(storage["replication_factor"])
     network = doc.get("network")
     if not isinstance(network, dict):
         return env

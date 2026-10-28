@@ -207,3 +207,30 @@ success check too, with the diagnostic workload required ready first. The same
 fresh node identity, boot/data disks and original commissioning report were
 preserved. These are source-candidate results; storage/OpenStack/LAMP acceptance
 and final fresh packaged replay remain separate requirements.
+
+## Reviewed persistent storage acceptance
+
+The next native step installs storage only after networking succeeds. It validates
+all connected nodes, running iSCSI services, exact reviewed disk WWIDs/capacities,
+and the actual persistent volume and mount targets before changing cluster storage.
+Missing data volumes cannot fall back to the system disk. Replicas follow the
+available storage hosts, and the initial block export reserves platform headroom
+and fits individual disks even when machines have different capacities.
+
+The job installs Longhorn, renders owned single/multi-attach classes with the
+measured replica count, verifies the selected disk paths, and prepares the retained
+managed Cinder export. Storage software participates on compute nodes as well;
+only reviewed data mounts receive default data disks. Canonical rendered manifests
+and exported settings keep the later infrastructure pipeline from restoring a
+hard-coded replica count.
+
+An actual first attempt exposed a Helm null selector becoming an empty required
+label. The corrected participant labels were verified with the actual Helm renderer,
+then the repeated iPhone simulator run completed installation on the disposable
+cluster. Independent probes verified the healthy 42-GiB volume, owned Bound claim,
+claim/PV/volume identity chain, ready export keeper, reviewed data path and stable
+NFS service ownership. A cold-reopen verification job also passed; the retained
+claim and volume identities are checked independently across retries.
+
+These are fresh single-node source-candidate results. OpenStack services, VM/LAMP
+workloads, guest-data persistence/reboot and final packaged replay remain required.
