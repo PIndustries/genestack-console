@@ -110,6 +110,7 @@ def run_greenfield(
     stop_after: str = "",
     replace_hosts: Any = None,
     wipe_disk_wwids: Any = None,
+    preserve_commissioned: bool = False,
 ) -> dict[str, Any]:
     """PXE/BYOI every inventory server, then ``run_deploy`` from hosts."""
     boot_mode = str(boot or "auto").strip().lower()
@@ -120,6 +121,10 @@ def run_greenfield(
     stop = str(stop_after or "").strip().lower()
     if stop not in ("", "commission", "talos"):
         msg = "stop_after must be commission or talos"
+        log(f"[greenfield] {msg}")
+        return {"ok": False, "error": msg, "returncode": 2, "dry_run": dry_run}
+    if preserve_commissioned and (dry_run or stop != "talos"):
+        msg = "preserve_commissioned is only valid for a live reviewed Talos continuation"
         log(f"[greenfield] {msg}")
         return {"ok": False, "error": msg, "returncode": 2, "dry_run": dry_run}
     if boot_mode == "iso":
@@ -256,7 +261,26 @@ def run_greenfield(
             except ValueError as exc:
                 return _stamp({"ok": False, "error": str(exc), "returncode": 2,
                                "dry_run": False, "failed_at": "greenfield/disk-plan"})
-            for hostname, node, _ip in plan:
+            commission_targets: list[tuple[str, BaremetalNode, str]] = []
+            for hostname, node, ip in plan:
+                if preserve_commissioned and node.wiped_at is not None:
+                    from app.services.bootselect import validate_scoped_report
+
+                    valid, reason = validate_scoped_report(
+                        node.commission_report,
+                        node.pxe_mac,
+                        reviewed_disks[hostname],
+                    )
+                    if not valid or node.commission_wipe_wwids != reviewed_disks[hostname]:
+                        return _stamp({
+                            "ok": False,
+                            "error": f"{hostname} has no valid report for the reviewed disk wipe: {reason or 'disk allowlist changed'}",
+                            "returncode": 2,
+                            "dry_run": False,
+                            "failed_at": "greenfield/resume-validation",
+                        })
+                    log(f"[greenfield] preserving already commissioned {hostname}; no wipe will run")
+                    continue
                 started = baremetal_service.begin_commission(
                     db, env, node, log=log, settings=settings, boot_now=False,
                     wipe_disk_wwids=reviewed_disks[hostname],
@@ -271,6 +295,7 @@ def run_greenfield(
                             "failed_at": "greenfield/commission",
                         }
                     )
+                commission_targets.append((hostname, node, ip))
             try:
                 pxe_t0 = deploy_timing.now()
                 baremetal_service._prepare_pxe(db, env, settings, log)
@@ -292,17 +317,18 @@ def run_greenfield(
             iso_count: dict[str, int] = {}
             last_iso_at: dict[str, float] = {}
             last_talos_at: dict[str, float] = {}
-            node_by_host: dict[str, BaremetalNode] = {}
+            node_by_host: dict[str, BaremetalNode] = {
+                hostname: node for hostname, node, _ip in plan
+            }
             boot_t0 = deploy_timing.now()
             host_t0 = {hostname: deploy_timing.now() for hostname, _node, _ip in plan}
-            for hostname, node, _ip in plan:
+            for hostname, node, _ip in commission_targets:
                 if check_cancel:
                     check_cancel()
                 db.refresh(node)
                 result = baremetal_service.pxe_boot(
                     db, node, dry_run=False, log=log, settings=settings
                 )
-                node_by_host[hostname] = node
                 if str(result.get("via") or "") == "iso":
                     iso_count[hostname] = 1
                     last_iso_at[hostname] = time.monotonic()
@@ -388,12 +414,17 @@ def run_greenfield(
                     node = node_by_host.get(hostname)
                     if node is not None:
                         db.refresh(node)
+                        needs_talos_serve = not served_after_wipe(
+                            node.talos_served_at, node.wiped_at
+                        )
+                        if preserve_commissioned and node.wiped_at is not None:
+                            needs_talos_serve = needs_talos_serve or not baremetal_service.talos_api_ready(
+                                node.expected_ip or ""
+                            )
                         if (
                             stop != "commission"
                             and node.wiped_at is not None
-                            and not served_after_wipe(
-                                node.talos_served_at, node.wiped_at
-                            )
+                            and needs_talos_serve
                             and (
                                 hostname not in last_talos_at
                                 or (time.monotonic() - last_talos_at[hostname])

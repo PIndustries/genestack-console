@@ -142,7 +142,15 @@ def stopped_installation(reviewed):
         db.add(previous); db.flush()
         reviewed_cluster.authorize(db, env, params, doc, plan, actor='fixture', job_id=previous.id)
         node = db.get(BaremetalNode, nid)
+        machine, = plan['machines']
+        node.commission_wipe_wwids = [d['wwid'] for d in machine['disks']]
+        node.commission_report = {
+            'wipe': True,
+            'disks': [{'name': f'disk-{i}', 'wwid': d['wwid'], 'wiped': True} for i, d in enumerate(machine['disks'])],
+            'nics': [{'mac': machine['mac']}],
+        }
         node.wiped_at = datetime.now(UTC)
+        node.boot_stage = 'fresh-maintenance'
         db.commit()
         return eid, nid, previous.id
 
@@ -161,7 +169,7 @@ def test_resume_preserves_existing_commissioning_and_configuration(stopped_insta
         assert node.next_boot == 'disk'
 
 
-@pytest.mark.parametrize('change', ['running', 'other-environment', 'other-operation', 'unwiped', 'changed-selector', 'changed-mac'])
+@pytest.mark.parametrize('change', ['running', 'other-environment', 'other-operation', 'unsafe-unwiped-state', 'changed-selector', 'changed-mac', 'invalid-wipe-report'])
 def test_resume_rejects_unowned_active_or_changed_targets(stopped_installation, change):
     from app.models import Job, JobStatus
 
@@ -173,7 +181,10 @@ def test_resume_rejects_unowned_active_or_changed_targets(stopped_installation, 
         if change == 'running': job.status = JobStatus.running
         if change == 'other-environment': job.environment_id = None
         if change == 'other-operation': job.operation = 'baremetal.inspect'
-        if change == 'unwiped': node.wiped_at = None
+        if change == 'unsafe-unwiped-state':
+            node.wiped_at = None
+            node.boot_stage = 'talos'
+        if change == 'invalid-wipe-report': node.commission_report = {'wipe': False}
         if change == 'changed-mac': node.pxe_mac = '52:54:00:00:00:ff'
         if change == 'changed-selector':
             doc, current = envconfig.get_current(db, env)
@@ -185,8 +196,124 @@ def test_resume_rejects_unowned_active_or_changed_targets(stopped_installation, 
         with pytest.raises(ValueError): reviewed_cluster.resumable_plan(db, env, previous)
 
 
-@pytest.mark.parametrize('maintenance_ready', [False, True])
-def test_resume_handler_never_recommissions_and_keeps_original_wipe(stopped_installation, monkeypatch, tmp_path, maintenance_ready):
+def test_resume_accepts_a_safely_failed_uncommissioned_machine(stopped_installation):
+    eid, nid, previous = stopped_installation
+    with SessionLocal() as db:
+        env = db.get(Environment, eid)
+        node = db.get(BaremetalNode, nid)
+        node.wiped_at = None
+        node.boot_stage = 'failed'
+        node.state = 'failed'
+        doc, plan, _ = reviewed_cluster.resumable_plan(db, env, previous)
+        assert node.wiped_at is None and node.boot_stage == 'failed'
+        assert plan['machines'][0]['id'] == nid
+
+
+def test_greenfield_continuation_does_not_recommission_a_valid_wipe(stopped_installation, monkeypatch):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.config import Settings
+    from app.services import baremetal, greenfield
+
+    eid, nid, _ = stopped_installation
+    with SessionLocal() as db:
+        env = db.get(Environment, eid)
+        node = db.get(BaremetalNode, nid)
+        node.talos_served_at = datetime.now(UTC)
+        node.boot_stage = 'fresh-maintenance'
+        db.flush()
+        monkeypatch.setattr(baremetal, 'begin_commission', lambda *a, **k: pytest.fail('Completed wipe must not repeat'))
+        monkeypatch.setattr(baremetal, 'pxe_boot', lambda *a, **k: pytest.fail('Fresh Talos node should not reboot'))
+        monkeypatch.setattr(baremetal, '_prepare_pxe', lambda *a, **k: {'ok': True})
+        monkeypatch.setattr(baremetal, 'talos_api_ready', lambda *_a, **_k: True)
+        monkeypatch.setattr(baremetal, 'host_boot_state', lambda *a, **k: 'fresh-maintenance')
+        result = greenfield.run_greenfield(
+            db, env, SimpleNamespace(kubeconfig=None), lambda _line: None,
+            dry_run=False, skip_push=True, timeout=60, extra_env={}, ssh_target=None,
+            remote_env={}, settings=Settings(), boot='pxe', stop_after='talos',
+            wipe_disk_wwids={node.name: list(node.commission_wipe_wwids)},
+            preserve_commissioned=True,
+        )
+        assert result['ok'] is True and result['stages_completed'] == ['talos']
+        assert node.wiped_at is not None and node.commission_report['wipe'] is True
+
+
+def test_greenfield_continuation_commissions_only_unfinished_target(reviewed, monkeypatch):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.config import Settings
+    from app.models import Job, JobStatus
+    from app.services import baremetal, greenfield
+
+    eid, nid, plan, params = reviewed
+    with SessionLocal() as db:
+        env = db.get(Environment, eid)
+        doc, _ = reviewed_cluster.configuration(db, env, params)
+        previous = Job(environment_id=eid, operation='genestack.install_reviewed_cluster',
+                       status=JobStatus.failed, created_by='fixture')
+        db.add(previous); db.flush()
+        reviewed_cluster.authorize(db, env, params, doc, plan, actor='fixture', job_id=previous.id)
+        node = db.get(BaremetalNode, nid)
+        node.boot_stage = 'failed'; node.state = 'failed'
+        targets = []
+
+        def commission(_db, _env, target, **kwargs):
+            targets.append(('commission', target.name, list(kwargs['wipe_disk_wwids'])))
+            target.next_boot = 'commission'; target.boot_stage = 'commissioning'
+            target.commission_wipe_wwids = list(kwargs['wipe_disk_wwids'])
+            target.commission_token = 'fixture-token'; target.commission_report = None
+            target.wiped_at = None; target.state = 'booting'
+            _db.add(target); _db.flush()
+            return {'ok': True}
+
+        def boot(_db, _node, **_kwargs):
+            targets.append(('pxe', _node.name, _node.next_boot))
+            return {'ok': True}
+
+        def probe(_ip, _kube, **kwargs):
+            if kwargs.get('wiped_at') is None:
+                machine, = plan['machines']
+                node.commission_report = {
+                    'wipe': True,
+                    'disks': [{'name': f'disk-{i}', 'wwid': d['wwid'], 'wiped': True}
+                              for i, d in enumerate(machine['disks'])],
+                    'nics': [{'mac': machine['mac']}],
+                }
+                node.wiped_at = datetime.now(UTC)
+                node.boot_stage = 'commissioned'
+                db.add(node); db.flush()
+            return 'fresh-maintenance' if kwargs.get('talos_served_at') else 'down'
+
+        def serve(_db, _env, target, **kwargs):
+            target.next_boot = 'talos'; target.boot_stage = 'talos'
+            result = boot(_db, target, **kwargs)
+            target.talos_served_at = datetime.now(UTC)
+            _db.add(target); _db.flush()
+            return result
+
+        monkeypatch.setattr(baremetal, 'begin_commission', commission)
+        monkeypatch.setattr(baremetal, 'pxe_boot', boot)
+        monkeypatch.setattr(baremetal, '_serve_talos', serve)
+        monkeypatch.setattr(baremetal, '_prepare_pxe', lambda *a, **k: {'ok': True})
+        monkeypatch.setattr(baremetal, 'host_boot_state', probe)
+        monkeypatch.setattr(greenfield.time, 'sleep', lambda _seconds: None)
+        result = greenfield.run_greenfield(
+            db, env, SimpleNamespace(kubeconfig=None), lambda _line: None,
+            dry_run=False, skip_push=True, timeout=60, extra_env={}, ssh_target=None,
+            remote_env={}, settings=Settings(), boot='pxe', stop_after='talos',
+            wipe_disk_wwids={plan['machines'][0]['name']:
+                             [d['wwid'] for d in plan['machines'][0]['disks']]},
+            preserve_commissioned=True,
+        )
+        assert result['ok'] is True
+        assert targets[0][0:2] == ('commission', node.name)
+        assert targets[1] == ('pxe', node.name, 'commission')
+        assert targets[2] == ('pxe', node.name, 'talos')
+
+
+def test_resume_handler_preserves_completed_wipe_and_keeps_original_target(stopped_installation, monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     from app.models import Job, JobStatus
@@ -194,23 +321,21 @@ def test_resume_handler_never_recommissions_and_keeps_original_wipe(stopped_inst
     from app.services import baremetal, deploy, greenfield
 
     eid, nid, previous = stopped_installation
-    def forbidden(*args, **kwargs): raise AssertionError('Resume must never commission or wipe')
+    def forbidden(*args, **kwargs): raise AssertionError('Resume must not bypass the reviewed greenfield continuation')
     monkeypatch.setattr(baremetal, 'begin_commission', forbidden)
-    monkeypatch.setattr(greenfield, 'run_greenfield', forbidden)
+    greenfield_calls = []
+    def continue_greenfield(*args, **kwargs):
+        greenfield_calls.append(kwargs)
+        return {'ok': True}
+    monkeypatch.setattr(greenfield, 'run_greenfield', continue_greenfield)
     monkeypatch.setattr(reviewed_cluster, 'verify_management_identity', lambda *a, **k: None)
     monkeypatch.setattr(reviewed_cluster, 'validate_talos_configuration', lambda *a, **k: None)
-    calls = []
-    def boot(db, env, node, target, **kwargs):
-        calls.append(target)
-        return {'ok': True}
-    monkeypatch.setattr(baremetal, 'set_next_boot', boot)
-    probes = iter([maintenance_ready, True])
-    monkeypatch.setattr(baremetal, 'talos_api_ready', lambda *a: next(probes))
     monkeypatch.setattr(deploy, 'run_deploy', lambda *a, **k: {'ok': True})
     with SessionLocal() as db:
         env = db.get(Environment, eid)
         node = db.get(BaremetalNode, nid)
         wiped = node.wiped_at
+        _, plan, _ = reviewed_cluster.resumable_plan(db, env, previous)
         job = Job(environment_id=eid, operation='genestack.resume_reviewed_cluster', status=JobStatus.running, created_by='fixture')
         db.add(job); db.flush()
         runner = SimpleNamespace(db=db, settings=SimpleNamespace(data_dir=tmp_path), write_audit=lambda **k: None)
@@ -218,7 +343,12 @@ def test_resume_handler_never_recommissions_and_keeps_original_wipe(stopped_inst
             {'installation_job_id': previous}, None, lambda: None, False, 7200, None, None, {}, None, None, None, None)
         assert result['ok'] is True and result['cluster_bootstrap_complete'] is True
         assert result['cloud_services_ready'] is False
-        assert calls == ([] if maintenance_ready else ['talos'])
+        assert len(greenfield_calls) == 1
+        assert greenfield_calls[0]['preserve_commissioned'] is True
+        assert greenfield_calls[0]['stop_after'] == 'talos'
+        assert greenfield_calls[0]['wipe_disk_wwids'] == {
+            plan['machines'][0]['name']: [d['wwid'] for d in plan['machines'][0]['disks']]
+        }
         assert node.wiped_at == wiped and node.commission_token is None
         record = envconfig.get_current(db, env)[0]['hardware_installation']
         assert record['original_installation_job_id'] == previous and record['installation_job_id'] == job.id

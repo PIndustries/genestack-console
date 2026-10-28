@@ -2,18 +2,16 @@
 from __future__ import annotations
 
 import subprocess
-import time
 from pathlib import Path
 
 import yaml
 
-from app.models import BaremetalNode
 from app.modules.params import p
 
 HANDLERS = ('genestack_resume_reviewed_cluster',)
 OPERATION = {
     'id': 'genestack.resume_reviewed_cluster', 'name': 'Continue reviewed cluster installation',
-    'description': 'Continue the same authorized installation on already commissioned machines. Never runs commissioning or another disk wipe.',
+    'description': 'Continue the same authorized installation, preserving completed disk wipes and commissioning only unfinished reviewed machines.',
     'required_role': 'admin', 'backend': 'genestack', 'mutating': True,
     'params': [p('installation_job_id', True, 'Stopped installation job in this environment')],
     'handler': 'genestack_resume_reviewed_cluster', 'timeout_seconds': 7200,
@@ -22,7 +20,7 @@ OPERATION = {
 
 def run(self, handler, op, job, env, log, ctx, params, deadline, check_cancel,
         dry, timeout, gs_root, ans_root, extra_env, ssh_target, remote_env, executor, agent_env_id):
-    from app.services import baremetal, deploy, envconfig, reviewed_cluster
+    from app.services import deploy, envconfig, greenfield, reviewed_cluster
 
     if env is None or ssh_target or agent_env_id:
         return {'ok': False, 'error': 'Guided installation requires the local deployer appliance', 'returncode': 2}
@@ -45,22 +43,21 @@ def run(self, handler, op, job, env, log, ctx, params, deadline, check_cancel,
                     resource_type='environment', resource_id=env.id, environment_id=env.id,
                     details={'previous_installation_job_id': params['installation_job_id'],
                              'confirmed_machine_ids': [m['id'] for m in plan['machines']]}, success=True)
-    log('[installation] Continuing the same commissioned targets; no commissioning or disk wipe will run')
-    for machine in plan['machines']:
-        check_cancel()
-        node = self.db.get(BaremetalNode, machine['id'])
-        if not baremetal.talos_api_ready(node.expected_ip):
-            result = baremetal.set_next_boot(self.db, env, node, 'talos', boot_now=True,
-                                             dry_run=False, log=log, settings=self.settings)
-            self.db.commit()
-            if not result.get('ok'):
-                return result
-        stop = min(time.monotonic() + 600, deadline or float('inf'))
-        while not baremetal.talos_api_ready(node.expected_ip):
-            check_cancel()
-            if time.monotonic() >= stop:
-                return {'ok': False, 'error': 'Talos API did not become available after continuing the boot', 'returncode': 2}
-            time.sleep(2)
+    log('[installation] Continuing the reviewed plan; completed wipes are preserved and only unfinished machines are commissioned')
+    allowed = {
+        machine['name']: [disk['wwid'] for disk in machine['disks']]
+        for machine in plan['machines']
+    }
+    result = greenfield.run_greenfield(
+        self.db, env, ctx, log, dry_run=False, skip_push=True,
+        timeout=timeout, extra_env=extra_env, ssh_target=None,
+        remote_env=remote_env, settings=self.settings, deadline=deadline,
+        check_cancel=check_cancel, boot='pxe', stop_after='talos',
+        wipe_disk_wwids=allowed, preserve_commissioned=True,
+    )
+    if not result.get('ok'):
+        return result
+    check_cancel()
     result = deploy.run_deploy(self.db, env, ctx, log, dry_run=False, skip_push=False,
         timeout=timeout, extra_env=extra_env, ssh_target=None, remote_env=remote_env,
         settings=self.settings, from_stage='hosts', until_stage='hosts',
