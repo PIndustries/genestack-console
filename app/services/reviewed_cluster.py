@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from app.services import envconfig, hardware_installation, talos
-from app.services.bootselect import normalize_mac
+from app.services.bootselect import normalize_mac, validate_scoped_report
 
 
 def configuration(db, env, params: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -156,10 +156,18 @@ def resumable_plan(db, env, previous_job_id: str) -> tuple[dict[str, Any], dict[
         entry = doc['servers'][machine['name']]
         boot = next(d['wwid'] for d in machine['disks'] if d['purpose'] == 'boot')
         data = [d['wwid'] for d in machine['disks'] if d['purpose'] == 'storage']
-        if (node.wiped_at is None or node.name != machine['name'] or node.expected_ip != machine['ip']
+        if (node.name != machine['name'] or node.expected_ip != machine['ip']
             or node.pxe_mac != machine['mac'] or entry.get('private_mac') != machine['mac']
             or entry.get('ip') != machine['ip'] or entry.get('roles') != machine['roles']
             or selected.get('install_disk_selectors', {}).get(machine['name']) != boot
             or selected.get('data_disk_selectors', {}).get(machine['name']) != data):
             raise ValueError('The commissioned machine or disk selectors changed. Review the targets')
+        if node.wiped_at is not None:
+            valid, _reason = validate_scoped_report(
+                node.commission_report, node.pxe_mac, node.commission_wipe_wwids
+            )
+            if (not valid or set(node.commission_wipe_wwids or []) != {d['wwid'] for d in machine['disks']}):
+                raise ValueError('A commissioned machine has no valid report for the reviewed disk allowlist')
+        elif node.boot_stage not in ('failed', 'commissioning'):
+            raise ValueError('An uncommissioned machine is not in a safe stopped state; review the targets')
     return doc, plan, current[1].version
