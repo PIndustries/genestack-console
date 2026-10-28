@@ -44,8 +44,8 @@ OPERATIONS = (
         "id": "baremetal.node.pxe_boot",
         "name": "PXE Boot Bare-Metal Node",
         "description": (
-            "Set one-shot PXE, read BootSourceOverrideTarget back, then "
-            "ForceRestart. State moves to booting. The image is this "
+            "Read the power state, set one-shot PXE, then power on an off "
+            "machine or restart a running one. State moves to booting. The image is this "
             "machine's current next boot: commission, Talos, or an exit to "
             "the local disk. This does not change that choice. A machine "
             "that was not asked to provision stays on disk, so this PXE "

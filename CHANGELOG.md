@@ -4,6 +4,13 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc5
+
+- Start powered-off servers when booting inspection or installation through the
+  app. Restart running servers, and reject unknown or transitional power states
+  before changing their boot override. This supports repeat inspection after
+  the read-only RAM environment powers a machine off.
+
 ## 2026.10.28.2-rc4
 
 - Prepare a local deployer using the cloud's configured source directory instead

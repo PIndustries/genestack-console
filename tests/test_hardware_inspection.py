@@ -320,3 +320,23 @@ def test_cancelled_inspection_disarms_report_token_and_allows_retry(monkeypatch)
             {"node_id": "owned", "boot_now": True}, None, cancel,
             False, 900, None, None, None, None, None, None, None)
     assert node.next_boot == "disk" and node.boot_stage == "failed" and node.commission_token is None
+
+
+def test_failed_power_action_revokes_the_prepared_inspection_token(client, admin_headers, monkeypatch):
+    from app.db import SessionLocal
+    from app.models import BaremetalNode
+    from tests.test_baremetal import _create_env, _make_node, _submit
+
+    env = _create_env(client, admin_headers, dry_run=False)
+    identity, _ = _make_node(env["id"], pxe_mac=MAC, hardware_report=node().hardware_report)
+    monkeypatch.setattr(baremetal, "_prepare_pxe", lambda *a: {"ok": True})
+    monkeypatch.setattr(baremetal, "pxe_boot", lambda *a, **k: {
+        "ok": False, "error": "Redfish rejected power request", "returncode": 2})
+    job = _submit(client, admin_headers, env["id"], "baremetal.node.inspect", {
+        "node_id": identity, "boot_now": True})
+    assert job["status"] == "failed"
+    with SessionLocal() as db:
+        target = db.get(BaremetalNode, identity)
+        assert target.commission_token is None
+        assert target.next_boot == "disk" and target.boot_stage == "failed"
+        assert target.wiped_at is None and target.os_inventory_report is None

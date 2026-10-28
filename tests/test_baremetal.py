@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 import yaml
 from sqlalchemy import select
 
@@ -392,14 +393,16 @@ def test_power_invalid_action_fails(client, admin_headers):
 # ---------------------------------------------------------------------------
 
 
-def test_pxe_boot_sets_override_and_restarts(client, admin_headers, monkeypatch):
+@pytest.mark.parametrize("power_state,action,reset_type", [("On", "restart", "ForceRestart"), ("Off", "on", "On")])
+def test_pxe_boot_starts_or_restarts_after_override(client, admin_headers, monkeypatch, power_state, action, reset_type):
     from app.services import redfish
 
     calls = []
+    monkeypatch.setattr(redfish, "power_state", lambda *a: calls.append(("state",) + a) or power_state)
     monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: calls.append(("pxe",) + a))
     monkeypatch.setattr(redfish, "boot_override", lambda *a: "Pxe")
     monkeypatch.setattr(
-        redfish, "power", lambda *a: calls.append(("power",) + a) or "ForceRestart"
+        redfish, "power", lambda *a: calls.append(("power",) + a) or reset_type
     )
 
     env = _create_env(client, admin_headers, dry_run=False)
@@ -412,10 +415,46 @@ def test_pxe_boot_sets_override_and_restarts(client, admin_headers, monkeypatch)
         {"node_id": node_id},
     )
     assert job["status"] == "success", job
-    assert [c[0] for c in calls] == ["pxe", "power"], "pxe override before restart"
-    assert calls[1][4] == "restart"
+    assert [c[0] for c in calls] == ["state", "pxe", "power"], "read state before override, then start"
+    assert calls[2][4] == action
     assert "readback Pxe" in (job.get("log_text") or "")
+    assert reset_type + " sent" in job["log_text"]
     assert _node_row(env["id"], name)["state"] == "booting"
+
+
+@pytest.mark.parametrize("state", ["PoweringOff", "PoweringOn", "Unknown", ""])
+def test_pxe_boot_rejects_unsettled_power_without_changing_boot(client, admin_headers, monkeypatch, state):
+    from app.services import redfish
+
+    calls = []
+    monkeypatch.setattr(redfish, "power_state", lambda *a: state)
+    monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: calls.append("override"))
+    monkeypatch.setattr(redfish, "power", lambda *a: calls.append("power"))
+    env = _create_env(client, admin_headers, dry_run=False)
+    node_id, name = _make_node(env["id"])
+    job = _submit(client, admin_headers, env["id"], "baremetal.node.pxe_boot", {"node_id": node_id})
+    assert job["status"] == "failed"
+    assert "wait for On or Off" in job["error"]
+    assert calls == []
+    assert _node_row(env["id"], name)["state"] == "registered"
+
+
+def test_pxe_boot_unreadable_power_does_not_guess_restart(client, admin_headers, monkeypatch):
+    from app.services import redfish
+
+    def unreadable(*args):
+        raise redfish.RedfishError("power state unavailable")
+
+    calls = []
+    monkeypatch.setattr(redfish, "power_state", unreadable)
+    monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: calls.append("override"))
+    monkeypatch.setattr(redfish, "power", lambda *a: calls.append("power"))
+    env = _create_env(client, admin_headers, dry_run=False)
+    node_id, _ = _make_node(env["id"])
+    job = _submit(client, admin_headers, env["id"], "baremetal.node.pxe_boot", {"node_id": node_id})
+    assert job["status"] == "failed"
+    assert "power state unavailable" in job["error"]
+    assert calls == []
 
 
 def test_pxe_boot_dry_run_changes_nothing(client, admin_headers, monkeypatch):
@@ -456,6 +495,7 @@ def _patch_provision_path(monkeypatch, ready=True):
     from app.services import baremetal
     from app.services import redfish
 
+    monkeypatch.setattr(redfish, "power_state", lambda *a: "On")
     monkeypatch.setattr(redfish, "set_pxe_boot", lambda *a: None)
     monkeypatch.setattr(redfish, "boot_override", lambda *a: "Pxe")
     monkeypatch.setattr(redfish, "power", lambda *a: "ForceRestart")
