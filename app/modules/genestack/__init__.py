@@ -26,6 +26,7 @@ class GenestackModule(Module):
         "resume_reviewed_cluster",
         "install_cluster_network",
         "install_cluster_storage",
+        "install_cloud_services",
         "services_list",
         "cluster_status",
         "pipeline_run",

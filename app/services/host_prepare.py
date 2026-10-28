@@ -40,18 +40,21 @@ from app.services.envcontext import EnvContext
 LogFn = Callable[[str], None]
 
 DEFAULT_REPO_URL = "https://github.com/rackerlabs/genestack"
-DEFAULT_REPO_REF = "main"
+# Reviewed public deployment recipe; advance only with fresh appliance acceptance.
+DEFAULT_REPO_REF = "b445a65cf0b3852b5d95cba98563fbef4810ff0e"
 DEFAULT_GENESTACK_PATH = "/opt/genestack"
 DEFAULT_CONFIG_DIR = "/etc/genestack"
 
 
 def _resolve_params(env: Environment | None, params: dict[str, Any]) -> dict[str, str]:
     meta = (env.metadata_json or {}) if env else {}
+    repo_url = str(params.get("repo_url") or meta.get("repo_url") or DEFAULT_REPO_URL)
+    public_recipe = repo_url.rstrip("/").removesuffix(".git") == DEFAULT_REPO_URL
     return {
-        "repo_url": str(
-            params.get("repo_url") or meta.get("repo_url") or DEFAULT_REPO_URL
+        "repo_url": repo_url,
+        "repo_ref": str(
+            params.get("repo_ref") or (DEFAULT_REPO_REF if public_recipe else "main")
         ),
-        "repo_ref": str(params.get("repo_ref") or DEFAULT_REPO_REF),
         # env.genestack_path is the console-side checkout root, not the
         # remote deploy-host clone path — only an explicit param overrides.
         "genestack_path": str(params.get("genestack_path") or DEFAULT_GENESTACK_PATH),

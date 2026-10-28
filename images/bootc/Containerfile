@@ -71,6 +71,8 @@ RUN printf '%s\n' \
         ca-certificates \
         curl \
         dnsmasq-base \
+        iputils-arping \
+        bash-completion \
         ipxe \
         git \
         wget \

@@ -1118,6 +1118,9 @@ def build_talos_plan(
         from app.services.talos_storage import node_documents
 
         storage_documents = node_documents(node["hostname"], talos_cfg, servers_doc)
+        from app.services.talos_compute import documents as compute_documents
+
+        storage_documents.extend(compute_documents(node["hostname"], talos_cfg, servers_doc))
         if storage_documents:
             documents = list(yaml.safe_load_all(patch)) if patch else []
             documents.extend(storage_documents)

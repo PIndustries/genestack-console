@@ -85,6 +85,7 @@ CATALOG_ORDER = (
     "genestack.resume_reviewed_cluster",
     "genestack.install_cluster_network",
     "genestack.install_cluster_storage",
+    "genestack.install_cloud_services",
 )
 
 

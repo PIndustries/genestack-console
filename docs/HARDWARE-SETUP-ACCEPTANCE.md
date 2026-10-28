@@ -4,6 +4,28 @@ Hardware discovery is the first step of deployment, not proof of a working syste
 The normal operator flow must use the native apps through the hosted portal;
 backend API tests and direct diagnostic scripts are supporting checks only.
 
+## Current acceptance status (2026-10-28)
+
+The first-customer source candidate passed real iPhone simulator setup on owned
+blank virtual hardware, including UEFI inspection, reviewed Talos/Kubernetes
+installation, private networking, retained storage and OpenStack service setup.
+Independent reads confirmed healthy compute and volume workers and completed
+bootstrap jobs.
+
+The subsequent full native workload run passed all eight independent gates:
+image checksum/activation, managed-volume creation, primary VM boot and exact
+startup bytes, volume/security attachment, private HTTP/PHP/database response,
+unchanged database content on the mounted volume after a changed boot ID,
+server removal, and complete native resource cleanup. A second VM created in
+the app supplied the private HTTP probe and verified a 2 MiB transfer checksum.
+No fallback cleanup was used in the successful run.
+
+Earlier cloud retries included diagnostic repairs; they do not prove a pristine
+packaged deployment. The final fresh packaged-image replay is still required.
+This is single-node virtual acceptance, not heterogeneous/multi-node capacity or
+physical DFW rebuild acceptance. External VM networking remains explicitly
+outside the isolated private-network test.
+
 ## Implemented in this branch
 
 - Register a machine's BMC credentials, PXE MAC and reserved provisioning IP using
@@ -16,7 +38,7 @@ backend API tests and direct diagnostic scripts are supporting checks only.
 - Preserve remote deployer paths and export that environment's inventory path.
 - Report unavailable health probes explicitly instead of failing with HTTP 500.
 
-## Still required before app-driven deployment is accepted
+## Acceptance checklist
 
 1. Reconcile physical BMC disks with OS-visible devices, RAID logical volumes and
    stable WWIDs. Exclude attached remote volumes and read-only/virtual media.
@@ -234,3 +256,88 @@ claim and volume identities are checked independently across retries.
 
 These are fresh single-node source-candidate results. OpenStack services, VM/LAMP
 workloads, guest-data persistence/reboot and final packaged replay remain required.
+
+
+## Private cloud service continuation
+
+The guided setup continues after the verified cluster network and retained
+storage with `genestack.install_cloud_services`. It checks the exact reviewed
+Kubernetes node names and addresses, refuses an existing provider uplink or
+unrelated cloud workloads, and uses the private provisioning LAN. New service
+VIPs are outside DHCP and checked for address conflicts before reservation.
+No external VM network is created by this continuation.
+
+Defaults size service replicas, database/message-queue quorum and persistent
+claims from measured machines and reviewed data disks. A single-node cloud uses
+one database/message-queue replica; it does not claim high availability. Existing
+service sizing and retained storage identities must survive retries.
+
+The infrastructure wrapper recognizes the upstream network setup block and uses
+the shipped node-interface helper. Unknown layouts stop for an update instead of
+guessing a deployer NIC. The first live app test found a missing command-completion
+directory in the minimal deployer; updated preparation includes that dependency
+and the continuation repairs the directory before the upstream CLI install.
+
+Acceptance remains open until the app-submitted job completes and the same
+Kubernetes-proxied OpenStack APIs used by the apps authenticate successfully,
+compute registers healthy, and the first private LAMP instance passes HTTP,
+database persistence, reboot and cleanup checks. Source-candidate tests do not
+replace the final fresh packaged-image replay.
+
+
+The live single-node continuation also exposed a blocked database-operator
+rollout, fixed minimum-two API autoscalers, a host `/etc/modprobe.d` write on
+Talos, and an unbudgeted 20 GiB cache claim. The guided profile constrains
+operator rollouts/autoscalers, prepares CPU-specific KVM through Talos
+`KernelModuleConfig`, places persistent libvirt definitions under `/var`, and
+budgets a 1 GiB cache plus the temporary/backup claims. Actual Helm/Kustomize
+renders and the Talos 1.14.2 kernel-module schema were validated independently.
+These checks precede live compute and LAMP acceptance; they are not release proof.
+
+A subsequent live retry exposed libvirt's `systemd-run` dependency on a Talos
+host without a systemd bus. The scoped Helm post-renderer preserves cgroup
+placement, adapts only the two recognized libvirt startup ConfigMaps, then
+continues through the normal Kustomize renderer. An unknown startup layout
+stops before applying manifests. The pinned chart render verified that all
+other resources remain identical and that the adapted shell syntax is valid.
+Both runtime helpers are included in the built source wheel and the compiled
+binary's existing assets directory. Live compute, persistent guest workload
+and fresh packaged-image acceptance are still required.
+
+The corrected daemon then reached a synchronous D-Bus initialization hang:
+its backtrace stopped in `virSystemdHasLogind` during shutdown-inhibitor setup.
+The chart's whole-host `/run` mount exposed Talos's system-bus socket. The
+scoped profile shares only `/run/libvirt` with Nova and the exporter, keeping
+that unrelated host socket out of the container. Actual chart rendering
+verifies the restricted host path and both container mount paths. A runtime
+adapter digest on the pod template ensures subPath-mounted script updates also
+replace existing pods. Diagnostic pod restarts do not count as automatic
+rollout acceptance.
+
+The Nova API initially reported an empty flavor catalog before its bootstrap
+job finished. The completed bootstrap supplied the standard sizes, so the
+experiment that created a separate initial flavor was removed. Acceptance must
+wait for bootstrap completion rather than infer missing defaults from an
+intermediate state.
+
+The next live failure was an unused Cinder multipath host mount trying to
+create `/etc/multipath` on Talos's immutable root. The guided NFS profile
+removes that mount while retaining its single-writer strategy, owner annotation
+and data/configuration mounts. The actual pinned Cinder chart and Kustomize
+output passed these assertions.
+
+A storage-only retry requires the precise prior Cinder failure, an unchanged
+configuration with the same recorded pushed version, healthy core APIs, every
+reviewed compute service, the matching healthy libvirt runtime, and completed
+Nova bootstrap jobs. Otherwise it repeats the complete setup. The live iPhone
+retry exercised this gate and resumed at block storage. Final success also
+requires the compute/storage rollout and bootstrap jobs, all compute services,
+a healthy Cinder volume worker, usable VM sizes and the managed volume type.
+
+
+Fresh public deployer preparation checks out the immutable upstream revision used
+by this acceptance candidate (`b445a65cf0b3852b5d95cba98563fbef4810ff0e`), rather
+than whichever commit `main` contains on installation day. Explicit advanced refs
+remain available; custom repositories retain their existing default. Preparation
+never switches or resets an existing checkout. Fresh packaged-image replay must
+verify the pinned default as well as the Console binary version.

@@ -163,6 +163,7 @@ KNOWN_TOP_LEVEL_KEYS = frozenset(
         "ovh",
         "registry",
         "hardware_installation",
+        "cloud_services",
     }
 )
 
@@ -186,6 +187,7 @@ KNOWN_NETWORK_KEYS = frozenset(
         "gateway_domain",
         "acme_email",
         "hyperconverged",
+        "interfaces",
         "container_interface",
         "compute_interface",
         "ovn",
@@ -252,6 +254,8 @@ def _rook_overlay_kustomization(external_pvc: bool = False) -> str:
 # efi_bootloader_path is the OVH BYOI EFI path (default \EFI\BOOT\BOOTX64.EFI).
 KNOWN_TALOS_KEYS = frozenset(
     {
+
+        "compute_kernel_modules",
         "cluster_name",
         "install_disk",
         "install_disk_selectors",
@@ -627,8 +631,22 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
                 data_disk_selectors(talos, data.get("servers") or {})
             except ValueError as exc:
                 raise ConfigValidationError(str(exc)) from exc
+        if 'compute_kernel_modules' in talos:
+            modules = talos['compute_kernel_modules']
+            if not isinstance(modules, dict):
+                raise ConfigValidationError('talos.compute_kernel_modules must map reviewed compute nodes to modules')
+            from app.services.talos_compute import documents as compute_documents
+
+            servers = data.get('servers') or {}
+            for hostname in modules:
+                if not isinstance(hostname, str) or hostname not in servers:
+                    raise ConfigValidationError('Compute kernel modules reference an unknown reviewed node')
+                try:
+                    compute_documents(hostname, talos, servers)
+                except ValueError as error:
+                    raise ConfigValidationError(str(error)) from error
         for key in KNOWN_TALOS_KEYS:
-            if talos.get(key) is None or key in ("install_disk_selectors", "data_disk_selectors"):
+            if talos.get(key) is None or key in ("install_disk_selectors", "data_disk_selectors", "compute_kernel_modules"):
                 continue
             if key in TALOS_LIST_KEYS:
                 if not isinstance(talos[key], list):
@@ -1607,6 +1625,10 @@ def render_to_files(
         files["manifests/longhorn/longhorn-namespace.yaml"] = _dump({"apiVersion": "v1", "kind": "Namespace",
             "metadata": {"name": "longhorn-system", "labels": {"pod-security.kubernetes.io/enforce": "privileged"}}})
 
+    from app.services.cloud_services import rendered_files as cloud_service_files
+
+    files.update(cloud_service_files(doc))
+
     components = doc.get("components")
     if components is not None:
         files["openstack-components.yaml"] = _dump({"components": components})
@@ -1771,6 +1793,10 @@ def render_to_files(
                 files[".ssh/id_ed25519"] = private_key + "\n"
                 files[".ssh/id_ed25519.pub"] = env.ssh_public_key + "\n"
 
+    from app.services.cloud_services import finish_rendered_files
+
+    finish_rendered_files(doc, files)
+
     return files
 
 
@@ -1812,6 +1838,8 @@ def doc_env(doc: dict[str, Any]) -> dict[str, str]:
     network = doc.get("network")
     if not isinstance(network, dict):
         return env
+    if network.get("interfaces") == "automatic":
+        env["GENESTACK_NETWORK_INTERFACES"] = "automatic"
     for key, var in (
         ("gateway_domain", "GATEWAY_DOMAIN"),
         ("acme_email", "ACME_EMAIL"),
