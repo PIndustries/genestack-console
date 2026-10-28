@@ -4,6 +4,38 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.1
+
+- Save the local agent token in the configured writable data directory on an
+  immutable appliance, rather than the Docker-specific `/app/data` path.
+- Roll back credential creation if token publication fails, while preserving
+  unrelated startup recovery work and existing agent credentials. Publish only
+  complete, owner-readable token files and never overwrite an existing token.
+
+- Continue native first-time setup from an empty deployer through installation
+  review, Talos/Kubernetes bootstrap, networking, persistent storage and private
+  OpenStack services. Follow and resume the existing job without repeating a
+  completed disk erase.
+- Offer unused dedicated Ethernet ports and configure the selected port by its
+  fresh hardware fingerprint. Persist exact-MAC settings, enable outbound
+  masquerading, preserve the management route and roll back failed setup.
+- Serve the correct BIOS or UEFI PXE loader through a ready, read-only TFTP helper.
+  Include provisioning prerequisites in the appliance and revoke unfinished
+  inspection tokens safely on cancellation or timeout.
+- Match installation disks by OS-reconciled WWID. Use reviewed data disks for
+  storage and size replicas and service reservations from measured hardware;
+  retain owned storage identities across retries.
+- Install and verify private cluster networking and pod DNS. Leave VM provider
+  uplinks unconfigured until an operator explicitly supplies an external network.
+- Prepare retained Longhorn-backed Cinder exports with stable service ownership.
+  Reject foreign resources or changed retained sizing and verify compute and
+  block-storage bootstrap before declaring service setup complete.
+- Adapt the recognized upstream libvirt startup for Talos, isolate its runtime
+  from the host system bus and remove the unused immutable-root multipath mount
+  from the guided NFS profile. Preserve cgroup placement and scoped mounts.
+- Pin fresh public source preparation to the reviewed upstream revision. Keep
+  explicit advanced source overrides and preserve existing checkouts.
+
 ## 2026.10.28.1-rc2
 
 - Save the local agent token in the configured writable data directory on an
