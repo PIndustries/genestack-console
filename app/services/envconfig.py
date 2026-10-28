@@ -631,8 +631,22 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
                 data_disk_selectors(talos, data.get("servers") or {})
             except ValueError as exc:
                 raise ConfigValidationError(str(exc)) from exc
+        if 'compute_kernel_modules' in talos:
+            modules = talos['compute_kernel_modules']
+            if not isinstance(modules, dict):
+                raise ConfigValidationError('talos.compute_kernel_modules must map reviewed compute nodes to modules')
+            from app.services.talos_compute import documents as compute_documents
+
+            servers = data.get('servers') or {}
+            for hostname in modules:
+                if not isinstance(hostname, str) or hostname not in servers:
+                    raise ConfigValidationError('Compute kernel modules reference an unknown reviewed node')
+                try:
+                    compute_documents(hostname, talos, servers)
+                except ValueError as error:
+                    raise ConfigValidationError(str(error)) from error
         for key in KNOWN_TALOS_KEYS:
-            if talos.get(key) is None or key in ("install_disk_selectors", "data_disk_selectors"):
+            if talos.get(key) is None or key in ("install_disk_selectors", "data_disk_selectors", "compute_kernel_modules"):
                 continue
             if key in TALOS_LIST_KEYS:
                 if not isinstance(talos[key], list):

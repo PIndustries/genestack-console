@@ -23,9 +23,9 @@ def from_cpuinfo(text):
 
 def documents(hostname, talos, servers):
     modules = talos.get("compute_kernel_modules") or {}
-    selected = modules.get(hostname)
-    if not selected:
+    if hostname not in modules:
         return []
+    selected = modules[hostname]
     if selected not in [value[1] for value in VENDORS.values()] or "compute" not in servers[
         hostname
     ].get("roles", []):
