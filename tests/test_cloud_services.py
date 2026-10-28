@@ -241,3 +241,19 @@ def test_libvirt_startup_update_replaces_pods_with_subpath_config_mounts():
     assert annotations['genestack.dev/libvirt-talos-runtime'] == hashlib.sha256(
         (package_root() / 'app/assets/libvirt-talos-post-render.sh').read_bytes()
     ).hexdigest()
+
+
+def test_libvirt_shares_only_its_own_runtime_sockets_with_talos():
+    import yaml
+    from app.services.cloud_services import configure, finish_rendered_files, rendered_files
+
+    doc, _ = configure(document(), 'owned-environment')
+    files = rendered_files(doc)
+    finish_rendered_files(doc, files)
+    overlay = yaml.safe_load(files['kustomize/libvirt/overlay/kustomization.yaml'])
+    patch = yaml.safe_load(overlay['patches'][0]['patch'])['spec']['template']['spec']
+    volume = next(v for v in patch['volumes'] if v['name'] == 'run')
+    assert volume['hostPath'] == {'path': '/run/libvirt', 'type': 'DirectoryOrCreate'}
+    for container in patch['containers']:
+        assert {'mountPath': '/run', '$patch': 'delete'} in container['volumeMounts']
+        assert {'name': 'run', 'mountPath': '/run/libvirt'} in container['volumeMounts']

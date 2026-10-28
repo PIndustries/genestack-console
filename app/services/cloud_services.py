@@ -416,10 +416,27 @@ def finish_rendered_files(doc, files):
                                 }
                             },
                             "spec": {
+                                "containers": [
+                                    {
+                                        "name": name,
+                                        "volumeMounts": [
+                                            {"mountPath": "/run", "$patch": "delete"},
+                                            {"name": "run", "mountPath": "/run/libvirt"},
+                                        ],
+                                    }
+                                    for name in ["libvirt", "libvirt-exporter"]
+                                ],
                                 "initContainers": [
                                     {"name": "libvirt-init-modules", "$patch": "delete"}
                                 ],
                                 "volumes": [
+                                    {
+                                        "name": "run",
+                                        "hostPath": {
+                                            "path": "/run/libvirt",
+                                            "type": "DirectoryOrCreate",
+                                        },
+                                    },
                                     {"name": "etc-modprobe-d", "$patch": "delete"},
                                     {"name": "host-rootfs", "$patch": "delete"},
                                     {
