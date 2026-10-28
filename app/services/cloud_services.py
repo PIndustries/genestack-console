@@ -132,6 +132,14 @@ def configure(original, environment_id):
     doc["cloud_services"] = plan
     values = doc.setdefault("helm_overrides", {})
     global_values = values.setdefault("global", {})
+    operator = values.setdefault("mariadb-operator", {})
+    for tree in [
+        operator,
+        operator.setdefault("webhook", {}),
+        operator.setdefault("certController", {}),
+    ]:
+        _default(tree, ["ha", "enabled"], replicas > 1)
+        _default(tree, ["ha", "replicas"], replicas)
     for key in ["api", "conductor", "scheduler", "consoleauth", "metadata", "novncproxy", "server"]:
         _default(global_values, ["pod", "replicas", key], replicas)
     _default(global_values, ["endpoints", "oslo_cache", "statefulset", "replicas"], replicas)

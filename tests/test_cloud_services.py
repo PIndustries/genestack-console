@@ -134,3 +134,14 @@ def test_recognized_new_core_uses_the_shipped_scoped_network_helper():
     result = compatible_infrastructure(source, "/scoped/runtime/site-network.sh")
     assert "/scoped/runtime/site-network.sh" in result
     assert "bin/lib/site-network.sh" not in result
+
+
+def test_database_operator_and_webhooks_fit_the_actual_control_nodes():
+    from app.services.cloud_services import configure
+
+    for count in [1, 2, 3]:
+        configured, _plan = configure(document(count), "owned-environment")
+        operator = configured["helm_overrides"]["mariadb-operator"]
+        assert operator["ha"]["replicas"] == count
+        assert operator["webhook"]["ha"]["replicas"] == count
+        assert operator["certController"]["ha"]["replicas"] == count
