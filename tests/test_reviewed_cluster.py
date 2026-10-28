@@ -236,3 +236,28 @@ def test_concurrent_config_change_during_resume_preflight_prevents_boot(stopped_
         assert doc['network']['gateway'] == '10.77.27.2'
         assert doc['hardware_installation']['installation_job_id'] == previous
         assert node.wiped_at == wiped
+
+
+def test_network_install_requires_successful_reviewed_bootstrap_and_own_connection(stopped_installation):
+    from app.models import Job, JobStatus
+    from app.services import cluster_network
+
+    eid, _, previous = stopped_installation
+    with SessionLocal() as db:
+        env = db.get(Environment, eid)
+        with pytest.raises(ValueError, match='installation before networking'):
+            cluster_network.configuration(db, env)
+        env.kubeconfig_data = 'opaque-fixture-not-a-real-credential'
+        with pytest.raises(ValueError, match='must finish'):
+            cluster_network.configuration(db, env)
+        db.get(Job, previous).status = JobStatus.success
+        db.commit()
+        doc, version = cluster_network.configuration(db, env)
+        assert version == envconfig.get_current(db, env)[1].version
+        assert doc['hardware_installation']['installation_job_id'] == previous
+        doc = copy.deepcopy(doc)
+        doc['servers'][next(iter(doc['servers']))]['ip'] = '192.0.2.99'
+        envconfig.put_version(db, env, yaml.safe_dump(doc), 'fixture', expected_version=version)
+        db.commit()
+        with pytest.raises(ValueError, match='assignments changed'):
+            cluster_network.configuration(db, env)

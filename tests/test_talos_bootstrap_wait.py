@@ -30,3 +30,18 @@ def test_bootstrap_deadline_and_cancellation_are_bounded(monkeypatch):
     def cancel(): raise RuntimeError('cancelled')
     with pytest.raises(RuntimeError, match='cancelled'):
         talos._bootstrap_with_retry(['talosctl', 'bootstrap'], timeout=900, check_cancel=cancel)
+
+
+
+def test_guided_firewall_allows_its_pods_without_broadening_node_ip_selection():
+    import yaml
+
+    doc = {'talos': {'cni': 'kube-ovn', 'cluster_cidrs': ['10.77.28.0/24']},
+           'servers': {'owned': {'ip': '10.77.28.191', 'private_ip': '10.77.28.191', 'roles': ['k8s_control_plane']}}}
+    firewall = talos.firewall_yaml(doc)
+    assert '10.236.0.0/14' in firewall
+    assert '100.64.0.0/16' in firewall
+    assert '0.0.0.0/0' not in firewall
+    patch = list(yaml.safe_load_all(talos.network_patch_yaml(doc)))
+    node = next(d for d in patch if d.get('kind') == 'KubeNodeConfig')
+    assert node['nodeIP']['validSubnets'] == ['10.77.28.0/24']
