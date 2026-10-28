@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc4
+
+- Prepare a local deployer using the cloud's configured source directory instead
+  of an unrelated legacy checkout at `/opt/genestack`. Preserve installed source,
+  explicit advanced overrides and the separate SSH/agent filesystem defaults.
+
 ## 2026.10.28.2-rc3
 
 - Boot hardware inspection and commissioning with the matching, checksum-pinned

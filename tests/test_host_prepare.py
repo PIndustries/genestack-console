@@ -19,7 +19,7 @@ def _create_env(client, headers, **fields) -> dict:
     resp = client.post(
         "/api/v1/environments",
         headers=headers,
-        json={"name": f"env-prepare-{_suffix()}", **fields},
+        json={"name": f"env-prepare-{_suffix()}", "genestack_path": "/opt/genestack", **fields},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -317,6 +317,32 @@ def test_installed_source_archive_is_not_fetched_or_replaced(client, admin_heade
     scripts = _scripts(captured)
     assert not any("git clone" in script or "git -C" in script for script in scripts)
     assert any("base64.b64decode" in script for script in scripts)
+
+
+def test_local_prepare_uses_the_cloud_source_without_an_advanced_job_override(
+    client, admin_headers, monkeypatch
+):
+    source = "/opt/fresh physical source"
+    env = _create_env(client, admin_headers, dry_run=False, genestack_path=source)
+    captured = _capture_commands(monkeypatch, rc_rules={"/.git": 1})
+    job = _prepare_job(client, admin_headers, env["id"]).json()
+    assert job["status"] == "success", job.get("error")
+    scripts = _scripts(captured)
+    assert "test -d '/opt/fresh physical source'" in scripts
+    assert bootstrap_command(source, env["genestack_config_dir"])[0] in scripts
+    assert not any("/opt/genestack " in command or "git fetch" in command for command in scripts)
+
+
+def test_remote_and_agent_defaults_do_not_reuse_console_host_paths():
+    from types import SimpleNamespace
+
+    from app.services.host_prepare import _resolve_params
+
+    env = SimpleNamespace(metadata_json={}, genestack_path="/console-only/source", genestack_config_dir="/cloud/config")
+    assert _resolve_params(env, {}, local=True)["genestack_path"] == "/console-only/source"
+    assert _resolve_params(env, {}, local=False)["genestack_path"] == "/opt/genestack"
+    for local in [True, False]:
+        assert _resolve_params(env, {"genestack_path": "/explicit/source"}, local=local)["genestack_path"] == "/explicit/source"
 
 
 @pytest.mark.parametrize("linked", [True, False])
