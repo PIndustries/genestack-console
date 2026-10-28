@@ -46,7 +46,9 @@ DEFAULT_GENESTACK_PATH = "/opt/genestack"
 DEFAULT_CONFIG_DIR = "/etc/genestack"
 
 
-def _resolve_params(env: Environment | None, params: dict[str, Any]) -> dict[str, str]:
+def _resolve_params(
+    env: Environment | None, params: dict[str, Any], *, local: bool = False
+) -> dict[str, str]:
     meta = (env.metadata_json or {}) if env else {}
     repo_url = str(params.get("repo_url") or meta.get("repo_url") or DEFAULT_REPO_URL)
     public_recipe = repo_url.rstrip("/").removesuffix(".git") == DEFAULT_REPO_URL
@@ -55,9 +57,14 @@ def _resolve_params(env: Environment | None, params: dict[str, Any]) -> dict[str
         "repo_ref": str(
             params.get("repo_ref") or (DEFAULT_REPO_REF if public_recipe else "main")
         ),
-        # env.genestack_path is the console-side checkout root, not the
-        # remote deploy-host clone path — only an explicit param overrides.
-        "genestack_path": str(params.get("genestack_path") or DEFAULT_GENESTACK_PATH),
+        # A local worker runs on the Console host: use this cloud's configured
+        # source. SSH/agent targets have a separate filesystem and retain their
+        # deploy-host default unless the operator explicitly overrides it.
+        "genestack_path": str(
+            params.get("genestack_path")
+            or (env.genestack_path if local and env else None)
+            or DEFAULT_GENESTACK_PATH
+        ),
         "config_dir": str(
             params.get("config_dir")
             or (env.genestack_config_dir if env else None)
@@ -89,7 +96,7 @@ def run_host_prepare(
     agent_env_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the prepare sequence on the deploy host (over ssh when configured)."""
-    resolved = _resolve_params(env, params)
+    resolved = _resolve_params(env, params, local=not ssh_target and not agent_env_id)
     repo_url = resolved["repo_url"]
     repo_ref = resolved["repo_ref"]
     genestack_path = resolved["genestack_path"]

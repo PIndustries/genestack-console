@@ -34,7 +34,7 @@ OPERATION = {
         _p(
             "genestack_path",
             False,
-            "Remote clone path on the deploy host (default /opt/genestack)",
+            "Source path (default cloud's configured local source; /opt/genestack on SSH or agent targets)",
         ),
         _p(
             "config_dir",

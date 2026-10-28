@@ -70,7 +70,8 @@ GSC_BIND_HOST="${GSC_BIND_HOST:-127.0.0.1}"
 RUNTIME=""          # binary | image
 CONSOLE_BIN=""
 # Public Genestack cloud tree (Apache-2.0). Not the Console. Tarball, not git.
-GSC_GENESTACK_URL="${GSC_GENESTACK_URL:-https://github.com/rackerlabs/genestack/archive/refs/heads/main.tar.gz}"
+# Match the reviewed fresh-clone recipe in app/services/host_prepare.py.
+GSC_GENESTACK_URL="${GSC_GENESTACK_URL:-https://github.com/rackerlabs/genestack/archive/b445a65cf0b3852b5d95cba98563fbef4810ff0e.tar.gz}"
 GSC_REPO_URL="${GSC_REPO_URL:-}"         # only used with --from-source
 GSC_REPO_REF="${GSC_REPO_REF:-}"
 GSC_CONSOLE_SUBDIR="${GSC_CONSOLE_SUBDIR:-genestack-console}"
