@@ -408,6 +408,13 @@ def finish_rendered_files(doc, files):
                     "metadata": {"name": "libvirt-libvirt-default"},
                     "spec": {
                         "template": {
+                            "metadata": {
+                                "annotations": {
+                                    "genestack.dev/libvirt-talos-runtime": hashlib.sha256(
+                                        (package_root() / "app/assets/libvirt-talos-post-render.sh").read_bytes()
+                                    ).hexdigest()
+                                }
+                            },
                             "spec": {
                                 "initContainers": [
                                     {"name": "libvirt-init-modules", "$patch": "delete"}

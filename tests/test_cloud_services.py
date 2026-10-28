@@ -224,3 +224,20 @@ def test_guided_libvirt_keeps_the_normal_post_renderer_after_talos_adaptation(tm
     installer.write_text('unrecognized installer')
     with pytest.raises(ValueError, match='Unrecognized libvirt'):
         _pipeline_command('bin/install-libvirt.sh', ctx, dry_run=False, local=True)
+
+
+def test_libvirt_startup_update_replaces_pods_with_subpath_config_mounts():
+    import hashlib
+    import yaml
+    from app.paths import package_root
+    from app.services.cloud_services import configure, finish_rendered_files, rendered_files
+
+    doc, _ = configure(document(), 'owned-environment')
+    files = rendered_files(doc)
+    finish_rendered_files(doc, files)
+    overlay = yaml.safe_load(files['kustomize/libvirt/overlay/kustomization.yaml'])
+    patch = yaml.safe_load(overlay['patches'][0]['patch'])
+    annotations = patch['spec']['template']['metadata']['annotations']
+    assert annotations['genestack.dev/libvirt-talos-runtime'] == hashlib.sha256(
+        (package_root() / 'app/assets/libvirt-talos-post-render.sh').read_bytes()
+    ).hexdigest()
