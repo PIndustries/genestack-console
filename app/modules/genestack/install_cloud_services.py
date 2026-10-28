@@ -275,6 +275,7 @@ def run(
                 for s in services
             ):
                 raise ValueError("OpenStack compute is not yet registered and healthy")
+            flavor = cloud_services.ensure_initial_flavor(cloud, doc)
         self.write_audit(
             actor=job.created_by or "system",
             action="env.install_cloud_services",
@@ -288,6 +289,7 @@ def run(
             "ok": True,
             "dry_run": False,
             "cloud_services_ready": True,
+            "initial_flavor": flavor,
             "message": "Private cloud APIs and compute are ready. Create a private network and your first server",
         }
     except (ValueError, OSError, OpenStackError) as error:

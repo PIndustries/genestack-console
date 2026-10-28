@@ -19,6 +19,36 @@ def _default(tree, path, value):
     tree.setdefault(path[-1], value)
 
 
+def ensure_initial_flavor(cloud, doc):
+    """An empty new cloud needs one usable VM choice; preserve existing catalogs."""
+    existing = cloud.list_flavors()
+    if existing:
+        return {"created": False}
+    machines = [
+        m for m in doc["hardware_installation"]["reviewed_plan"]["machines"]
+        if "compute" in m["roles"]
+    ]
+    if not machines:
+        raise ValueError("A first VM size requires reviewed compute hardware")
+    machine = max(machines, key=lambda m: (m["memory_gib"], m["cpu_threads"]))
+    # Leave capacity for the cloud services and additional guests. This is a
+    # starting choice, not a reservation or a change to Nova's allocation ratios.
+    ram = min(2048, int(machine["memory_gib"] * 1024 / 8) // 512 * 512)
+    cores = min(2, max(1, machine["cpu_threads"] // 8))
+    boot = [d["capacity_bytes"] for d in machine["disks"] if d["purpose"] == "boot"]
+    disk = min(16, max(boot, default=0) // 1024**3 // 4)
+    if ram < 512 or disk < 4:
+        raise ValueError("Reviewed compute capacity cannot fit a safe starting VM size")
+    flavor = cloud.flavor_create(name="gs.small", vcpus=cores, ram=ram, disk=disk)
+    expected = {"id": flavor.get("id"), "name": "gs.small", "vcpus": cores, "ram": ram, "disk": disk}
+    if not expected["id"] or not any(
+        all(row.get(key) == value for key, value in expected.items())
+        for row in cloud.list_flavors()
+    ):
+        raise ValueError("The starting VM size was not confirmed by the compute API")
+    return {"created": True, **expected}
+
+
 def configure(original, environment_id):
     doc = copy.deepcopy(original)
     machines = doc["hardware_installation"]["reviewed_plan"]["machines"]

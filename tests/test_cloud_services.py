@@ -257,3 +257,47 @@ def test_libvirt_shares_only_its_own_runtime_sockets_with_talos():
     for container in patch['containers']:
         assert {'mountPath': '/run', '$patch': 'delete'} in container['volumeMounts']
         assert {'name': 'run', 'mountPath': '/run/libvirt'} in container['volumeMounts']
+
+
+def test_first_flavor_is_confirmed_and_created_only_for_an_empty_cloud():
+    from app.services.cloud_services import ensure_initial_flavor
+
+    class Cloud:
+        def __init__(self, existing=()): self.rows = list(existing); self.calls = []
+        def list_flavors(self): return self.rows
+        def flavor_create(self, **values):
+            self.calls.append(values)
+            self.rows.append({'id': 'created-id', **values})
+            return self.rows[-1]
+
+    doc = document()
+    machine = doc['hardware_installation']['reviewed_plan']['machines'][0]
+    machine['disks'].append({'purpose': 'boot', 'capacity_bytes': 80 * 1024**3})
+    cloud = Cloud()
+    result = ensure_initial_flavor(cloud, doc)
+    assert result == {'created': True, 'id': 'created-id', 'name': 'gs.small', 'vcpus': 2, 'ram': 2048, 'disk': 16}
+    assert ensure_initial_flavor(cloud, doc) == {'created': False}
+    assert len(cloud.calls) == 1
+    custom = Cloud([{'id': 'custom', 'name': 'customer-size'}])
+    assert ensure_initial_flavor(custom, doc) == {'created': False}
+    assert not custom.calls
+    machine['memory_gib'] = 8
+    machine['cpu_threads'] = 4
+    machine['disks'][-1]['capacity_bytes'] = 40 * 1024**3
+    smaller = ensure_initial_flavor(Cloud(), doc)
+    assert (smaller['vcpus'], smaller['ram'], smaller['disk']) == (1, 1024, 10)
+
+
+def test_first_flavor_requires_confirmation_and_real_boot_capacity():
+    from app.services.cloud_services import ensure_initial_flavor
+
+    class Unconfirmed:
+        def list_flavors(self): return []
+        def flavor_create(self, **values): return {'id': 'not-confirmed'}
+
+    doc = document()
+    with pytest.raises(ValueError, match='capacity'):
+        ensure_initial_flavor(Unconfirmed(), doc)
+    doc['hardware_installation']['reviewed_plan']['machines'][0]['disks'].append({'purpose': 'boot', 'capacity_bytes': 80 * 1024**3})
+    with pytest.raises(ValueError, match='confirmed'):
+        ensure_initial_flavor(Unconfirmed(), doc)

@@ -281,3 +281,19 @@ other resources remain identical and that the adapted shell syntax is valid.
 Both runtime helpers are included in the built source wheel and the compiled
 binary's existing assets directory. Live compute, persistent guest workload
 and fresh packaged-image acceptance are still required.
+
+The corrected daemon then reached a synchronous D-Bus initialization hang:
+its backtrace stopped in `virSystemdHasLogind` during shutdown-inhibitor setup.
+The chart's whole-host `/run` mount exposed Talos's system-bus socket. The
+scoped profile shares only `/run/libvirt` with Nova and the exporter, keeping
+that unrelated host socket out of the container. Actual chart rendering
+verifies the restricted host path and both container mount paths. A runtime
+adapter digest on the pod template ensures subPath-mounted script updates also
+replace existing pods. Diagnostic pod restarts do not count as automatic
+rollout acceptance.
+
+The new Nova API also reported an empty flavor catalog. Guided completion
+creates and independently re-reads one starting `gs.small` size only when the
+catalog is empty. CPU, memory and root-disk bounds come from a reviewed compute
+machine. Existing user sizes are preserved. The real app-driven VM journey must
+still demonstrate this choice and its volume/reboot behavior.
