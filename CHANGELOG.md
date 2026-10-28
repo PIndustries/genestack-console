@@ -4,6 +4,14 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc2
+
+- Reuse the API's existing provisioning runtime when a worker finds the PXE
+  sockets already owned. Reload runtime reservations without overwriting the
+  worker's freshly rendered boot files; reject foreign or incomplete owners.
+- Keep delegated reloads authenticated on loopback with proxy and redirect
+  forwarding disabled. A direct owner reload cannot recursively delegate.
+
 ## 2026.10.28.2-rc1
 
 - Activate Console program updates through the existing managed root worker on

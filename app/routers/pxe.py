@@ -93,8 +93,9 @@ def agent_pxe_prep(
     agent_id = str(body.get("agent_id") or "").strip()
     if not agent_id:
         raise HTTPException(status_code=400, detail="agent_id is required")
-    from app.models import AgentCredential
     from sqlalchemy import select
+
+    from app.models import AgentCredential
 
     settings = get_settings()
     cred = db.scalar(
@@ -116,6 +117,31 @@ def agent_pxe_prep(
         agent_pxe_config=cred.pxe_config,
     )
     return result
+
+
+@router.post("/pxe/runtime/reload")
+def reload_existing_runtime(
+    db: Session = Depends(get_db),
+    env: Environment = Depends(get_env_scoped("operator")),
+) -> dict[str, Any]:
+    """Apply only this API process's runtime; never rewrite pending boot files.
+
+    Workers use this when the API already owns the provisioning sockets. This
+    direct apply deliberately cannot delegate, so a foreign port owner fails
+    once rather than recursively calling back into the API.
+    """
+    from app.services.baremetal import boot_profiles
+    from app.services.pxe_owner import ready
+    from app.services.pxe_paths import provisioning_root
+    from app.services.pxe_runtime import apply_pxe_cfg
+
+    settings = get_settings()
+    current = envconfig_service.get_current(db, env)
+    pxe_cfg = current[0].get("pxe") if current else None
+    if not isinstance(pxe_cfg, dict) or not pxe_cfg:
+        raise HTTPException(status_code=409, detail="Save the provisioning network first")
+    runtime = apply_pxe_cfg(pxe_cfg, boot_profiles(db, env), provisioning_root(settings.data_dir))
+    return {"environment_id": env.id, "ok": ready(runtime), "runtime": runtime}
 
 
 @router.post("/pxe/restart")
