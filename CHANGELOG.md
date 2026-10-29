@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.29.3
+
+- When an operator confirms replacing a mismatched Talos install, recommission
+  that node through the RAM disk using only the exact system and storage disks
+  in the saved review, then continue into fresh Talos maintenance.
+
 ## 2026.10.29.2
 
 - Close each authenticated Redfish session after its request to prevent iLO
