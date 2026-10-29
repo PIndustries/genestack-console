@@ -470,7 +470,10 @@ def begin_commission(
     db.add(node)
     db.flush()
     try:
-        prepared = _prepare_pxe(db, env, settings, log, apply_runtime=apply_runtime)
+        prepared = (
+            _prepare_pxe(db, env, settings, log, apply_runtime=False)
+            if not apply_runtime else _prepare_pxe(db, env, settings, log)
+        )
     except Exception:  # noqa: BLE001 -- a failed preparation must revoke destructive boot authorization
         prepared = {"ok": False, "error": "PXE preparation failed; commissioning was disarmed", "returncode": 2}
     if isinstance(prepared, dict) and prepared.get("ok") is False:
@@ -559,7 +562,10 @@ def set_next_boot(
         node.boot_stage = "ubuntu"
     db.add(node)
     db.flush()
-    prepared = _prepare_pxe(db, env, settings, log, apply_runtime=apply_runtime)
+    prepared = (
+        _prepare_pxe(db, env, settings, log, apply_runtime=False)
+        if not apply_runtime else _prepare_pxe(db, env, settings, log)
+    )
     if isinstance(prepared, dict) and prepared.get("ok") is False:
         return prepared
     log(f"[baremetal] {node.name} next boot is {choice}")
@@ -890,7 +896,10 @@ def _serve_talos(
     node.boot_stage = "talos"
     db.add(node)
     db.flush()
-    prepared = _prepare_pxe(db, env, settings, log, apply_runtime=apply_runtime)
+    prepared = (
+        _prepare_pxe(db, env, settings, log, apply_runtime=False)
+        if not apply_runtime else _prepare_pxe(db, env, settings, log)
+    )
     if isinstance(prepared, dict) and prepared.get("ok") is False:
         return prepared
     booted = pxe_boot(db, node, dry_run=False, log=log, settings=settings)
