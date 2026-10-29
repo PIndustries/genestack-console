@@ -53,6 +53,7 @@ def run(self, handler, op, job, env, log, ctx, params, deadline, check_cancel,
         timeout=timeout, extra_env=extra_env, ssh_target=None,
         remote_env=remote_env, settings=self.settings, deadline=deadline,
         check_cancel=check_cancel, boot='pxe', stop_after='talos',
+        replace_hosts=params.get('replace_hosts'),
         wipe_disk_wwids=allowed, preserve_commissioned=True,
     )
     if not result.get('ok'):

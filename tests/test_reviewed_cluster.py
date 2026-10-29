@@ -340,11 +340,12 @@ def test_resume_handler_preserves_completed_wipe_and_keeps_original_target(stopp
         db.add(job); db.flush()
         runner = SimpleNamespace(db=db, settings=SimpleNamespace(data_dir=tmp_path), write_audit=lambda **k: None)
         result = resume_reviewed_cluster.run(runner, None, None, job, env, lambda s: None, None,
-            {'installation_job_id': previous}, None, lambda: None, False, 7200, None, None, {}, None, None, None, None)
+            {'installation_job_id': previous, 'replace_hosts': ['controller1']}, None, lambda: None, False, 7200, None, None, {}, None, None, None, None)
         assert result['ok'] is True and result['cluster_bootstrap_complete'] is True
         assert result['cloud_services_ready'] is False
         assert len(greenfield_calls) == 1
         assert greenfield_calls[0]['preserve_commissioned'] is True
+        assert greenfield_calls[0]['replace_hosts'] == ['controller1']
         assert greenfield_calls[0]['stop_after'] == 'talos'
         assert greenfield_calls[0]['wipe_disk_wwids'] == {
             plan['machines'][0]['name']: [d['wwid'] for d in plan['machines'][0]['disks']]

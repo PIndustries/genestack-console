@@ -324,10 +324,19 @@ def retry_job(
         )
 
     try:
+        retry_params = merge_confirmed_replace(job.params, job.user_step)
+        if (job.operation == "genestack.resume_reviewed_cluster"
+                and isinstance(job.user_step, dict)
+                and job.user_step.get("kind") == "boot-installer"
+                and str(job.user_step.get("reboot") or "") == "1"):
+            # A resume updates the reviewed environment to this job ID before
+            # attempting Talos. If it pauses for a per-node replacement, the
+            # confirmed retry must resume from this failed job, not its parent.
+            retry_params["installation_job_id"] = job.id
         created = execute_operation(
             db,
             operation=job.operation,
-            params=merge_confirmed_replace(job.params, job.user_step),
+            params=retry_params,
             environment_id=job.environment_id,
             created_by=principal.username,
             run_sync=body.run_sync if body else True,

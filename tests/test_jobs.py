@@ -285,6 +285,54 @@ def test_retry_job_run_sync_false_queues(client, admin_headers):
     assert retry.json()["status"] == "queued"
 
 
+def test_retrying_confirmed_resume_uses_the_paused_resume_job_as_parent(client, admin_headers):
+    """A per-node replacement retry must retain the current reviewed resume state."""
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus
+    from app.services.job_runner import release_env_mutex
+
+    environment_id = _create_env(client, admin_headers, "resume-replacement")
+    submitted = client.post(
+        f"/api/v1/environments/{environment_id}/jobs",
+        headers=admin_headers,
+        json={
+            "operation": "genestack.resume_reviewed_cluster",
+            "params": {"installation_job_id": "older-stopped-install"},
+            "run_sync": False,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    paused = submitted.json()
+
+    db = SessionLocal()
+    try:
+        row = db.get(Job, paused["id"])
+        assert row is not None
+        row.status = JobStatus.failed
+        row.user_step = {
+            "kind": "boot-installer",
+            "hostname": "controller1",
+            "address": "10.0.0.3",
+            "confirm": "Replace this install",
+            "reboot": "1",
+        }
+        release_env_mutex(db, environment_id, row.id)
+        db.commit()
+    finally:
+        db.close()
+
+    retry = client.post(
+        f"/api/v1/jobs/{paused['id']}/retry",
+        headers=admin_headers,
+        json={"run_sync": False},
+    )
+    assert retry.status_code == 201, retry.text
+    retried = retry.json()
+    assert retried["status"] == "queued"
+    assert retried["params"]["installation_job_id"] == paused["id"]
+    assert retried["params"]["replace_hosts"] == ["controller1"]
+
+
 def test_retry_missing_job_returns_404(client, admin_headers):
     resp = client.post(
         "/api/v1/jobs/does-not-exist/retry",
