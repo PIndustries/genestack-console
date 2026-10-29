@@ -329,6 +329,8 @@ jobs:
       # not skip that upload and does not remove the qcow2 already attached.
       - name: Build the appliance disk
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.parts != 'iso' }}
+        env:
+          GSC_APPLIANCE_BUILD_NETWORK: host
         run: |
           chmod 0755 dist/genestack-console-linux-amd64
           ./scripts/build-appliance.sh dist/genestack-console-linux-amd64 disk
@@ -349,6 +351,8 @@ jobs:
 
       - name: Build the installer ISO
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.parts != 'disk' }}
+        env:
+          GSC_APPLIANCE_BUILD_NETWORK: host
         run: |
           chmod 0755 dist/genestack-console-linux-amd64
           ./scripts/build-appliance.sh dist/genestack-console-linux-amd64 iso
