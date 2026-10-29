@@ -678,7 +678,19 @@ def network_patch_yaml(doc: dict[str, Any]) -> str:
                 "config": {"nodePortAddresses": nodeports},
             }
         )
-    merge = yaml.safe_dump({"machine": {"certSANs": sans}}, sort_keys=False).rstrip()
+    machine: dict[str, Any] = {"certSANs": sans}
+    time_servers = talos_settings.get("time_servers")
+    if not time_servers:
+        # Isolated greenfield nodes cannot reach public NTP or DNS. PXE and
+        # image-cache traffic already use the deployer, which serves NTP too.
+        from app.services.image_registry import registry_host_from_doc
+
+        local_time_server = registry_host_from_doc(doc)
+        if local_time_server:
+            time_servers = [local_time_server]
+    if time_servers:
+        machine["time"] = {"servers": [str(server) for server in time_servers]}
+    merge = yaml.safe_dump({"machine": machine}, sort_keys=False).rstrip()
     extra = yaml.safe_dump_all(documents, sort_keys=False, explicit_start=True).rstrip()
     return f"{merge}\n{extra}\n"
 

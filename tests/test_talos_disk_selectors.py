@@ -67,10 +67,23 @@ def test_generated_talos_config_mirrors_images_to_deployer_cache(tmp_path):
     documents = list(yaml.safe_load_all(base64.b64decode(shlex.split(command["argv"][-1])[2])))
     machine = next(d["machine"] for d in documents if d.get("machine", {}).get("registries"))
     mirrors = machine["registries"]["mirrors"]
+    time_config = next(d["machine"]["time"] for d in documents if d.get("machine", {}).get("time"))
+    assert time_config["servers"] == ["192.0.2.50"]
     assert mirrors["factory.talos.dev"] == {
         "endpoints": ["http://192.0.2.50:5008"], "skipFallback": True
     }
     assert mirrors["registry.k8s.io"]["endpoints"] == ["http://192.0.2.50:5005"]
+
+
+def test_explicit_time_servers_override_local_registry_default(tmp_path):
+    doc = document()
+    doc["registry"] = {"host": "192.0.2.50"}
+    doc["talos"]["time_servers"] = ["192.0.2.123"]
+    result = plan(doc, tmp_path)
+    command = next(c for c in result["commands"] if c["phase"] == "write-network-patch")
+    documents = list(yaml.safe_load_all(base64.b64decode(shlex.split(command["argv"][-1])[2])))
+    machine = next(d["machine"] for d in documents if d.get("machine", {}).get("time"))
+    assert machine["time"]["servers"] == ["192.0.2.123"]
 
 
 @pytest.mark.parametrize("selectors", [
