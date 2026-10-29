@@ -60,6 +60,14 @@ run_priv() {
   fi
 }
 
+# Some isolated CI runners expose DNS and egress only through the host
+# network. Leave the default unchanged for local builds; release CI can opt
+# in explicitly with GSC_APPLIANCE_BUILD_NETWORK=host.
+BUILD_NETWORK_ARGS=()
+if [ -n "${GSC_APPLIANCE_BUILD_NETWORK:-}" ]; then
+  BUILD_NETWORK_ARGS=(--network "$GSC_APPLIANCE_BUILD_NETWORK")
+fi
+
 stage="$(mktemp -d)"
 work="$(mktemp -d)"
 trap 'rm -rf "$stage" "$work"' EXIT
@@ -78,6 +86,7 @@ chmod 0755 "$stage/prepare.sh" "$stage/grow-state.py" "$stage/genestack-console"
 
 echo "==> bootc image ${REF}"
 run_priv podman build \
+  "${BUILD_NETWORK_ARGS[@]}" \
   --build-arg "BASE=${BASE}" \
   --build-arg "BOOTC_VERSION=${BOOTC_VERSION}" \
   -t "$REF" \
@@ -107,6 +116,7 @@ run_priv podman run --rm --network none --entrypoint /bin/bash "$REF" -ec '
 # before the long disk pass. The ISO part builds it again from the local cache.
 echo "==> installer image ${ISO_REF}"
 run_priv podman build \
+  "${BUILD_NETWORK_ARGS[@]}" \
   --build-arg "BASE=${BASE}" \
   --build-arg "APPLIANCE_REF=${REF}" \
   -t "$ISO_REF" \
