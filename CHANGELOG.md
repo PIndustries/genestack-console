@@ -1,8 +1,11 @@
 # Changelog
 
-Each published build has a section here. The release workflow copies the matching section onto the GitHub Release. The version heading is the `VERSION` string, without the leading `v`.
+Each published build has a section here. The release workflow copies the matching section onto the GitHub Release. The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
-The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
+## 2026.10.29.2
+
+- Close each authenticated Redfish session after its request to prevent iLO
+  session leaks during bare-metal commissioning.
 
 ## 2026.10.29.1-rc1
 
@@ -15,7 +18,7 @@ The oldest GitHub Release is v2026.10.03. The source history starts two version 
 - Close each authenticated Redfish session after its request to prevent iLO
   session leaks during bare-metal commissioning.
 
-## 2026.10.28.2-rc11
+
 
 - Continue a paused reviewed Talos install from its current job and carry the
   explicitly confirmed machine through the retry, so mobile replacement
