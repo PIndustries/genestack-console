@@ -10,10 +10,13 @@ from app.services.redfish import RedfishError
 
 
 class FakeResponse:
-    def __init__(self, status_code: int = 200, payload=None, content: bytes = b"{}"):
+    def __init__(
+        self, status_code: int = 200, payload=None, content: bytes = b"{}", headers=None
+    ):
         self.status_code = status_code
         self._payload = payload
         self.content = content
+        self.headers = headers or {}
 
     def json(self):
         if self._payload is None:
@@ -28,6 +31,9 @@ class FakeClient:
         self._handler = handler
         self._requests = requests
         self.kwargs = kwargs
+        self.headers = {}
+        self.auth = kwargs.get("auth")
+        self.base_url = kwargs.get("base_url")
 
     def __enter__(self):
         return self
@@ -44,6 +50,9 @@ class FakeClient:
 
     def get(self, path):
         return self.request("GET", path)
+
+    def delete(self, path):
+        return self.request("DELETE", path)
 
 
 def _patch_client(monkeypatch, handler):
@@ -132,6 +141,54 @@ def test_power_unknown_action_raises(monkeypatch):
     with pytest.raises(RedfishError, match="unknown power action"):
         redfish.power("bmc", "u", "p", "nuke")
     assert requests == [], "no HTTP call for an unknown action"
+
+
+def test_request_closes_session_after_authenticated_redfish_call(monkeypatch):
+    calls = []
+
+    def handler(method, path, payload):
+        calls.append((method, path))
+        if method == "GET" and path == "/redfish/v1/Systems/1" and len(calls) == 1:
+            return FakeResponse(status_code=401)
+        if method == "POST" and path == redfish.SESSION_PATH:
+            return FakeResponse(
+                status_code=201,
+                headers={"X-Auth-Token": "test-token", "Location": redfish.SESSION_PATH + "42"},
+            )
+        if method == "GET" and path == "/redfish/v1/SessionService/Sessions/42":
+            return FakeResponse(status_code=404)
+        return FakeResponse(payload={"PowerState": "On"})
+
+    _patch_client(monkeypatch, handler)
+    assert redfish.power_state("bmc.example.com", "root", "secret") == "On"
+    assert calls == [
+        ("GET", "/redfish/v1/Systems/1"),
+        ("POST", redfish.SESSION_PATH),
+        ("GET", "/redfish/v1/Systems/1"),
+        ("DELETE", redfish.SESSION_PATH + "42"),
+    ]
+
+
+def test_request_does_not_delete_cross_origin_session_location(monkeypatch):
+    calls = []
+
+    def handler(method, path, payload):
+        calls.append((method, path))
+        if method == "GET" and len(calls) == 1:
+            return FakeResponse(status_code=401)
+        if method == "POST":
+            return FakeResponse(
+                status_code=201,
+                headers={
+                    "X-Auth-Token": "test-token",
+                    "Location": "https://other.example/redfish/v1/SessionService/Sessions/42",
+                },
+            )
+        return FakeResponse(payload={"PowerState": "On"})
+
+    _patch_client(monkeypatch, handler)
+    assert redfish.power_state("bmc.example.com", "root", "secret") == "On"
+    assert not any(method == "DELETE" for method, _path in calls)
 
 
 # ---------------------------------------------------------------------------
