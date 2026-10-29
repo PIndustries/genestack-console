@@ -77,12 +77,14 @@ def _decode(response: httpx.Response) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _open_session(client: httpx.Client, username: str, password: str) -> bool:
+def _open_session(
+    client: httpx.Client, username: str, password: str
+) -> tuple[bool, str | None]:
     """iLO 4 (and similar) reject Basic on Systems/*; they want X-Auth-Token.
 
-    POST SessionService with the same credentials. Returns True when a token
-    was installed on ``client``. Trailing slash is required — iLO 4 308s
-    ``Sessions`` without it and drops the POST body.
+    POST SessionService with the same credentials. Returns the same-origin
+    session resource path when a token was installed. Trailing slash is
+    required — iLO 4 308s ``Sessions`` without it and drops the POST body.
     """
     try:
         response = client.request(
@@ -91,15 +93,44 @@ def _open_session(client: httpx.Client, username: str, password: str) -> bool:
             json={"UserName": username, "Password": password},
         )
     except httpx.HTTPError:
-        return False
+        return False, None
     if response.status_code >= 400:
-        return False
+        return False, None
     token = response.headers.get("X-Auth-Token") or response.headers.get("x-auth-token")
     if not token:
-        return False
+        return False, None
     client.headers["X-Auth-Token"] = token
     client.auth = None
-    return True
+    # Redfish requires the client to delete the session it created. iLO 4 has
+    # a small per-user session limit; leaking one session per request prevents
+    # later boot-control requests from authenticating. Only accept a
+    # same-origin Session resource path before using the token to close it.
+    location = response.headers.get("Location") or response.headers.get("location")
+    if not location:
+        payload = _decode(response) or {}
+        location = payload.get("@odata.id")
+    if not location:
+        log.warning("redfish: BMC opened a session without a deletable Location")
+        return True, None
+    parsed = urlsplit(str(location))
+    if parsed.scheme or parsed.netloc:
+        base = urlsplit(str(client.base_url))
+        if (
+            parsed.scheme.lower() != base.scheme.lower()
+            or (parsed.hostname or "").lower() != (base.hostname or "").lower()
+            or parsed.port != base.port
+        ):
+            log.warning("redfish: ignoring a cross-origin session Location")
+            return True, None
+    if (
+        not parsed.path.startswith(SESSION_PATH)
+        or parsed.path.rstrip("/") == SESSION_PATH.rstrip("/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        log.warning("redfish: ignoring an invalid session Location")
+        return True, None
+    return True, parsed.path
 
 
 def _request(
@@ -113,19 +144,30 @@ def _request(
     """One Redfish request; returns the decoded JSON body (None when empty)."""
     try:
         with _client(host, username, password) as client:
-            response = client.request(method, path, json=json)
-            # iLO 4: unauthenticated root is 200, Systems/* is 401 until a session exists.
-            if response.status_code in (401, 403):
-                if _open_session(client, username, password):
-                    response = client.request(method, path, json=json)
+            session_path = None
+            try:
+                response = client.request(method, path, json=json)
+                # iLO 4: unauthenticated root is 200, Systems/* is 401 until a session exists.
+                if response.status_code in (401, 403):
+                    opened, session_path = _open_session(client, username, password)
+                    if opened:
+                        response = client.request(method, path, json=json)
+                if response.status_code >= 400:
+                    raise RedfishError(
+                        f"redfish {method} {path}: HTTP {response.status_code}",
+                        status_code=response.status_code,
+                    )
+                return _decode(response)
+            finally:
+                if session_path:
+                    try:
+                        closed = client.delete(session_path)
+                        if closed.status_code >= 400:
+                            log.warning("redfish: BMC rejected session cleanup")
+                    except httpx.HTTPError:
+                        log.warning("redfish: could not close the BMC session")
     except httpx.HTTPError as exc:
         raise RedfishError(f"redfish {method} {path} failed: {exc}") from exc
-    if response.status_code >= 400:
-        raise RedfishError(
-            f"redfish {method} {path}: HTTP {response.status_code}",
-            status_code=response.status_code,
-        )
-    return _decode(response)
 
 
 def power_state(host: str, username: str, password: str) -> str:
