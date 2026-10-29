@@ -59,6 +59,20 @@ def test_each_machine_gets_exact_disk_selector_and_base_has_no_fallback(tmp_path
     assert result["install_disk_selectors"] == doc["talos"]["install_disk_selectors"]
 
 
+def test_generated_talos_config_mirrors_images_to_deployer_cache(tmp_path):
+    doc = document()
+    doc["registry"] = {"host": "192.0.2.50"}
+    result = plan(doc, tmp_path)
+    command = next(c for c in result["commands"] if c["phase"] == "write-network-patch")
+    documents = list(yaml.safe_load_all(base64.b64decode(shlex.split(command["argv"][-1])[2])))
+    machine = next(d["machine"] for d in documents if d.get("machine", {}).get("registries"))
+    mirrors = machine["registries"]["mirrors"]
+    assert mirrors["factory.talos.dev"] == {
+        "endpoints": ["http://192.0.2.50:5008"], "skipFallback": True
+    }
+    assert mirrors["registry.k8s.io"]["endpoints"] == ["http://192.0.2.50:5005"]
+
+
 @pytest.mark.parametrize("selectors", [
     None, {}, {"cp1": "naa.60000000000000000000000000000001"},
     {"cp1": "*", "worker1": "naa.60000000000000000000000000000002"},

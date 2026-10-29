@@ -1014,6 +1014,17 @@ def build_talos_plan(
             "match": "false" if selectors is not None else f'disk.dev_path == "{install_disk}"'
         }},
     }], sort_keys=False, explicit_start=True)
+    # Greenfield nodes may have no internet route or external DNS. Route every
+    # configured registry through the deployer cache as part of the machine
+    # config, so installer and Kubernetes image pulls use the same path.
+    from app.services.image_registry import talos_registry_patch_yaml
+
+    registry_patch = talos_registry_patch_yaml(doc)
+    registry_config = yaml.safe_load(registry_patch) or {}
+    if (registry_config.get("machine", {}).get("registries", {}).get("mirrors")):
+        network_patch += yaml.safe_dump_all(
+            [registry_config], sort_keys=False, explicit_start=True
+        )
     commands: list[dict[str, Any]] = [
         {
             "phase": "write-network-patch",
@@ -2027,6 +2038,20 @@ def run_talos_bootstrap(
         plan["workdir"].mkdir(parents=True, exist_ok=True)
         plan["kubeconfig"].parent.mkdir(parents=True, exist_ok=True)
         log(f"[talos] workdir {plan['workdir']}")
+        # The cache runs on the local Genestack deployer. Remote executors
+        # cannot use this process-local Docker setup and must configure their
+        # own reachable registry explicitly.
+        if not ssh_target and not agent_env_id:
+            from app.services import image_registry
+            from app.config import get_settings
+
+            if image_registry.registry_host_from_doc(doc):
+                registry = image_registry.ensure_running(doc, get_settings(), log)
+                if not registry.get("ok"):
+                    raise ConfigValidationError(
+                        "Talos image cache could not be started: "
+                        + str(registry.get("error") or "unknown registry error")
+                    )
     # A file that already exists belongs to the operator. A file this run
     # creates, including on the deploy host over SSH or the agent, is stored
     # and removed when the job ends.
