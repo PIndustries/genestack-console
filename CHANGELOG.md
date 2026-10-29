@@ -4,6 +4,11 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.29.2
+
+- Close each authenticated Redfish session after its request to prevent iLO
+  session leaks during bare-metal commissioning.
+
 ## 2026.10.29.1-rc1
 
 - Keep the API-owned PXE runtime active while preparing per-node boot files

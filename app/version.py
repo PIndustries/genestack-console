@@ -9,6 +9,6 @@ from __future__ import annotations
 
 import os
 
-VERSION = "2026.10.29.2-rc1"
+VERSION = "2026.10.29.2"
 
 BUILD = os.environ.get("GSC_BUILD", "dev")
