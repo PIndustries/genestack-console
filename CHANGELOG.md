@@ -4,6 +4,12 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.29.1-rc1
+
+- Keep the API-owned PXE runtime active while preparing per-node boot files
+  during a greenfield deployment, so multi-node commissioning does not try
+  to restart listeners owned by the Console API.
+
 ## 2026.10.28.2-rc11
 
 - Continue a paused reviewed Talos install from its current job and carry the
