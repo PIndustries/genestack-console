@@ -261,6 +261,7 @@ KNOWN_TALOS_KEYS = frozenset(
         "install_disk_selectors",
         "data_disk_selectors",
         "nameservers",
+        "time_servers",
         "cni",
         "image_url",
         "install_image",
@@ -275,7 +276,7 @@ KNOWN_TALOS_KEYS = frozenset(
 # ovh: vRack fabric for dedicated/Rise dual-NIC (attach + 802.1q on the private NIC).
 KNOWN_OVH_KEYS = frozenset({"vrack", "vlan_id", "private_cidr"})
 TALOS_LIST_KEYS = frozenset(
-    {"cluster_cidrs", "public_ingress_ports", "public_management_cidrs", "nameservers"}
+    {"cluster_cidrs", "public_ingress_ports", "public_management_cidrs", "nameservers", "time_servers"}
 )
 
 # Helm values kube-ovn needs on Talos (read-only /etc). Docs: k8s-cni-kube-ovn.md

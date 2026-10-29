@@ -4,6 +4,21 @@ Each published build has a section here. The release workflow copies the matchin
 
 The oldest GitHub Release is v2026.10.03. The source history starts two version numbers earlier. Those two sections are the commits. They are not downloadable tags.
 
+## 2026.10.28.2-rc10
+
+- Start the deployer pull-through registry before Talos bootstrap and add its
+  mirrors to generated node configuration, so isolated greenfield nodes can
+  fetch the Talos installer and cluster images without external DNS/egress.
+- Configure Talos time sync from the local deployer by default, with an
+  explicit `talos.time_servers` override, so isolated nodes can start etcd,
+  kubelet, and trust services without public NTP.
+
+## 2026.10.28.2-rc9
+
+- Start the deployer pull-through registry before Talos bootstrap and add its
+  mirrors to generated node configuration, so isolated greenfield nodes can
+  fetch the Talos installer and cluster images without external DNS/egress.
+
 ## 2026.10.28.2-rc8
 
 - Continue a partially commissioned reviewed install without repeating completed

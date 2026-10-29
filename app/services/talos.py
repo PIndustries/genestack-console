@@ -179,6 +179,17 @@ def _doc_servers(doc: dict[str, Any]) -> dict[str, Any]:
     return servers if isinstance(servers, dict) else {}
 
 
+def _has_configured_deployer_address(doc: dict[str, Any]) -> bool:
+    """Whether this environment explicitly identifies its local deployer."""
+    registry = doc.get("registry") if isinstance(doc, dict) else None
+    pxe = doc.get("pxe") if isinstance(doc, dict) else None
+    return bool(
+        isinstance(registry, dict) and str(registry.get("host") or "").strip()
+        or isinstance(pxe, dict)
+        and str(pxe.get("next_server") or pxe.get("gateway") or "").strip()
+    )
+
+
 def _clean_ip(value: Any) -> str:
     return str(value or "").split("/", 1)[0].strip()
 
@@ -678,7 +689,19 @@ def network_patch_yaml(doc: dict[str, Any]) -> str:
                 "config": {"nodePortAddresses": nodeports},
             }
         )
-    merge = yaml.safe_dump({"machine": {"certSANs": sans}}, sort_keys=False).rstrip()
+    machine: dict[str, Any] = {"certSANs": sans}
+    time_servers = talos_settings.get("time_servers")
+    if not time_servers and _has_configured_deployer_address(doc):
+        # Isolated greenfield nodes cannot reach public NTP or DNS. PXE and
+        # image-cache traffic already use the deployer, which serves NTP too.
+        from app.services.image_registry import registry_host_from_doc
+
+        local_time_server = registry_host_from_doc(doc)
+        if local_time_server:
+            time_servers = [local_time_server]
+    if time_servers:
+        machine["time"] = {"servers": [str(server) for server in time_servers]}
+    merge = yaml.safe_dump({"machine": machine}, sort_keys=False).rstrip()
     extra = yaml.safe_dump_all(documents, sort_keys=False, explicit_start=True).rstrip()
     return f"{merge}\n{extra}\n"
 
@@ -1014,6 +1037,18 @@ def build_talos_plan(
             "match": "false" if selectors is not None else f'disk.dev_path == "{install_disk}"'
         }},
     }], sort_keys=False, explicit_start=True)
+    # Greenfield nodes may have no internet route or external DNS. Route every
+    # configured registry through the deployer cache as part of the machine
+    # config, so installer and Kubernetes image pulls use the same path.
+    from app.services.image_registry import talos_registry_patch_yaml
+
+    if _has_configured_deployer_address(doc):
+        registry_patch = talos_registry_patch_yaml(doc)
+        registry_config = yaml.safe_load(registry_patch) or {}
+        if (registry_config.get("machine", {}).get("registries", {}).get("mirrors")):
+            network_patch += yaml.safe_dump_all(
+                [registry_config], sort_keys=False, explicit_start=True
+            )
     commands: list[dict[str, Any]] = [
         {
             "phase": "write-network-patch",
@@ -2027,6 +2062,20 @@ def run_talos_bootstrap(
         plan["workdir"].mkdir(parents=True, exist_ok=True)
         plan["kubeconfig"].parent.mkdir(parents=True, exist_ok=True)
         log(f"[talos] workdir {plan['workdir']}")
+        # The cache runs on the local Genestack deployer. Remote executors
+        # cannot use this process-local Docker setup and must configure their
+        # own reachable registry explicitly.
+        if not ssh_target and not agent_env_id:
+            from app.services import image_registry
+            from app.config import get_settings
+
+            if _has_configured_deployer_address(doc):
+                registry = image_registry.ensure_running(doc, get_settings(), log)
+                if not registry.get("ok"):
+                    raise ConfigValidationError(
+                        "Talos image cache could not be started: "
+                        + str(registry.get("error") or "unknown registry error")
+                    )
     # A file that already exists belongs to the operator. A file this run
     # creates, including on the deploy host over SSH or the agent, is stored
     # and removed when the job ends.
