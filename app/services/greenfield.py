@@ -475,19 +475,23 @@ def run_greenfield(
                             replaced_once.add(hostname)
                             log(
                                 f"[greenfield] {hostname} at {probe_ip} was "
-                                "confirmed. Rebooting it into the Talos "
-                                "installer. That replaces the install that "
-                                "is running."
+                                "confirmed. Recommissioning it with the "
+                                "reviewed disk allowlist before Talos."
                             )
-                            booted = baremetal_service.set_next_boot(
+                            # A configured Talos identity does not become fresh
+                            # maintenance just because the node was PXE-booted:
+                            # its STATE partition can restore the previous install.
+                            # The explicit per-node replacement confirmation
+                            # authorizes replaying the already-reviewed wipe on
+                            # exactly these WWIDs, then serving a clean Talos image.
+                            booted = baremetal_service.begin_commission(
                                 db,
                                 env,
                                 node,
-                                "talos",
-                                boot_now=True,
-                                dry_run=False,
                                 log=log,
-                                replace_installed=True,
+                                settings=settings,
+                                boot_now=True,
+                                wipe_disk_wwids=reviewed_disks[hostname],
                                 apply_runtime=False,
                             )
                             if booted.get("ok"):
