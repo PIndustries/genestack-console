@@ -70,6 +70,56 @@ def test_render_and_later_pipeline_keep_measured_replica_count_and_ownership():
     assert envconfig.doc_env(doc)['LONGHORN_STORAGE_REPLICAS'] == '1'
 
 
+def test_existing_owned_longhorn_parameter_maps_are_preserved_for_immutable_classes():
+    import yaml
+
+    from app.services import cluster_storage, envconfig
+    from app.models import Environment
+
+    owner = 'owned-cloud'
+    existing_parameters = {
+        'general': {'numberOfReplicas': '2', 'dataLocality': 'best-effort', 'custom': 'kept'},
+        'general-multi-attach': {'numberOfReplicas': '2', 'dataLocality': 'best-effort'},
+    }
+    existing = [
+        {'metadata': {'name': name, 'labels': {cluster_storage.OWNER: owner}},
+         'provisioner': 'driver.longhorn.io', 'parameters': parameters}
+        for name, parameters in existing_parameters.items()
+    ]
+    configured = cluster_storage.reconcile_existing_storage_classes(
+        {'storage': {'replication_factor': 3},
+         'hardware_installation': {'reviewed_plan': {'machines': [
+             machine('node-a', [120]), machine('node-b', [120]),
+         ]}}},
+        owner,
+        existing,
+    )
+    assert configured['storage']['replication_factor'] == 2
+    assert configured['helm_overrides']['longhorn']['defaultSettings']['defaultReplicaCount'] == 2
+    env = Environment(id=owner, name=owner)
+    files = envconfig.render_to_files(configured, env)
+    for name, expected in existing_parameters.items():
+        rendered_name = f'manifests/longhorn/longhorn-{name}-storageclass.yaml'
+        assert yaml.safe_load(files[rendered_name])['parameters'] == expected
+
+
+def test_existing_longhorn_classes_require_matching_owner_and_replicas():
+    from app.services import cluster_storage
+
+    owner = 'owned-cloud'
+    existing = [
+        {'metadata': {'name': name, 'labels': {cluster_storage.OWNER: owner}},
+         'provisioner': 'driver.longhorn.io',
+         'parameters': {'numberOfReplicas': replicas}}
+        for name, replicas in [('general', '2'), ('general-multi-attach', '3')]
+    ]
+    with pytest.raises(ValueError, match='different replica counts'):
+        cluster_storage.reconcile_existing_storage_classes({}, owner, existing)
+    existing[0]['metadata']['labels'][cluster_storage.OWNER] = 'other-cloud'
+    with pytest.raises(ValueError, match='ownership review'):
+        cluster_storage.reconcile_existing_storage_classes({}, owner, existing)
+
+
 def test_longhorn_participant_selector_is_a_real_label_not_null():
     from app.services.cluster_storage import configure
 
