@@ -207,6 +207,7 @@ KNOWN_STORAGE_KEYS = frozenset(
         "cinder_worker_name",
         "longhorn_cinder",
         "replication_factor",
+        "longhorn_storage_class_parameters",
         "ceph",
     }
 )
@@ -589,6 +590,23 @@ def parse_document(yaml_text: str) -> tuple[dict[str, Any], list[str]]:
         replicas = storage.get("replication_factor")
         if replicas is not None and (isinstance(replicas, bool) or not isinstance(replicas, int) or not 1 <= replicas <= 20):
             raise ConfigValidationError("storage.replication_factor must be an integer from 1 to 20")
+        class_parameters = storage.get("longhorn_storage_class_parameters")
+        if class_parameters is not None:
+            expected_classes = {"general", "general-multi-attach"}
+            if (
+                not isinstance(class_parameters, dict)
+                or set(class_parameters) != expected_classes
+                or any(
+                    not isinstance(parameters, dict)
+                    or not parameters
+                    or any(not isinstance(key, str) or not isinstance(value, str)
+                           for key, value in parameters.items())
+                    for parameters in class_parameters.values()
+                )
+            ):
+                raise ConfigValidationError(
+                    "storage.longhorn_storage_class_parameters must preserve both Longhorn parameter maps"
+                )
         from app.services.managed_cinder import settings as managed_cinder_settings
 
         try:
@@ -1621,7 +1639,11 @@ def render_to_files(
         from app.services.cluster_storage import storage_classes
 
         names = {"general": "longhorn-general-storageclass.yaml", "general-multi-attach": "longhorn-general-multi-attach-storageclass.yaml"}
-        for definition in storage_classes(env.id, storage["replication_factor"]):
+        for definition in storage_classes(
+            env.id,
+            storage["replication_factor"],
+            storage.get("longhorn_storage_class_parameters"),
+        ):
             files["manifests/longhorn/" + names[definition["metadata"]["name"]]] = _dump(definition)
         files["manifests/longhorn/longhorn-namespace.yaml"] = _dump({"apiVersion": "v1", "kind": "Namespace",
             "metadata": {"name": "longhorn-system", "labels": {"pod-security.kubernetes.io/enforce": "privileged"}}})

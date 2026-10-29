@@ -51,6 +51,7 @@ def run(
     from app.services import (
         cloud_services,
         cluster_network,
+        cluster_storage,
         deploy,
         envconfig,
         reviewed_cluster,
@@ -107,6 +108,17 @@ def run(
             raise ValueError("Cannot verify the reviewed cloud nodes")
         nodes = json.loads(result.get("stdout") or "{}")
         cluster_network.verified_nodes(doc, nodes)
+        classes = command(
+            ["kubectl", "get", "storageclass", "general", "general-multi-attach", "-o", "json"],
+            30,
+        )
+        if classes.get("returncode") != 0:
+            raise ValueError("Cannot verify the installed Longhorn storage classes")
+        class_list = json.loads(classes.get("stdout") or "{}")
+        doc = cluster_storage.reconcile_existing_storage_classes(
+            doc, env.id, class_list.get("items") or []
+        )
+        scoped.update(envconfig.doc_env(doc))
         if any(
             not any(
                 c.get("type") == "Ready" and c.get("status") == "True"
