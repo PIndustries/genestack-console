@@ -239,6 +239,103 @@ def test_greenfield_continuation_does_not_recommission_a_valid_wipe(stopped_inst
         assert node.wiped_at is not None and node.commission_report['wipe'] is True
 
 
+def test_confirmed_installed_talos_replays_only_reviewed_commission_wipe(reviewed, monkeypatch):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.config import Settings
+    from app.services import baremetal, greenfield
+
+    eid, nid, plan, params = reviewed
+    with SessionLocal() as db:
+        env = db.get(Environment, eid)
+        doc, _ = reviewed_cluster.configuration(db, env, params)
+        envconfig.put_version(db, env, yaml.safe_dump(doc), 'fixture')
+        node = db.get(BaremetalNode, nid)
+        reviewed_wwids = [d['wwid'] for d in plan['machines'][0]['disks']]
+        node.commission_wipe_wwids = reviewed_wwids
+        node.wiped_at = datetime.now(UTC)
+        node.talos_served_at = datetime.now(UTC)
+        node.boot_stage = 'installed'
+        node.state = 'failed'
+        node.commission_report = {
+            'wipe': True,
+            'disks': [{'name': f'disk-{i}', 'wwid': wwid, 'wiped': True}
+                      for i, wwid in enumerate(reviewed_wwids)],
+            'nics': [{'mac': node.pxe_mac}],
+        }
+        db.flush()
+
+        calls = []
+        def recommission(_db, _env, target, **kwargs):
+            calls.append((target.name, list(kwargs['wipe_disk_wwids'])))
+            target.wiped_at = None
+            target.talos_served_at = None
+            target.commission_token = 'fresh-token'
+            target.commission_report = None
+            target.boot_stage = 'commissioning'
+            target.next_boot = 'commission'
+            _db.add(target)
+            _db.flush()
+            return {'ok': True}
+
+        def record_fresh_wipe():
+            if node.wiped_at is None and node.commission_token == 'fresh-token':
+                node.commission_report = {
+                    'wipe': True,
+                    'disks': [{'name': f'disk-{i}', 'wwid': wwid, 'wiped': True}
+                              for i, wwid in enumerate(node.commission_wipe_wwids)],
+                    'nics': [{'mac': node.pxe_mac}],
+                }
+                node.wiped_at = datetime.now(UTC)
+                node.boot_stage = 'commissioned'
+                db.add(node)
+                db.flush()
+
+        def sleep(_seconds):
+            record_fresh_wipe()
+
+        def serve(_db, _env, target, **_kwargs):
+            target.talos_served_at = datetime.now(UTC)
+            target.boot_stage = 'talos'
+            target.next_boot = 'talos'
+            _db.add(target)
+            _db.flush()
+            return {'ok': True}
+
+        def probe(_ip, _kube, **kwargs):
+            if not calls:
+                return 'installed'
+            if kwargs.get('wiped_at') is None:
+                return 'installed'
+            if kwargs.get('talos_served_at') is not None:
+                return 'fresh-maintenance'
+            return 'down'
+
+        monkeypatch.setattr(baremetal, 'begin_commission', recommission)
+        monkeypatch.setattr(
+            baremetal, 'set_next_boot',
+            lambda *a, **k: pytest.fail('Replacement must replay the reviewed wipe'),
+        )
+        monkeypatch.setattr(baremetal, '_prepare_pxe', lambda *a, **k: {'ok': True})
+        monkeypatch.setattr(baremetal, '_serve_talos', serve)
+        monkeypatch.setattr(baremetal, 'host_boot_state', probe)
+        monkeypatch.setattr(baremetal, 'probe_addresses', lambda _node, ip: [ip])
+        monkeypatch.setattr(baremetal, 'talos_api_ready', lambda *_a, **_k: True)
+        monkeypatch.setattr(greenfield.time, 'sleep', sleep)
+
+        result = greenfield.run_greenfield(
+            db, env, SimpleNamespace(kubeconfig=None), lambda _line: None,
+            dry_run=False, skip_push=True, timeout=60, extra_env={}, ssh_target=None,
+            remote_env={}, settings=Settings(), boot='pxe', stop_after='talos',
+            wipe_disk_wwids={node.name: reviewed_wwids},
+            preserve_commissioned=True, replace_hosts=[node.name],
+        )
+        assert result['ok'] is True and result['stages_completed'] == ['talos'], result
+        assert calls == [(node.name, reviewed_wwids)]
+        assert node.wiped_at is not None and node.talos_served_at >= node.wiped_at
+
+
 def test_greenfield_continuation_commissions_only_unfinished_target(reviewed, monkeypatch):
     from datetime import UTC, datetime
     from types import SimpleNamespace
