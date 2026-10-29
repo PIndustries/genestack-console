@@ -283,7 +283,7 @@ def run_greenfield(
                     continue
                 started = baremetal_service.begin_commission(
                     db, env, node, log=log, settings=settings, boot_now=False,
-                    wipe_disk_wwids=reviewed_disks[hostname],
+                    wipe_disk_wwids=reviewed_disks[hostname], apply_runtime=False,
                 )
                 if not started.get("ok"):
                     return _stamp(
@@ -433,7 +433,7 @@ def run_greenfield(
                         ):
                             last_talos_at[hostname] = time.monotonic()
                             served = baremetal_service._serve_talos(
-                                db, env, node, log=log, settings=settings
+                                db, env, node, log=log, settings=settings, apply_runtime=False
                             )
                             if not served.get("ok"):
                                 log(
@@ -488,6 +488,7 @@ def run_greenfield(
                                 dry_run=False,
                                 log=log,
                                 replace_installed=True,
+                                apply_runtime=False,
                             )
                             if booted.get("ok"):
                                 continue

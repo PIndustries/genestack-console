@@ -384,9 +384,10 @@ def k8s_ready_for_ip(ip: str, kubeconfig: str | None) -> bool | None:
 
 
 def _prepare_pxe(
-    db: Session, env: Environment, settings: Settings | None, log: LogFn
+    db: Session, env: Environment, settings: Settings | None, log: LogFn, *,
+    apply_runtime: bool = True,
 ) -> dict[str, Any]:
-    """Render PXE files and reload the in-process DHCP/HTTP runtime.
+    """Render PXE files and optionally reload the in-process DHCP/HTTP runtime.
 
     When the PXE module is absent this is a logged no-op so the rest of the
     flow still works.
@@ -402,7 +403,8 @@ def _prepare_pxe(
     current = envconfig_service.get_current(db, env)
     doc = current[0] if current else {}
     result = pxe_service.ensure_assets_and_config(
-        env, doc, settings, log, profiles=boot_profiles(db, env)
+        env, doc, settings, log, profiles=boot_profiles(db, env),
+        apply_runtime=apply_runtime,
     )
     if not result.get("ok"):
         log(f"[pxe] prep failed: {result.get('error')}")
@@ -443,6 +445,7 @@ def begin_commission(
     settings: Settings | None = None,
     boot_now: bool = False,
     wipe_disk_wwids: Any = None,
+    apply_runtime: bool = True,
 ) -> dict[str, Any]:
     """Point this MAC at the wipe RAM disk and forget the previous report."""
     if not normalize_mac(node.pxe_mac):
@@ -467,7 +470,10 @@ def begin_commission(
     db.add(node)
     db.flush()
     try:
-        prepared = _prepare_pxe(db, env, settings, log)
+        prepared = (
+            _prepare_pxe(db, env, settings, log, apply_runtime=False)
+            if not apply_runtime else _prepare_pxe(db, env, settings, log)
+        )
     except Exception:  # noqa: BLE001 -- a failed preparation must revoke destructive boot authorization
         prepared = {"ok": False, "error": "PXE preparation failed; commissioning was disarmed", "returncode": 2}
     if isinstance(prepared, dict) and prepared.get("ok") is False:
@@ -502,6 +508,7 @@ def set_next_boot(
     settings: Settings | None = None,
     replace_installed: bool = False,
     wipe_disk_wwids: Any = None,
+    apply_runtime: bool = True,
 ) -> dict[str, Any]:
     """Choose the next image for one MAC. ``boot_now`` power-cycles into it."""
     choice = str(target or "").strip().lower()
@@ -555,7 +562,10 @@ def set_next_boot(
         node.boot_stage = "ubuntu"
     db.add(node)
     db.flush()
-    prepared = _prepare_pxe(db, env, settings, log)
+    prepared = (
+        _prepare_pxe(db, env, settings, log, apply_runtime=False)
+        if not apply_runtime else _prepare_pxe(db, env, settings, log)
+    )
     if isinstance(prepared, dict) and prepared.get("ok") is False:
         return prepared
     log(f"[baremetal] {node.name} next boot is {choice}")
@@ -872,6 +882,7 @@ def _serve_talos(
     *,
     log: LogFn,
     settings: Settings | None,
+    apply_runtime: bool = True,
 ) -> dict[str, Any]:
     """Second boot: the MAC already wiped, so PXE may serve Talos."""
     if node.wiped_at is None:
@@ -885,7 +896,10 @@ def _serve_talos(
     node.boot_stage = "talos"
     db.add(node)
     db.flush()
-    prepared = _prepare_pxe(db, env, settings, log)
+    prepared = (
+        _prepare_pxe(db, env, settings, log, apply_runtime=False)
+        if not apply_runtime else _prepare_pxe(db, env, settings, log)
+    )
     if isinstance(prepared, dict) and prepared.get("ok") is False:
         return prepared
     booted = pxe_boot(db, node, dry_run=False, log=log, settings=settings)
