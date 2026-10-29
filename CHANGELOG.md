@@ -10,6 +10,11 @@ The oldest GitHub Release is v2026.10.03. The source history starts two version 
   during a greenfield deployment, so multi-node commissioning does not try
   to restart listeners owned by the Console API.
 
+## 2026.10.29.2-rc1
+
+- Close each authenticated Redfish session after its request to prevent iLO
+  session leaks during bare-metal commissioning.
+
 ## 2026.10.28.2-rc11
 
 - Continue a paused reviewed Talos install from its current job and carry the
