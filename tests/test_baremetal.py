@@ -783,6 +783,27 @@ def test_prepare_pxe_guard_logs_when_module_missing(monkeypatch):
     assert any("pxe module not present" in m for m in logs)
 
 
+@pytest.mark.parametrize("apply_runtime", [True, False])
+def test_prepare_pxe_forwards_runtime_policy(monkeypatch, apply_runtime):
+    from app.services import baremetal, envconfig, pxe
+
+    monkeypatch.setattr(envconfig, "get_current", lambda db, env: ({}, None))
+    monkeypatch.setattr(baremetal, "boot_profiles", lambda db, env: [])
+    observed = {}
+
+    def fake_ensure(env, doc, settings, log, **kwargs):
+        observed.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(pxe, "ensure_assets_and_config", fake_ensure)
+    result = baremetal._prepare_pxe(
+        None, object(), object(), lambda message: None, apply_runtime=apply_runtime
+    )
+
+    assert result == {"ok": True}
+    assert observed["apply_runtime"] is apply_runtime
+
+
 # ---------------------------------------------------------------------------
 # REST endpoint
 # ---------------------------------------------------------------------------
