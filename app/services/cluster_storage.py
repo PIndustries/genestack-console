@@ -94,12 +94,69 @@ def verify_mounts(doc, hostname, disks, volumes, mounts):
             raise ValueError('A reviewed data disk is not mounted as its verified persistent volume')
 
 
-def storage_classes(environment_id, replicas):
+def reconcile_existing_storage_classes(doc, environment_id, existing):
+    """Keep the installed StorageClass parameter maps authoritative.
+
+    Kubernetes treats StorageClass parameters as immutable. A redeploy must
+    render the exact installed maps rather than guessing from the current
+    replica default and trying to mutate a live class.
+    """
+    import copy
+
+    doc = copy.deepcopy(doc)
+    expected = {"general", "general-multi-attach"}
+    by_name = {
+        item.get("metadata", {}).get("name"): item
+        for item in existing
+        if isinstance(item, dict)
+    }
+    if set(by_name) != expected:
+        raise ValueError("Both reviewed Longhorn storage classes must exist before cloud services")
+
+    parameters = {}
+    replica_counts = set()
+    for name in sorted(expected):
+        item = by_name[name]
+        metadata = item.get("metadata") or {}
+        actual = item.get("parameters")
+        if (
+            metadata.get("labels", {}).get(OWNER) != environment_id
+            or item.get("provisioner") != "driver.longhorn.io"
+            or not isinstance(actual, dict)
+            or not actual
+        ):
+            raise ValueError("An existing Longhorn storage class requires ownership review")
+        value = actual.get("numberOfReplicas")
+        if not isinstance(value, str) or not value.isdigit() or int(value) < 1:
+            raise ValueError("An existing Longhorn storage class has an invalid replica parameter")
+        replica_counts.add(int(value))
+        parameters[name] = copy.deepcopy(actual)
+    if len(replica_counts) != 1:
+        raise ValueError("The reviewed Longhorn storage classes have different replica counts")
+
+    replicas = replica_counts.pop()
+    proposal(
+        {"machines": doc.get("hardware_installation", {}).get("reviewed_plan", {}).get("machines", [])},
+        replicas,
+    )
+    storage = doc.setdefault("storage", {})
+    storage["replication_factor"] = replicas
+    storage["longhorn_storage_class_parameters"] = parameters
+    longhorn = doc.setdefault("helm_overrides", {}).setdefault("longhorn", {})
+    longhorn.setdefault("defaultSettings", {})["defaultReplicaCount"] = replicas
+    persistence = longhorn.setdefault("persistence", {})
+    persistence["defaultClassReplicaCount"] = replicas
+    return doc
+
+
+def storage_classes(environment_id, replicas, parameter_overrides=None):
+    parameter_overrides = parameter_overrides or {}
     return [{'apiVersion': 'storage.k8s.io/v1', 'kind': 'StorageClass',
              'metadata': {'name': name, 'labels': {OWNER: environment_id},
                           'annotations': {'storageclass.kubernetes.io/is-default-class': default}},
              'provisioner': 'driver.longhorn.io', 'allowVolumeExpansion': True,
              'reclaimPolicy': 'Delete', 'volumeBindingMode': 'Immediate',
-             'parameters': {'numberOfReplicas': str(replicas), 'dataLocality': 'best-effort',
-                            'staleReplicaTimeout': '2880', 'fromBackup': '', 'fsType': 'ext4'}}
+             'parameters': parameter_overrides.get(name, {
+                            'numberOfReplicas': str(replicas), 'dataLocality': 'best-effort',
+                            'staleReplicaTimeout': '2880', 'fromBackup': '', 'fsType': 'ext4'})}
             for name, default in [('general', 'true'), ('general-multi-attach', 'false')]]
